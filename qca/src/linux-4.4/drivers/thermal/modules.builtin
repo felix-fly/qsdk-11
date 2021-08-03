@@ -1,0 +1,2 @@
+kernel/drivers/thermal/thermal_sys.ko
+kernel/drivers/thermal/qcom/qcom_tsens.ko

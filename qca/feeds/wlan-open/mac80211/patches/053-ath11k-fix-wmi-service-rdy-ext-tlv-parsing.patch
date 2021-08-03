@@ -1,0 +1,58 @@
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -40,7 +40,7 @@ struct wmi_tlv_svc_rdy_ext_parse {
+ 	u32 n_hw_mode_caps;
+ 	u32 tot_phy_id;
+ 	struct wmi_hw_mode_capabilities pref_hw_mode_caps;
+-	struct wmi_mac_phy_capabilities *mac_phy_caps;
++	struct wmi_mac_phy_capabilities mac_phy_caps[5];
+ 	u32 n_mac_phy_caps;
+ 	struct wmi_soc_hal_reg_capabilities *soc_hal_reg_caps;
+ 	struct wmi_hal_reg_capabilities_ext *ext_hal_reg_caps;
+@@ -3280,6 +3280,7 @@ static int ath11k_wmi_tlv_mac_phy_caps_p
+ 					     const void *ptr, void *data)
+ {
+ 	struct wmi_tlv_svc_rdy_ext_parse *svc_rdy_ext = data;
++	struct wmi_mac_phy_capabilities *mac_phy_caps;
+ 
+ 	if (tag != WMI_TAG_MAC_PHY_CAPABILITIES)
+ 		return -EPROTO;
+@@ -3287,6 +3288,9 @@ static int ath11k_wmi_tlv_mac_phy_caps_p
+ 	if (svc_rdy_ext->n_mac_phy_caps >= svc_rdy_ext->tot_phy_id)
+ 		return -ENOBUFS;
+ 
++	mac_phy_caps = &svc_rdy_ext->mac_phy_caps[svc_rdy_ext->n_mac_phy_caps];
++	/* TODO define the TLV to parse the WMI SVC RDY EXT*/
++	memcpy(mac_phy_caps, ptr, sizeof(struct wmi_mac_phy_capabilities));
+ 	svc_rdy_ext->n_mac_phy_caps++;
+ 	return 0;
+ }
+@@ -3475,6 +3479,7 @@ static int ath11k_wmi_tlv_svc_rdy_ext_pa
+ {
+ 	struct ath11k_pdev_wmi *wmi_handle = &ab->wmi_sc.wmi[0];
+ 	struct wmi_tlv_svc_rdy_ext_parse *svc_rdy_ext = data;
++	struct wmi_mac_phy_capabilities *mac_phy_caps = &svc_rdy_ext->mac_phy_caps[0];
+ 	int ret;
+ 
+ 	switch (tag) {
+@@ -3509,8 +3514,8 @@ static int ath11k_wmi_tlv_svc_rdy_ext_pa
+ 			svc_rdy_ext->hw_mode_done = true;
+ 		} else if (!svc_rdy_ext->mac_phy_done) {
+ 			svc_rdy_ext->n_mac_phy_caps = 0;
+-			svc_rdy_ext->mac_phy_caps =
+-					(struct wmi_mac_phy_capabilities *)ptr;
++			mac_phy_caps = (struct wmi_mac_phy_capabilities *)ptr;
++
+ 			ret = ath11k_wmi_tlv_iter(ab, ptr, len,
+ 						  ath11k_wmi_tlv_mac_phy_caps_parse,
+ 						  svc_rdy_ext);
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -2260,7 +2260,6 @@ struct wmi_hw_mode_capabilities {
+ #define WMI_MAX_HECAP_PHY_SIZE                 (3)
+ 
+ struct wmi_mac_phy_capabilities {
+-	u32 tlv_header;
+ 	u32 hw_mode_id;
+ 	u32 pdev_id;
+ 	u32 phy_id;

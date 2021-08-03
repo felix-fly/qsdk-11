@@ -1,0 +1,37 @@
+From 74fe3bc4d68e97d7e007d26a2e0d8b4c7197bdd7 Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Mon, 1 Jul 2019 15:27:09 +0200
+Subject: [PATCH 2/2] HE: mcs size is always a minimum of 4 bytes
+
+The MCS set always has a minimal size of 4 bytes. Without this change HE20
+failed to work.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ src/ap/ieee802_11_he.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/ap/ieee802_11_he.c b/src/ap/ieee802_11_he.c
+index 1b7f777..9569e46 100644
+--- a/src/ap/ieee802_11_he.c
++++ b/src/ap/ieee802_11_he.c
+@@ -79,7 +79,7 @@ u8 * hostapd_eid_he_capab(struct hostapd_data *hapd, u8 *eid,
+ 	struct hostapd_hw_modes *mode = hapd->iface->current_mode;
+ 	u8 he_oper_chwidth = ~HE_PHYCAP_CHANNEL_WIDTH_MASK;
+ 	u8 *pos = eid;
+-	u8 ie_size = 0, mcs_nss_size = 0, ppet_size = 0;
++	u8 ie_size = 0, mcs_nss_size = 4, ppet_size = 0;
+ 
+ 	if (!mode)
+ 		return eid;
+@@ -102,7 +102,6 @@ u8 * hostapd_eid_he_capab(struct hostapd_data *hapd, u8 *eid,
+ 	case CHANWIDTH_USE_HT:
+ 		he_oper_chwidth |= HE_PHYCAP_CHANNEL_WIDTH_SET_40MHZ_IN_2G |
+ 			HE_PHYCAP_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G;
+-		mcs_nss_size += 4;
+ 		break;
+ 	}
+ 
+-- 
+2.7.4
+

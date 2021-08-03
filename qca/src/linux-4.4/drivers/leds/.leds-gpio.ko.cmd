@@ -1,0 +1,1 @@
+cmd_drivers/leds/leds-gpio.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/leds/leds-gpio.ko drivers/leds/leds-gpio.o drivers/leds/leds-gpio.mod.o

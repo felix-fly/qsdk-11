@@ -1,0 +1,181 @@
+--- a/drivers/net/wireless/ath/ath11k/debug.h
++++ b/drivers/net/wireless/ath/ath11k/debug.h
+@@ -50,6 +50,8 @@ enum ath11k_dbg_htt_ext_stats_type {
+ 	ATH11K_DBG_HTT_EXT_STATS_TWT_SESSIONS               =  20,
+ 	ATH11K_DBG_HTT_EXT_STATS_REO_RESOURCE_STATS         =  21,
+ 	ATH11K_DBG_HTT_EXT_STATS_TX_SOUNDING_INFO           =  22,
++	ATH11K_DBG_HTT_EXT_STATS_PDEV_OBSS_PD_STATS	    =  23,
++	ATH11K_DBG_HTT_EXT_STATS_RING_BACKPRESSURE_STATS    =  24,
+ 
+ 	/* keep this last */
+ 	ATH11K_DBG_HTT_NUM_EXT_STATS,
+--- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
++++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.c
+@@ -3876,6 +3876,46 @@ static inline void htt_print_pdev_obss_p
+ 	stats_req->buf_len = len;
+ }
+ 
++static inline void htt_print_backpressure_stats_tlv_v(const u32 *tag_buf,
++						      u8 *data)
++{
++	struct debug_htt_stats_req *stats_req =
++			(struct debug_htt_stats_req *)data;
++	struct htt_ring_backpressure_stats_tlv *htt_stats_buf=
++			(struct htt_ring_backpressure_stats_tlv *)tag_buf;
++	int i;
++	u8 *buf = stats_req->buf;
++	u32 len = stats_req->buf_len;
++	u32 buf_len = ATH11K_HTT_STATS_BUF_SIZE;
++
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "pdev_id = %u",
++			   htt_stats_buf->pdev_id);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "current_head_idx = %u",
++			   htt_stats_buf->current_head_idx);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "current_tail_idx = %u",
++			   htt_stats_buf->current_tail_idx);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "num_htt_msgs_sent = %u",
++			   htt_stats_buf->num_htt_msgs_sent);
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "backpressure_time_ms = %u",
++			   htt_stats_buf->backpressure_time_ms);
++
++	for( i = 0; i < 5 ; i++)
++		len += HTT_DBG_OUT(buf + len, buf_len - len, "backpressure_hist_%u = %u",
++				   i + 1, htt_stats_buf->backpressure_hist[i]);
++
++	len += HTT_DBG_OUT(buf + len, buf_len - len, "============================");
++
++	if (len >= buf_len) {
++		buf[buf_len - 1] = 0;
++		stats_req->buf_len = buf_len - 1;
++	}
++	else {
++		buf[len] = 0;
++		stats_req->buf_len = len;;
++	}
++
++}
++
+ static inline void htt_htt_stats_debug_dump(const u32 *tag_buf,
+ 					    u8 *data)
+ {
+@@ -4268,6 +4308,9 @@ static int ath11k_dbg_htt_ext_stats_pars
+ 	case HTT_STATS_PDEV_OBSS_PD_TAG:
+ 		htt_print_pdev_obss_pd_stats_tlv_v(tag_buf, user_data);
+ 		break;
++	case HTT_STATS_RING_BACKPRESSURE_STATS_TAG:
++		htt_print_backpressure_stats_tlv_v(tag_buf, user_data);
++		break;
+ 	default:
+ 		break;
+ 	}
+--- a/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
++++ b/drivers/net/wireless/ath/ath11k/debug_htt_stats.h
+@@ -100,6 +100,8 @@ enum htt_tlv_tag_t {
+ 	HTT_STATS_SCHED_TXQ_SCHED_ORDER_SU_TAG              = 86,
+ 	HTT_STATS_SCHED_TXQ_SCHED_INELIGIBILITY_TAG         = 87,
+ 	HTT_STATS_PDEV_OBSS_PD_TAG                          = 88,
++	HTT_STATS_HW_WAR_TAG				    = 89,
++	HTT_STATS_RING_BACKPRESSURE_STATS_TAG		    = 90,
+ 
+ 	HTT_STATS_MAX_TAG,
+ };
+@@ -1617,4 +1619,31 @@ struct htt_pdev_obss_pd_stats_tlv {
+ };
+ 
+ void ath11k_debug_htt_stats_init(struct ath11k *ar);
++
++struct htt_ring_backpressure_stats_tlv {
++    u32 pdev_id;
++    u32 current_head_idx;
++    u32 current_tail_idx;
++    u32 num_htt_msgs_sent;
++    /*
++     * Time in milliseconds for which the ring has been in
++     * its current backpressure condition
++     */
++    u32 backpressure_time_ms;
++    /* backpressure_hist - histogram showing how many times different degrees
++     * of backpressure duration occurred:
++     * Index 0 indicates the number of times ring was
++     * continously in backpressure state for 100 - 200ms.
++     * Index 1 indicates the number of times ring was
++     * continously in backpressure state for 200 - 300ms.
++     * Index 2 indicates the number of times ring was
++     * continously in backpressure state for 300 - 400ms.
++     * Index 3 indicates the number of times ring was
++     * continously in backpressure state for 400 - 500ms.
++     * Index 4 indicates the number of times ring was
++     * continously in backpressure state beyond 500ms.
++     */
++    u32 backpressure_hist[5];
++};
++
+ #endif
+--- a/drivers/net/wireless/ath/ath11k/dp.h
++++ b/drivers/net/wireless/ath/ath11k/dp.h
+@@ -918,6 +918,7 @@ enum htt_t2h_msg_type {
+ 	HTT_T2H_MSG_TYPE_PEER_UNMAP	= 0x1f,
+ 	HTT_T2H_MSG_TYPE_PPDU_STATS_IND = 0x1d,
+ 	HTT_T2H_MSG_TYPE_EXT_STATS_CONF = 0x1c,
++	HTT_T2H_MSG_TYPE_BKPRESSURE_EVENT_IND = 0x24,
+ };
+ 
+ #define HTT_TARGET_VERSION_MAJOR 3
+@@ -966,6 +967,13 @@ struct htt_resp_msg {
+ 	};
+ } __packed;
+ 
++#define HTT_BACKPRESSURE_EVENT_PDEV_ID_M GENMASK(15, 8)
++#define HTT_BACKPRESSURE_EVENT_RING_TYPE_M GENMASK(23, 16)
++#define HTT_BACKPRESSURE_EVENT_RING_ID_M GENMASK(31, 24)
++
++#define HTT_BACKPRESSURE_EVENT_HP_M GENMASK(15, 0)
++#define HTT_BACKPRESSURE_EVENT_TP_M GENMASK(31, 16)
++
+ /* ppdu stats
+  *
+  * @details
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1305,6 +1305,31 @@ static void ath11k_htt_pktlog(struct ath
+ 	ath11k_htt_pktlog_process(ar, (u8 *)data->payload);
+ }
+ 
++static void ath11k_htt_backpressure_event_handler(struct ath11k_base *ab,
++						  struct sk_buff *skb)
++{
++	u32 *data = (u32 *)skb->data;
++	u8 pdev_id, ring_type, ring_id;
++	u16 hp, tp;
++	u32 backpressure_time;
++
++	pdev_id = FIELD_GET(HTT_BACKPRESSURE_EVENT_PDEV_ID_M, *data);
++	ring_type = FIELD_GET(HTT_BACKPRESSURE_EVENT_RING_TYPE_M, *data);
++	ring_id = FIELD_GET(HTT_BACKPRESSURE_EVENT_RING_ID_M, *data);
++	++data;
++
++	hp = FIELD_GET(HTT_BACKPRESSURE_EVENT_HP_M, *data);
++	tp = FIELD_GET(HTT_BACKPRESSURE_EVENT_TP_M, *data);
++	++data;
++
++	backpressure_time = *data;
++
++	ath11k_dbg(ab, ATH11K_DBG_DP_HTT, "htt backpressure event, pdev %d, "
++			"ring type %d,ring id %d, hp %d tp %d, " 
++			"backpressure time %d\n", pdev_id, ring_type, ring_id, 
++			hp, tp, backpressure_time);
++}
++
+ void ath11k_dp_htt_htc_t2h_msg_handler(struct ath11k_base *ab,
+ 				       struct sk_buff *skb)
+ {
+@@ -1354,6 +1379,9 @@ void ath11k_dp_htt_htc_t2h_msg_handler(s
+ 	case HTT_T2H_MSG_TYPE_PKTLOG:
+ 		ath11k_htt_pktlog(ab, skb);
+ 		break;
++	case HTT_T2H_MSG_TYPE_BKPRESSURE_EVENT_IND:
++		ath11k_htt_backpressure_event_handler(ab, skb);
++		break;
+ 	default:
+ 		ath11k_warn(ab, "htt event %d not handled\n", type);
+ 		break;

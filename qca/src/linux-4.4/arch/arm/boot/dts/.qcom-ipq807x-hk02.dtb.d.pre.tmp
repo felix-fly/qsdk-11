@@ -1,0 +1,22 @@
+qcom-ipq807x-hk02.o: arch/arm/boot/dts/qcom-ipq807x-hk02.dts \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-hk02.dts \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-soc.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/clock/qcom,gcc-ipq807x.h \
+ arch/arm/boot/dts/include/dt-bindings/reset/qcom,gcc-ipq807x.h \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/arm-gic.h \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h \
+ arch/arm/boot/dts/include/dt-bindings/clock/qca,apss-ipq807x.h \
+ arch/arm/boot/dts/include/dt-bindings/input/input.h \
+ arch/arm/boot/dts/include/dt-bindings/input/linux-event-codes.h \
+ arch/arm/boot/dts/include/dt-bindings/gpio/gpio.h \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-mhi.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-memory.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-coresight.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-spmi-regulator.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-regulator.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/spmi/spmi.h \
+ arch/arm/boot/dts/include/dt-bindings/iio/qcom,spmi-vadc.h \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-rpm-regulator.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-thermal.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-cpr-regulator.dtsi \
+ arch/arm/boot/dts/../../../arm64/boot/dts/qcom/qcom-ipq807x-hk-cpu.dtsi

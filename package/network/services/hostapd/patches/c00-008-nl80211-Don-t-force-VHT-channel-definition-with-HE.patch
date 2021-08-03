@@ -1,0 +1,54 @@
+From 47dec75fa3e1ac2156fe0edf9c80ba06e309cb0e Mon Sep 17 00:00:00 2001
+From: Sven Eckelmann <seckelmann@datto.com>
+Date: Mon, 1 Jul 2019 15:34:08 +0200
+Subject: [PATCH] nl80211: Don't force VHT channel definition with HE
+
+HE (802.11ax) is also supported on 2.4GHz. And the 2.4GHz band isn't
+supposed to use VHT opers. Some codepaths in wpa_supplicant will therefore
+not initialize the freq->bandwidth or the freq->center_freq1/2 members. As
+a result, the nl80211_put_freq_params will directly return an error (-1) or
+the kernel will return an error due to the invalid channel definition.
+
+Instead, the channel definitions should be created based on the actual
+HT/VHT/none information on 2.4GHz.
+
+Fixes: ad9a1bfe788e ("nl80211: Share VHT channel configuration for HE")
+Signed-off-by: Sven Eckelmann <seckelmann@datto.com>
+---
+ src/drivers/driver_nl80211.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
+index 5ad509b1fd70..0c64f68baa52 100644
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -4369,6 +4369,10 @@ fail:
+ static int nl80211_put_freq_params(struct nl_msg *msg,
+ 				   const struct hostapd_freq_params *freq)
+ {
++	enum hostapd_hw_mode hw_mode;
++	int is_24ghz;
++	u8 channel;
++
+ 	wpa_printf(MSG_DEBUG, "  * freq=%d", freq->freq);
+ 	if (nla_put_u32(msg, NL80211_ATTR_WIPHY_FREQ, freq->freq))
+ 		return -ENOBUFS;
+@@ -4377,7 +4381,14 @@ static int nl80211_put_freq_params(struct nl_msg *msg,
+ 	wpa_printf(MSG_DEBUG, "  * vht_enabled=%d", freq->vht_enabled);
+ 	wpa_printf(MSG_DEBUG, "  * ht_enabled=%d", freq->ht_enabled);
+ 
+-	if (freq->vht_enabled || freq->he_enabled) {
++	hw_mode = ieee80211_freq_to_chan(freq->freq, &channel);
++	if (hw_mode == HOSTAPD_MODE_IEEE80211B ||
++	    hw_mode == HOSTAPD_MODE_IEEE80211G)
++		is_24ghz = 1;
++	else
++		is_24ghz = 0;
++
++	if (freq->vht_enabled || (freq->he_enabled && !is_24ghz)) {
+ 		enum nl80211_chan_width cw;
+ 
+ 		wpa_printf(MSG_DEBUG, "  * bandwidth=%d", freq->bandwidth);
+-- 
+2.1.2
+

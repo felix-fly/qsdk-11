@@ -1,0 +1,8 @@
+kernel/drivers/net/mdio.ko
+kernel/drivers/net/phy/libphy.ko
+kernel/drivers/net/phy/swconfig.ko
+kernel/drivers/net/phy/fixed_phy.ko
+kernel/drivers/net/phy/mdio-bitbang.ko
+kernel/drivers/net/phy/mdio-gpio.ko
+kernel/drivers/net/phy/at803x.ko
+kernel/drivers/net/phy/mdio-qca.ko

@@ -1,0 +1,72 @@
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -137,6 +137,17 @@ static u8 ath11k_dp_rx_h_msdu_start_nss(
+ 	return hweight8(mimo_ss_bitmap);
+ }
+ 
++static u8 ath11k_dp_rx_h_mpdu_start_tid(struct hal_rx_desc *desc)
++{
++	return FIELD_GET(RX_MPDU_START_INFO2_TID,
++			 __le32_to_cpu(desc->mpdu_start.info2));
++}
++
++static u16 ath11k_dp_rx_h_mpdu_start_peer_id(struct hal_rx_desc *desc)
++{
++	return __le16_to_cpu(desc->mpdu_start.sw_peer_id);
++}
++
+ static u8 ath11k_dp_rx_h_msdu_end_l3pad(struct hal_rx_desc *desc)
+ {
+ 	return FIELD_GET(RX_MSDU_END_INFO2_L3_HDR_PADDING,
+@@ -3125,11 +3136,17 @@ static int ath11k_dp_rx_h_null_q_desc(st
+ 				      struct ieee80211_rx_status *status,
+ 				      struct sk_buff_head *msdu_list)
+ {
+-	struct sk_buff_head amsdu_list;
+-	u16 msdu_len;
+ 	struct hal_rx_desc *desc = (struct hal_rx_desc *)msdu->data;
+-	u8 l3pad_bytes;
+ 	struct ath11k_skb_rxcb *rxcb = ATH11K_SKB_RXCB(msdu);
++	struct sk_buff_head amsdu_list;
++	struct ieee80211_hdr *hdr;
++	struct ath11k_peer *peer;
++	struct ath11k_sta *arsta;
++	struct dp_rx_tid *rx_tid;
++	u16 msdu_len, peer_id;
++	u8 l3pad_bytes, tid;
++	u8 peer_mac[ETH_ALEN];
++	int vdev_id;
+ 
+ 	msdu_len = ath11k_dp_rx_h_msdu_start_msdu_len(desc);
+ 
+@@ -3175,6 +3192,30 @@ static int ath11k_dp_rx_h_null_q_desc(st
+ 
+ 	ath11k_dp_rx_h_mpdu(ar, &amsdu_list, desc, status);
+ 
++	peer_id = ath11k_dp_rx_h_mpdu_start_peer_id(desc);
++	tid = ath11k_dp_rx_h_mpdu_start_tid(desc);
++	hdr = (void *)ath11k_dp_rx_h_80211_hdr(desc);
++	if (is_multicast_ether_addr(hdr->addr1) ||
++	    tid > IEEE80211_NUM_TIDS)
++		return 0;
++
++	spin_lock_bh(&ar->ab->base_lock);
++	peer = ath11k_peer_find_by_id(ar->ab, peer_id);
++	if (peer && peer->sta) {
++		arsta = (struct ath11k_sta *)peer->sta->drv_priv;
++		rx_tid = &peer->rx_tid[tid];
++
++		if (!rx_tid->active) {
++			vdev_id = peer->vdev_id;
++			ether_addr_copy(peer_mac, peer->addr);
++			spin_unlock_bh(&ar->ab->base_lock);
++			ath11k_peer_rx_tid_setup(ar, peer_mac, vdev_id,
++						 tid, 1, 0);
++			spin_lock_bh(&ar->ab->base_lock);
++		}
++	}
++	spin_unlock_bh(&ar->ab->base_lock);
++
+ 	/* Please note that caller will having the access to msdu and completing
+ 	 * rx with mac80211. Need not worry about cleaning up amsdu_list.
+ 	 */

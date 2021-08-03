@@ -1,0 +1,680 @@
+From c4401adb2f0188add0dc2194849f4baacf31ce49 Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Wed, 17 Jul 2019 16:22:12 -0700
+Subject: [PATCH 1/6] mac80211: add xmit rate to struct ieee80211_tx_status
+
+Right now struct ieee80211_tx_rate cannot hold HE rates. Lets use
+struct ieee80211_tx_status instead. This will also make the code
+future-proof for when we have EHT.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ include/net/mac80211.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/include/net/mac80211.h
++++ b/include/net/mac80211.h
+@@ -1056,11 +1056,13 @@ struct ieee80211_tx_info {
+  * @sta: Station that the packet was transmitted for
+  * @info: Basic tx status information
+  * @skb: Packet skb (can be NULL if not provided by the driver)
++ * @rate: The TX rate that was when sending the packet
+  */
+ struct ieee80211_tx_status {
+ 	struct ieee80211_sta *sta;
+ 	struct ieee80211_tx_info *info;
+ 	struct sk_buff *skb;
++	struct rate_info *rate;
+ };
+ 
+ /**
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -1774,7 +1774,8 @@ ieee80211_build_data_template(struct iee
+ 			      struct sk_buff *skb, u32 info_flags);
+ void ieee80211_tx_monitor(struct ieee80211_local *local, struct sk_buff *skb,
+ 			  struct ieee80211_supported_band *sband,
+-			  int retry_count, int shift, bool send_to_cooked);
++			  int retry_count, int shift, bool send_to_cooked,
++			  struct ieee80211_tx_status *status);
+ 
+ void ieee80211_check_fast_xmit(struct sta_info *sta);
+ void ieee80211_check_fast_xmit_all(struct ieee80211_local *local);
+--- a/net/mac80211/status.c
++++ b/net/mac80211/status.c
+@@ -254,7 +254,8 @@ static void ieee80211_set_bar_pending(st
+ 	tid_tx->bar_pending = true;
+ }
+ 
+-static int ieee80211_tx_radiotap_len(struct ieee80211_tx_info *info)
++static int ieee80211_tx_radiotap_len(struct ieee80211_tx_info *info,
++				     struct ieee80211_tx_status *status)
+ {
+ 	int len = sizeof(struct ieee80211_radiotap_header);
+ 
+@@ -272,7 +273,14 @@ static int ieee80211_tx_radiotap_len(str
+ 
+ 	/* IEEE80211_RADIOTAP_MCS
+ 	 * IEEE80211_RADIOTAP_VHT */
+-	if (info->status.rates[0].idx >= 0) {
++	if (status && status->rate) {
++		if (status->rate->flags & RATE_INFO_FLAGS_MCS)
++			len += 3;
++		else if (status->rate->flags & RATE_INFO_FLAGS_VHT_MCS)
++			len = ALIGN(len, 2) + 12;
++		else if (status->rate->flags & RATE_INFO_FLAGS_HE_MCS)
++			len = ALIGN(len, 2) + 12;
++	} else if (info->status.rates[0].idx >= 0) {
+ 		if (info->status.rates[0].flags & IEEE80211_TX_RC_MCS)
+ 			len += 3;
+ 		else if (info->status.rates[0].flags & IEEE80211_TX_RC_VHT_MCS)
+@@ -286,12 +294,14 @@ static void
+ ieee80211_add_tx_radiotap_header(struct ieee80211_local *local,
+ 				 struct ieee80211_supported_band *sband,
+ 				 struct sk_buff *skb, int retry_count,
+-				 int rtap_len, int shift)
++				 int rtap_len, int shift,
++				 struct ieee80211_tx_status *status)
+ {
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
+ 	struct ieee80211_radiotap_header *rthdr;
+ 	unsigned char *pos;
++	u16 legacy_rate = 0;
+ 	u16 txflags;
+ 
+ 	rthdr = skb_push(skb, rtap_len);
+@@ -310,14 +320,22 @@ ieee80211_add_tx_radiotap_header(struct
+ 	 */
+ 
+ 	/* IEEE80211_RADIOTAP_RATE */
+-	if (info->status.rates[0].idx >= 0 &&
+-	    !(info->status.rates[0].flags & (IEEE80211_TX_RC_MCS |
+-					     IEEE80211_TX_RC_VHT_MCS))) {
+-		u16 rate;
+ 
++	if (status && status->rate && !(status->rate->flags &
++					(RATE_INFO_FLAGS_MCS |
++					 RATE_INFO_FLAGS_60G |
++					 RATE_INFO_FLAGS_VHT_MCS |
++					 RATE_INFO_FLAGS_HE_MCS)))
++		legacy_rate = status->rate->legacy;
++	else if (info->status.rates[0].idx >= 0 &&
++		 !(info->status.rates[0].flags & (IEEE80211_TX_RC_MCS |
++						  IEEE80211_TX_RC_VHT_MCS)))
++		legacy_rate =
++			sband->bitrates[info->status.rates[0].idx].bitrate;
++
++	if (legacy_rate) {
+ 		rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_RATE);
+-		rate = sband->bitrates[info->status.rates[0].idx].bitrate;
+-		*pos = DIV_ROUND_UP(rate, 5 * (1 << shift));
++		*pos = DIV_ROUND_UP(legacy_rate, 5 * (1 << shift));
+ 		/* padding for tx flags */
+ 		pos += 2;
+ 	}
+@@ -341,7 +359,139 @@ ieee80211_add_tx_radiotap_header(struct
+ 	*pos = retry_count;
+ 	pos++;
+ 
+-	if (info->status.rates[0].idx < 0)
++	if (status && status->rate &&
++	    (status->rate->flags & RATE_INFO_FLAGS_MCS)) {
++		rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_MCS);
++		pos[0] = IEEE80211_RADIOTAP_MCS_HAVE_MCS |
++			 IEEE80211_RADIOTAP_MCS_HAVE_GI |
++			 IEEE80211_RADIOTAP_MCS_HAVE_BW;
++		if (status->rate->flags & RATE_INFO_FLAGS_SHORT_GI)
++			pos[1] |= IEEE80211_RADIOTAP_MCS_SGI;
++		if (status->rate->bw == RATE_INFO_BW_40)
++			pos[1] |= IEEE80211_RADIOTAP_MCS_BW_40;
++		pos[2] = status->rate->mcs;
++		pos += 3;
++	} else if (status && status->rate &&
++		   (status->rate->flags & RATE_INFO_FLAGS_VHT_MCS)) {
++		u16 known = local->hw.radiotap_vht_details &
++			(IEEE80211_RADIOTAP_VHT_KNOWN_GI |
++			 IEEE80211_RADIOTAP_VHT_KNOWN_BANDWIDTH);
++
++		rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_VHT);
++
++		/* required alignment from rthdr */
++		pos = (u8 *)rthdr + ALIGN(pos - (u8 *)rthdr, 2);
++
++		/* u16 known - IEEE80211_RADIOTAP_VHT_KNOWN_* */
++		put_unaligned_le16(known, pos);
++		pos += 2;
++
++		/* u8 flags - IEEE80211_RADIOTAP_VHT_FLAG_* */
++		if (status->rate->flags & RATE_INFO_FLAGS_SHORT_GI)
++			*pos |= IEEE80211_RADIOTAP_VHT_FLAG_SGI;
++		pos++;
++
++		/* u8 bandwidth */
++		switch (status->rate->bw) {
++		case RATE_INFO_BW_160:
++			*pos = 11;
++			break;
++		case RATE_INFO_BW_80:
++			*pos = 2;
++			break;
++		case RATE_INFO_BW_40:
++			*pos = 1;
++			break;
++		default:
++			*pos = 0;
++			break;
++		}
++
++		/* u8 mcs_nss[4] */
++		*pos = (status->rate->mcs << 4) | status->rate->nss;
++		pos += 4;
++
++		/* u8 coding */
++		pos++;
++		/* u8 group_id */
++		pos++;
++		/* u16 partial_aid */
++		pos += 2;
++	} else if (status && status->rate &&
++		   (status->rate->flags & RATE_INFO_FLAGS_HE_MCS)) {
++		struct ieee80211_radiotap_he *he;
++
++		rthdr->it_present |= cpu_to_le32(1 << IEEE80211_RADIOTAP_HE);
++
++		/* required alignment from rthdr */
++		pos = (u8 *)rthdr + ALIGN(pos - (u8 *)rthdr, 2);
++		he = (struct ieee80211_radiotap_he *)pos;
++
++		he->data1 = IEEE80211_RADIOTAP_HE_DATA1_FORMAT_SU |
++			    IEEE80211_RADIOTAP_HE_DATA1_DATA_MCS_KNOWN |
++			    IEEE80211_RADIOTAP_HE_DATA1_DATA_DCM_KNOWN |
++			    IEEE80211_RADIOTAP_HE_DATA1_BW_RU_ALLOC_KNOWN;
++
++		he->data2 = IEEE80211_RADIOTAP_HE_DATA2_GI_KNOWN;
++
++#define HE_PREP(f, val) le16_encode_bits(val, IEEE80211_RADIOTAP_HE_##f)
++
++		he->data6 |= HE_PREP(DATA6_NSTS, status->rate->nss);
++
++#define CHECK_GI(s) \
++	BUILD_BUG_ON(IEEE80211_RADIOTAP_HE_DATA5_GI_##s != \
++	(int)NL80211_RATE_INFO_HE_GI_##s)
++
++		CHECK_GI(0_8);
++		CHECK_GI(1_6);
++		CHECK_GI(3_2);
++
++		he->data3 |= HE_PREP(DATA3_DATA_MCS, status->rate->mcs);
++		he->data3 |= HE_PREP(DATA3_DATA_DCM, status->rate->he_dcm);
++
++		he->data5 |= HE_PREP(DATA5_GI, status->rate->he_gi);
++
++		switch (status->rate->bw) {
++		case RATE_INFO_BW_20:
++			he->data5 |= HE_PREP(DATA5_DATA_BW_RU_ALLOC,
++					     IEEE80211_RADIOTAP_HE_DATA5_DATA_BW_RU_ALLOC_20MHZ);
++			break;
++		case RATE_INFO_BW_40:
++			he->data5 |= HE_PREP(DATA5_DATA_BW_RU_ALLOC,
++					     IEEE80211_RADIOTAP_HE_DATA5_DATA_BW_RU_ALLOC_40MHZ);
++			break;
++		case RATE_INFO_BW_80:
++			he->data5 |= HE_PREP(DATA5_DATA_BW_RU_ALLOC,
++					     IEEE80211_RADIOTAP_HE_DATA5_DATA_BW_RU_ALLOC_80MHZ);
++			break;
++		case RATE_INFO_BW_160:
++			he->data5 |= HE_PREP(DATA5_DATA_BW_RU_ALLOC,
++					     IEEE80211_RADIOTAP_HE_DATA5_DATA_BW_RU_ALLOC_160MHZ);
++			break;
++		case RATE_INFO_BW_HE_RU:
++#define CHECK_RU_ALLOC(s) \
++	BUILD_BUG_ON(IEEE80211_RADIOTAP_HE_DATA5_DATA_BW_RU_ALLOC_##s##T != \
++	NL80211_RATE_INFO_HE_RU_ALLOC_##s + 4)
++
++			CHECK_RU_ALLOC(26);
++			CHECK_RU_ALLOC(52);
++			CHECK_RU_ALLOC(106);
++			CHECK_RU_ALLOC(242);
++			CHECK_RU_ALLOC(484);
++			CHECK_RU_ALLOC(996);
++			CHECK_RU_ALLOC(2x996);
++
++			he->data5 |= HE_PREP(DATA5_DATA_BW_RU_ALLOC,
++					     status->rate->he_ru_alloc + 4);
++			break;
++		default:
++			WARN_ONCE(1, "Invalid SU BW %d\n", status->rate->bw);
++		}
++
++		pos += sizeof(struct ieee80211_radiotap_he);
++	}
++
++	if ((status && status->rate) || info->status.rates[0].idx < 0)
+ 		return;
+ 
+ 	/* IEEE80211_RADIOTAP_MCS
+@@ -647,7 +797,8 @@ static int ieee80211_tx_get_rates(struct
+ 
+ void ieee80211_tx_monitor(struct ieee80211_local *local, struct sk_buff *skb,
+ 			  struct ieee80211_supported_band *sband,
+-			  int retry_count, int shift, bool send_to_cooked)
++			  int retry_count, int shift, bool send_to_cooked,
++			  struct ieee80211_tx_status *status)
+ {
+ 	struct sk_buff *skb2;
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+@@ -656,14 +807,14 @@ void ieee80211_tx_monitor(struct ieee802
+ 	int rtap_len;
+ 
+ 	/* send frame to monitor interfaces now */
+-	rtap_len = ieee80211_tx_radiotap_len(info);
++	rtap_len = ieee80211_tx_radiotap_len(info, status);
+ 	if (WARN_ON_ONCE(skb_headroom(skb) < rtap_len)) {
+ 		pr_err("ieee80211_tx_status: headroom too small\n");
+ 		dev_kfree_skb(skb);
+ 		return;
+ 	}
+ 	ieee80211_add_tx_radiotap_header(local, sband, skb, retry_count,
+-					 rtap_len, shift);
++					 rtap_len, shift, status);
+ 
+ 	/* XXX: is this sufficient for BPF? */
+ 	skb_reset_mac_header(skb);
+@@ -903,7 +1054,8 @@ static void __ieee80211_tx_status(struct
+ 	}
+ 
+ 	/* send to monitor interfaces */
+-	ieee80211_tx_monitor(local, skb, sband, retry_count, shift, send_to_cooked);
++	ieee80211_tx_monitor(local, skb, sband, retry_count, shift,
++			     send_to_cooked, status);
+ }
+ 
+ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
+--- a/net/mac80211/tx.c
++++ b/net/mac80211/tx.c
+@@ -4824,7 +4824,8 @@ struct sk_buff *ieee80211_beacon_get_tim
+ 	if (!sband)
+ 		return bcn;
+ 
+-	ieee80211_tx_monitor(hw_to_local(hw), copy, sband, 1, shift, false);
++	ieee80211_tx_monitor(hw_to_local(hw), copy, sband, 1, shift, false,
++			     NULL);
+ 
+ 	return bcn;
+ }
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -274,6 +274,8 @@ struct ath11k_rx_peer_stats {
+ 	u64 rx_duration;
+ 	struct ath11k_rx_peer_rate_stats pkt_stats;
+ 	struct ath11k_rx_peer_rate_stats byte_stats;
++	u64 dcm_count;
++	u64 ru_alloc_cnt[HAL_RX_RU_ALLOC_TYPE_MAX];
+ };
+ 
+ #define ATH11K_HE_MCS_NUM       12
+@@ -362,7 +364,6 @@ struct ath11k_sta {
+ 	u32 smps;
+ 
+ 	struct work_struct update_wk;
+-	struct ieee80211_tx_info tx_info;
+ 	struct rate_info txrate;
+ 	struct rate_info last_txrate;
+ 	u64 rx_duration;
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1039,23 +1039,23 @@ int ath11k_dp_htt_tlv_iter(struct ath11k
+ 	return 0;
+ }
+ 
+-static u32 ath11k_bw_to_mac80211_bwflags(u8 bw)
++static inline u32 ath11k_he_gi_to_nl80211_he_gi(u8 sgi)
+ {
+-	u32 bwflags = 0;
++	u32 ret = 0;
+ 
+-	switch (bw) {
+-	case ATH11K_BW_40:
+-		bwflags = IEEE80211_TX_RC_40_MHZ_WIDTH;
++	switch (sgi) {
++	case RX_MSDU_START_SGI_0_8_US:
++		ret = NL80211_RATE_INFO_HE_GI_0_8;
+ 		break;
+-	case ATH11K_BW_80:
+-		bwflags = IEEE80211_TX_RC_80_MHZ_WIDTH;
++	case RX_MSDU_START_SGI_1_6_US:
++		ret = NL80211_RATE_INFO_HE_GI_1_6;
+ 		break;
+-	case ATH11K_BW_160:
+-		bwflags = IEEE80211_TX_RC_160_MHZ_WIDTH;
++	case RX_MSDU_START_SGI_3_2_US:
++		ret = NL80211_RATE_INFO_HE_GI_3_2;
+ 		break;
+ 	}
+ 
+-	return bwflags;
++	return ret;
+ }
+ 
+ static void
+@@ -1067,12 +1067,11 @@ ath11k_update_per_peer_tx_stats(struct a
+ 	struct ieee80211_sta *sta;
+ 	struct ath11k_sta *arsta;
+ 	struct htt_ppdu_stats_user_rate *user_rate;
+-	struct ieee80211_chanctx_conf *conf = NULL;
+ 	struct ath11k_per_peer_tx_stats *peer_stats = &ar->peer_tx_stats;
+ 	struct htt_ppdu_user_stats *usr_stats = &ppdu_stats->user_stats[user];
+ 	struct htt_ppdu_stats_common *common = &ppdu_stats->common;
+ 	int ret;
+-	u8 flags, mcs, nss, bw, sgi, rate_idx = 0;
++	u8 flags, mcs, nss, bw, sgi, dcm, rate_idx = 0;
+ 	u32 succ_bytes = 0;
+ 	u16 rate = 0, succ_pkts = 0;
+ 	u32 tx_duration = 0;
+@@ -1107,18 +1106,29 @@ ath11k_update_per_peer_tx_stats(struct a
+ 	nss = HTT_USR_RATE_NSS(user_rate->rate_flags) + 1;
+ 	mcs = HTT_USR_RATE_MCS(user_rate->rate_flags);
+ 	sgi = HTT_USR_RATE_GI(user_rate->rate_flags);
++	dcm = HTT_USR_RATE_DCM(user_rate->rate_flags);
+ 
+ 	/* Note: If host configured fixed rates and in some other special
+ 	 * cases, the broadcast/management frames are sent in different rates.
+ 	 * Firmware rate's control to be skipped for this?
+ 	 */
+ 
+-	if (flags == WMI_RATE_PREAMBLE_VHT && mcs > 9) {
++	if (flags == WMI_RATE_PREAMBLE_HE && mcs > 11) {
++		ath11k_warn(ab, "Invalid HE mcs %hhd peer stats",  mcs);
++		return;
++	}
++
++	if (flags == WMI_RATE_PREAMBLE_HE && mcs > ATH11K_HE_MCS_MAX) {
++		ath11k_warn(ab, "Invalid HE mcs %hhd peer stats",  mcs);
++		return;
++	}
++
++	if (flags == WMI_RATE_PREAMBLE_VHT && mcs > ATH11K_VHT_MCS_MAX) {
+ 		ath11k_warn(ab, "Invalid VHT mcs %hhd peer stats",  mcs);
+ 		return;
+ 	}
+ 
+-	if (flags == WMI_RATE_PREAMBLE_HT && (mcs > 7 || nss < 1)) {
++	if (flags == WMI_RATE_PREAMBLE_HT && (mcs > ATH11K_HT_MCS_MAX || nss < 1)) {
+ 		ath11k_warn(ab, "Invalid HT mcs %hhd nss %hhd peer stats",
+ 			    mcs, nss);
+ 		return;
+@@ -1147,60 +1157,41 @@ ath11k_update_per_peer_tx_stats(struct a
+ 	arsta = (struct ath11k_sta *)sta->drv_priv;
+ 
+ 	memset(&arsta->txrate, 0, sizeof(arsta->txrate));
+-	memset(&arsta->tx_info.status, 0, sizeof(arsta->tx_info.status));
+ 
+ 	switch (flags) {
+ 	case WMI_RATE_PREAMBLE_OFDM:
+ 		arsta->txrate.legacy = rate;
+-		if (arsta->arvif && arsta->arvif->vif)
+-			conf = rcu_dereference(arsta->arvif->vif->chanctx_conf);
+-		if (conf && conf->def.chan->band == NL80211_BAND_5GHZ)
+-			arsta->tx_info.status.rates[0].idx = rate_idx - 4;
+ 		break;
+ 	case WMI_RATE_PREAMBLE_CCK:
+ 		arsta->txrate.legacy = rate;
+-		arsta->tx_info.status.rates[0].idx = rate_idx;
+-		if (mcs > ATH11K_HW_RATE_CCK_LP_1M &&
+-		    mcs <= ATH11K_HW_RATE_CCK_SP_2M)
+-			arsta->tx_info.status.rates[0].flags |=
+-					IEEE80211_TX_RC_USE_SHORT_PREAMBLE;
+ 		break;
+ 	case WMI_RATE_PREAMBLE_HT:
+ 		arsta->txrate.mcs = mcs + 8 * (nss - 1);
+-		arsta->tx_info.status.rates[0].idx = arsta->txrate.mcs;
+-		arsta->txrate.flags = RATE_INFO_FLAGS_MCS;
+-		arsta->tx_info.status.rates[0].flags |= IEEE80211_TX_RC_MCS;
+-		if (sgi) {
++		if (sgi)
+ 			arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+-			arsta->tx_info.status.rates[0].flags |=
+-					IEEE80211_TX_RC_SHORT_GI;
+-		}
+ 		break;
+ 	case WMI_RATE_PREAMBLE_VHT:
+ 		arsta->txrate.mcs = mcs;
+-		ieee80211_rate_set_vht(&arsta->tx_info.status.rates[0], mcs, nss);
+ 		arsta->txrate.flags = RATE_INFO_FLAGS_VHT_MCS;
+-		arsta->tx_info.status.rates[0].flags |= IEEE80211_TX_RC_VHT_MCS;
+-		if (sgi) {
++		if (sgi)
+ 			arsta->txrate.flags |= RATE_INFO_FLAGS_SHORT_GI;
+-			arsta->tx_info.status.rates[0].flags |=
+-						IEEE80211_TX_RC_SHORT_GI;
+-		}
++		break;
++	case WMI_RATE_PREAMBLE_HE:
++		arsta->txrate.mcs = mcs;
++		arsta->txrate.flags = RATE_INFO_FLAGS_HE_MCS;
++		arsta->txrate.he_dcm = dcm;
++		arsta->txrate.he_gi = ath11k_he_gi_to_nl80211_he_gi(sgi);
++		arsta->txrate.he_ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(
++						(user_rate->ru_end -
++						 user_rate->ru_start) + 1);
+ 		break;
+ 	}
+ 
+ 	arsta->txrate.nss = nss;
+ 	arsta->txrate.bw = ath11k_mac_bw_to_mac80211_bw(bw);
+-	arsta->tx_info.status.rates[0].flags |= ath11k_bw_to_mac80211_bwflags(bw);
+ 
+ 	memcpy(&arsta->last_txrate, &arsta->txrate, sizeof(struct rate_info));
+ 
+-	if (succ_pkts) {
+-		arsta->tx_info.flags = IEEE80211_TX_STAT_ACK;
+-		arsta->tx_info.status.rates[0].count = 1;
+-		ieee80211_tx_rate_update(ar->hw, sta, &arsta->tx_info);
+-	}
+-
+ 	/* PPDU stats reported for mgmt packet doesn't have valid tx bytes
+ 	 * skip peer stats update for mgmt packets */
+ 	if (tid < 16) {
+@@ -2106,6 +2097,7 @@ static void ath11k_dp_rx_h_rate(struct a
+ 		}
+ 		rx_status->encoding = RX_ENC_HE;
+ 		rx_status->nss = nss;
++		rx_status->he_gi = ath11k_he_gi_to_nl80211_he_gi(sgi);
+ 		rx_status->bw = ath11k_mac_bw_to_mac80211_bw(bw);
+ 		break;
+ 	}
+@@ -2538,6 +2530,8 @@ static void ath11k_dp_rx_update_peer_sta
+ 
+ 	rx_stats->num_mpdu_fcs_ok += ppdu_info->num_mpdu_fcs_ok;
+ 	rx_stats->num_mpdu_fcs_err += ppdu_info->num_mpdu_fcs_err;
++	rx_stats->dcm_count += ppdu_info->dcm;
++	rx_stats->ru_alloc_cnt[ppdu_info->ru_alloc] += num_msdu;
+ 
+ 	rx_stats->rx_duration += ppdu_info->rx_duration;
+ 	arsta->rx_duration = rx_stats->rx_duration;
+--- a/drivers/net/wireless/ath/ath11k/debugfs_sta.c
++++ b/drivers/net/wireless/ath/ath11k/debugfs_sta.c
+@@ -462,6 +462,13 @@ static ssize_t ath11k_dbg_sta_dump_rx_st
+ 		len += scnprintf(buf + len, size - len, "%llu%s",
+ 				rx_stats->byte_stats.rx_rate[i],
+ 				(i + 1) % 8 ? "\t\t" : "\n");
++	len += scnprintf(buf + len, size - len,
++			 "\nDCM: %llu\nRU: 26 %llu 52: %llu 106: %llu 242: %llu 484: %llu 996: %llu\n",
++			 rx_stats->dcm_count, rx_stats->ru_alloc_cnt[0],
++			 rx_stats->ru_alloc_cnt[1], rx_stats->ru_alloc_cnt[2],
++			 rx_stats->ru_alloc_cnt[3], rx_stats->ru_alloc_cnt[4],
++			 rx_stats->ru_alloc_cnt[5]);
++
+ 	len += scnprintf(buf + len, size - len, "\n");
+ 
+ 	spin_unlock_bh(&ar->ab->base_lock);
+--- a/drivers/net/wireless/ath/ath11k/dp.h
++++ b/drivers/net/wireless/ath/ath11k/dp.h
+@@ -1110,6 +1110,13 @@ struct htt_ppdu_stats_common {
+ 	u16 bw_mhz;
+ } __packed;
+ 
++enum htt_ppdu_stats_gi {
++	HTT_PPDU_STATS_SGI_0_8_US,
++	HTT_PPDU_STATS_SGI_0_4_US,
++	HTT_PPDU_STATS_SGI_1_6_US,
++	HTT_PPDU_STATS_SGI_3_2_US,
++};
++
+ #define HTT_PPDU_STATS_USER_RATE_INFO0_USER_POS_M	GENMASK(3, 0)
+ #define HTT_PPDU_STATS_USER_RATE_INFO0_MU_GROUP_ID_M	GENMASK(11, 4)
+ 
+@@ -1138,6 +1145,8 @@ struct htt_ppdu_stats_common {
+ 		FIELD_GET(HTT_PPDU_STATS_USER_RATE_FLAGS_MCS_M, _val)
+ #define HTT_USR_RATE_GI(_val) \
+ 		FIELD_GET(HTT_PPDU_STATS_USER_RATE_FLAGS_GI_M, _val)
++#define HTT_USR_RATE_DCM(_val) \
++		FIELD_GET(HTT_PPDU_STATS_USER_RATE_FLAGS_DCM_M, _val)
+ 
+ #define HTT_PPDU_STATS_USER_RATE_RESP_FLAGS_LTF_SIZE_M		GENMASK(1, 0)
+ #define HTT_PPDU_STATS_USER_RATE_RESP_FLAGS_STBC_M		BIT(2)
+--- a/drivers/net/wireless/ath/ath11k/dp_tx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_tx.c
+@@ -7,6 +7,7 @@
+ #include "dp_tx.h"
+ #include "debug.h"
+ #include "hw.h"
++#include "peer.h"
+ 
+ /* NOTE: Any of the mapped ring id value must not exceed DP_TCL_NUM_RING_MAX */
+ static const u8
+@@ -365,9 +366,12 @@ static void ath11k_dp_tx_complete_msdu(s
+ 				       struct sk_buff *msdu,
+ 				       struct hal_tx_status *ts)
+ {
++	struct ieee80211_tx_status status = { 0 };
+ 	struct ath11k_base *ab = ar->ab;
+ 	struct ieee80211_tx_info *info;
+ 	struct ath11k_skb_cb *skb_cb;
++	struct ath11k_peer *peer;
++	struct ath11k_sta *arsta;
+ 
+ 	if (WARN_ON_ONCE(ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM)) {
+ 		/* Must not happen */
+@@ -431,12 +435,25 @@ static void ath11k_dp_tx_complete_msdu(s
+ 		ath11k_dp_tx_cache_peer_stats(ar, msdu, ts);
+ 	}
+ 
+-	/* NOTE: Tx rate status reporting. Tx completion status does not have
+-	 * necessary information (for example nss) to build the tx rate.
+-	 * Might end up reporting it out-of-band from HTT stats.
+-	 */
+ 
+-	ieee80211_tx_status(ar->hw, msdu);
++	spin_lock_bh(&ab->base_lock);
++	peer = ath11k_peer_find_by_id(ab, ts->peer_id);
++	if (!peer || !peer->sta) {
++		ath11k_warn(ab, "failed to find the peer with peer_id %d\n",
++			    ts->peer_id);
++		spin_unlock_bh(&ab->base_lock);
++		dev_kfree_skb_any(msdu);
++		goto exit;
++	}
++	arsta = (struct ath11k_sta *)peer->sta->drv_priv;
++	status.sta = peer->sta;
++	status.skb = msdu;
++	status.info = info;
++	status.rate = &arsta->last_txrate;
++	rcu_read_unlock();
++	ieee80211_tx_status_ext(ar->hw, &status);
++	spin_unlock_bh(&ab->base_lock);
++	return;
+ 
+ exit:
+ 	rcu_read_unlock();
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.c
+@@ -1066,6 +1066,7 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 		}
+ 
+ 		ppdu_info->nss = nsts + 1;
++		ppdu_info->dcm = dcm;
+ 		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_SU;
+ 		break;
+ 	}
+@@ -1103,9 +1104,15 @@ ath11k_hal_rx_parse_mon_status_tlv(struc
+ 		break;
+ 	}
+ 	case HAL_PHYRX_HE_SIG_B1_MU: {
+-		/* TODO: Check if resource unit(RU) allocation stats
+-		 * are required
+-		 */
++		struct hal_rx_he_sig_b1_mu_info *he_sig_b1_mu =
++			(struct hal_rx_he_sig_b1_mu_info *)tlv_data;
++		u16 ru_tones;
++
++		info0 = __le32_to_cpu(he_sig_b1_mu->info0);
++
++		ru_tones = FIELD_GET(HAL_RX_HE_SIG_B1_MU_INFO_INFO0_RU_ALLOCATION,
++				     info0);
++		ppdu_info->ru_alloc = ath11k_he_ru_tones_to_nl80211_he_ru_alloc(ru_tones);
+ 		ppdu_info->reception_type = HAL_RX_RECEPTION_TYPE_MU_MIMO;
+ 		break;
+ 	}
+--- a/drivers/net/wireless/ath/ath11k/hal_rx.h
++++ b/drivers/net/wireless/ath/ath11k/hal_rx.h
+@@ -143,6 +143,8 @@ struct hal_rx_mon_ppdu_info {
+ 	u8 beamformed;
+ 	u8 rssi_comb;
+ 	u8 tid;
++	u8 dcm;
++	u8 ru_alloc;
+ 	u8 reception_type;
+ 	u64 rx_duration;
+ };
+@@ -368,6 +370,34 @@ enum hal_rx_mon_status
+ ath11k_hal_rx_parse_mon_status(struct ath11k_base *ab,
+ 			       struct hal_rx_mon_ppdu_info *ppdu_info,
+ 			       struct sk_buff *skb);
++
++static inline u32 ath11k_he_ru_tones_to_nl80211_he_ru_alloc(u16 ru_tones)
++{
++	u32 ret = 0;
++
++	switch (ru_tones) {
++	case RU_26:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_26;
++		break;
++	case RU_52:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_52;
++		break;
++	case RU_106:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_106;
++		break;
++	case RU_242:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_242;
++		break;
++	case RU_484:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_484;
++		break;
++	case RU_996:
++		ret = NL80211_RATE_INFO_HE_RU_ALLOC_996;
++		break;
++	}
++	return ret;
++}
++
+ #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_0 0xDDBEEF
+ #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_1 0xADBEEF
+ #define REO_QUEUE_DESC_MAGIC_DEBUG_PATTERN_2 0xBDBEEF
+--- a/drivers/net/wireless/ath/ath11k/rx_desc.h
++++ b/drivers/net/wireless/ath/ath11k/rx_desc.h
+@@ -1209,4 +1209,12 @@ struct hal_rx_desc {
+ 	u8 msdu_payload[0];
+ } __packed;
+ 
++#define HAL_RX_RU_ALLOC_TYPE_MAX 6
++#define RU_26  1
++#define RU_52  2
++#define RU_106 4
++#define RU_242 9
++#define RU_484 18
++#define RU_996 37
++
+ #endif /* ATH11K_RX_DESC_H */

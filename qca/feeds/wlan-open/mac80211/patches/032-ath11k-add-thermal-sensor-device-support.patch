@@ -1,0 +1,350 @@
+From 7b842d5f4c149a525aeaed6df027298fd8a9217d Mon Sep 17 00:00:00 2001
+From: Pradeep Kumar Chitrapu <pradeepc@codeaurora.org>
+Date: Tue, 21 May 2019 21:39:57 -0700
+Subject: [PATCH v2 2/2] ath11k: add thermal sensor device support
+
+Temperature sensor generates electrical analog voltage from temperature
+of each chain. The analog voltage is converted to digital value through
+ADC. For reading temperature values fom user space, hw monitoring device
+is used.
+
+Whenever the user requests for current temperature, the driver sends WMI
+command and wait for response. For reading temperature,
+
+cat /sys/class/ieee80211/phy*/device/hwmon/hwmon2/temp1_input
+
+Signed-off-by: Pradeep Kumar Chitrapu <pradeepc@codeaurora.org>
+---
+v2:
+ - changed temperature unit from u32 to s32
+
+ drivers/net/wireless/ath/ath11k/core.c    |  2 +-
+ drivers/net/wireless/ath/ath11k/mac.c     |  2 +
+ drivers/net/wireless/ath/ath11k/thermal.c | 79 ++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath11k/thermal.h | 13 +++++
+ drivers/net/wireless/ath/ath11k/wmi.c     | 85 +++++++++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath11k/wmi.h     | 13 +++++
+ 6 files changed, 193 insertions(+), 1 deletion(-)
+
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -623,7 +623,7 @@ static void ath11k_core_restart(struct w
+ 		complete(&ar->install_key_done);
+ 		complete(&ar->vdev_setup_done);
+ 		complete(&ar->bss_survey_done);
+-
++		complete(&ar->thermal.wmi_sync);
+ 		wake_up(&ar->dp.tx_empty_waitq);
+ 		idr_for_each(&ar->txmgmt_idr,
+ 			     ath11k_mac_tx_mgmt_pending_free, ar);
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -5412,6 +5412,8 @@ int ath11k_mac_create(struct ath11k_base
+ 		init_completion(&ar->bss_survey_done);
+ 		init_completion(&ar->scan.started);
+ 		init_completion(&ar->scan.completed);
++		init_completion(&ar->thermal.wmi_sync);
++
+ 		INIT_DELAYED_WORK(&ar->scan.timeout, ath11k_scan_timeout_work);
+ 		INIT_WORK(&ar->regd_update_work, ath11k_regd_update_work);
+ 
+--- a/drivers/net/wireless/ath/ath11k/thermal.c
++++ b/drivers/net/wireless/ath/ath11k/thermal.c
+@@ -6,6 +6,8 @@
+ #include <linux/device.h>
+ #include <linux/sysfs.h>
+ #include <linux/thermal.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
+ #include "core.h"
+ #include "debug.h"
+ 
+@@ -57,7 +59,71 @@ static struct thermal_cooling_device_ops
+ 	.set_cur_state = ath11k_thermal_set_cur_throttle_state,
+ };
+ 
+-int ath11k_thermal_set_throttling(struct ath11k *ar, throttle_state)
++static ssize_t ath11k_thermal_show_temp(struct device *dev,
++					struct device_attribute *attr,
++					char *buf)
++{
++	struct ath11k *ar = dev_get_drvdata(dev);
++	int ret, temperature;
++	unsigned long time_left;
++
++	mutex_lock(&ar->conf_mutex);
++
++	/* Can't get temperature when the card is off */
++	if (ar->state != ATH11K_STATE_ON) {
++		ret = -ENETDOWN;
++		goto out;
++	}
++
++	reinit_completion(&ar->thermal.wmi_sync);
++	ret = ath11k_wmi_send_pdev_temperature_cmd(ar);
++	if (ret) {
++		ath11k_warn(ar->ab, "failed to read temperature %d\n", ret);
++		goto out;
++	}
++
++	if (test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)) {
++		ret = -ESHUTDOWN;
++		goto out;
++	}
++
++	time_left = wait_for_completion_timeout(&ar->thermal.wmi_sync,
++						ATH11K_THERMAL_SYNC_TIMEOUT_HZ);
++	if (!time_left) {
++		ath11k_warn(ar->ab, "failed to synchronize thermal read\n");
++		ret = -ETIMEDOUT;
++		goto out;
++	}
++
++	spin_lock_bh(&ar->data_lock);
++	temperature = ar->thermal.temperature;
++	spin_unlock_bh(&ar->data_lock);
++
++	/* display in millidegree celcius */
++	ret = snprintf(buf, PAGE_SIZE, "%d\n", temperature * 1000);
++out:
++	mutex_unlock(&ar->conf_mutex);
++	return ret;
++}
++
++void ath11k_thermal_event_temperature(struct ath11k *ar, int temperature)
++{
++	spin_lock_bh(&ar->data_lock);
++	ar->thermal.temperature = temperature;
++	spin_unlock_bh(&ar->data_lock);
++	complete(&ar->thermal.wmi_sync);
++}
++
++static SENSOR_DEVICE_ATTR(temp1_input, 0444, ath11k_thermal_show_temp,
++			  NULL, 0);
++
++static struct attribute *ath11k_hwmon_attrs[] = {
++	&sensor_dev_attr_temp1_input.dev_attr.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(ath11k_hwmon);
++
++int ath11k_thermal_set_throttling(struct ath11k *ar, u32 throttle_state)
+ {
+ 	struct ath11k_base *sc = ar->ab;
+ 	struct thermal_mitigation_params param;
+@@ -91,6 +157,7 @@ int ath11k_thermal_set_throttling(struct
+ int ath11k_thermal_register(struct ath11k_base *sc)
+ {
+ 	struct thermal_cooling_device *cdev;
++	struct device *hwmon_dev;
+ 	struct ath11k *ar;
+ 	struct ath11k_pdev *pdev;
+ 	int i, ret;
+@@ -118,6 +185,18 @@ int ath11k_thermal_register(struct ath11
+ 		}
+ 
+ 		ar->thermal.cdev = cdev;
++		if (!IS_REACHABLE(CONFIG_HWMON))
++			return 0;
++
++		hwmon_dev = devm_hwmon_device_register_with_groups(&ar->hw->wiphy->dev,
++								   "ath11k_hwmon", ar,
++								   ath11k_hwmon_groups);
++		if (IS_ERR(hwmon_dev)) {
++			ath11k_err(ar->ab, "failed to register hwmon device: %ld\n",
++				   PTR_ERR(hwmon_dev));
++			ret = -EINVAL;
++			goto err_thermal_destroy;
++		}
+ 	}
+ 
+ 	return 0;
+--- a/drivers/net/wireless/ath/ath11k/thermal.h
++++ b/drivers/net/wireless/ath/ath11k/thermal.h
+@@ -10,18 +10,26 @@
+ #define ATH11K_THERMAL_TEMP_HIGH_MARK 150
+ #define ATH11K_THERMAL_THROTTLE_MAX     100
+ #define ATH11K_THERMAL_DEFAULT_DUTY_CYCLE 100
++#define ATH11K_HWMON_NAME_LEN           15
++#define ATH11K_THERMAL_SYNC_TIMEOUT_HZ (5 * HZ)
+ 
+ struct ath11k_thermal {
+ 	struct thermal_cooling_device *cdev;
++	struct completion wmi_sync;
+ 
+ 	/* protected by conf_mutex */
+ 	u32 throttle_state;
++	/* temperature value in Celcius degree
++	 * protected by data_lock
++	 */
++	int temperature;
+ };
+ 
+ #if IS_REACHABLE(CONFIG_THERMAL)
+ int ath11k_thermal_register(struct ath11k_base *sc);
+ void ath11k_thermal_unregister(struct ath11k_base *sc);
+ int ath11k_thermal_set_throttling(struct ath11k *ar, u32 throttle_state);
++void ath11k_thermal_event_temperature(struct ath11k *ar, int temperature);
+ #else
+ static inline int ath11k_thermal_register(struct ath11k_base *sc)
+ {
+@@ -36,5 +44,10 @@ static inline int ath11k_thermal_set_thr
+ {
+ }
+ 
++static inline void ath11k_thermal_event_temperature(struct ath11k *ar,
++						    int temperature)
++{
++}
++
+ #endif
+ #endif /* _ATH11K_THERMAL_ */
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -1443,6 +1443,34 @@ int ath11k_wmi_send_stats_request_cmd(st
+ 	return ret;
+ }
+ 
++int ath11k_wmi_send_pdev_temperature_cmd(struct ath11k *ar)
++{
++	struct ath11k_pdev_wmi *wmi = ar->wmi;
++	struct wmi_get_pdev_temperature_cmd *cmd;
++	struct sk_buff *skb;
++	int ret;
++
++	skb = ath11k_wmi_alloc_skb(wmi->wmi_sc, sizeof(*cmd));
++	if (!skb)
++		return -ENOMEM;
++
++	cmd = (struct wmi_get_pdev_temperature_cmd *)skb->data;
++	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_GET_TEMPERATURE_CMD) |
++			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
++	cmd->pdev_id = ar->pdev->pdev_id;
++
++	ret = ath11k_wmi_cmd_send(wmi, skb, WMI_PDEV_GET_TEMPERATURE_CMDID);
++	if (ret) {
++		ath11k_warn(ar->ab, "failed to send WMI_PDEV_GET_TEMPERATURE cmd\n");
++		dev_kfree_skb(skb);
++	}
++
++	ath11k_dbg(ar->ab, ATH11K_DBG_WMI,
++		   "WMI pdev get temperature for pdev_id %d\n", ar->pdev->pdev_id);
++
++	return ret;
++}
++
+ int ath11k_wmi_send_bcn_offload_control_cmd(struct ath11k *ar,
+ 					    u32 vdev_id, u32 bcn_ctrl_op)
+ {
+@@ -4061,6 +4089,34 @@ int ath11k_wmi_pull_fw_stats(struct ath1
+ 	return 0;
+ }
+ 
++int ath11k_pull_pdev_temp_ev(struct ath11k_base *ab, u8 *evt_buf,
++			     u32 len, s32 *temp, u32 *pdev_id)
++{
++	const void **tb;
++	const struct wmi_pdev_temperature_event *ev;
++	int ret;
++
++	tb = ath11k_wmi_tlv_parse_alloc(ab, evt_buf, len, GFP_ATOMIC);
++	if (IS_ERR(tb)) {
++		ret = PTR_ERR(tb);
++		ath11k_warn(ab, "failed to parse tlv: %d\n", ret);
++		return ret;
++	}
++
++	ev = tb[WMI_TAG_PDEV_TEMPERATURE_EVENT];
++	if (!ev) {
++		ath11k_warn(ab, "failed to fetch pdev temp ev");
++		kfree(tb);
++		return -EPROTO;
++	}
++
++	*pdev_id = ev->pdev_id;
++	*temp = ev->temperature;
++
++	kfree(tb);
++	return 0;
++}
++
+ size_t ath11k_wmi_fw_stats_num_vdevs(struct list_head *head)
+ {
+ 	struct ath11k_fw_stats_vdev *i;
+@@ -5404,6 +5460,30 @@ exit:
+ 	kfree(tb);
+ }
+ 
++static void
++ath11k_wmi_pdev_temperature_event(struct ath11k_base *ab, struct sk_buff *skb)
++{
++	struct ath11k *ar;
++	s32 temp;
++	u32 pdev_id;
++
++	if (ath11k_pull_pdev_temp_ev(ab, skb->data, skb->len, &temp, &pdev_id) != 0) {
++		ath11k_warn(ab, "failed to extract pdev temperature event");
++		return;
++	}
++
++	ath11k_dbg(ab, ATH11K_DBG_WMI,
++		   "pdev temperature ev temp %d pdev_id %d\n", temp, pdev_id);
++
++	ar = ath11k_mac_get_ar_by_pdev_id(ab, pdev_id);
++	if (!ar) {
++		ath11k_warn(ab, "invalid pdev id in pdev temperature ev %d", pdev_id);
++		return;
++	}
++
++	ath11k_thermal_event_temperature(ar, temp);
++}
++
+ static void ath11k_wmi_tlv_op_rx(struct ath11k_base *ab, struct sk_buff *skb)
+ {
+ 	struct wmi_cmd_hdr *cmd_hdr;
+@@ -5481,6 +5561,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	case WMI_PDEV_CSA_SWITCH_COUNT_STATUS_EVENTID:
+ 		ath11k_wmi_pdev_csa_switch_count_status_event(ab, skb);
+ 		break;
++	case WMI_PDEV_TEMPERATURE_EVENTID:
++		ath11k_wmi_pdev_temperature_event(ab, skb);
++		break;
+ 	/* add Unsupported events here */
+ 	case WMI_TBTTOFFSET_EXT_UPDATE_EVENTID:
+ 	case WMI_VDEV_DELETE_RESP_EVENTID:
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -3270,6 +3270,12 @@ struct wmi_request_stats_cmd {
+ 	u32 pdev_id;
+ } __packed;
+ 
++struct wmi_get_pdev_temperature_cmd {
++	u32 tlv_header;
++	u32 param;
++	u32 pdev_id;
++} __packed;
++
+ #define WMI_BEACON_TX_BUFFER_SIZE	512
+ 
+ struct wmi_bcn_tmpl_cmd {
+@@ -4096,6 +4102,12 @@ struct wmi_pdev_radar_ev {
+ 	s32 sidx;
+ } __packed;
+ 
++struct wmi_pdev_temperature_event {
++	/* temperature value in Celcius degree */
++	s32 temperature;
++	u32 pdev_id;
++} __packed;
++
+ #define WMI_RX_STATUS_OK			0x00
+ #define WMI_RX_STATUS_ERR_CRC			0x01
+ #define WMI_RX_STATUS_ERR_DECRYPT		0x08
+@@ -4673,6 +4685,7 @@ int ath11k_wmi_pdev_bss_chan_info_reques
+ 					  enum wmi_bss_chan_info_req_type type);
+ int ath11k_wmi_send_stats_request_cmd(struct ath11k *ar,
+ 				      struct stats_request_params *param);
++int ath11k_wmi_send_pdev_temperature_cmd(struct ath11k *ar);
+ int ath11k_wmi_send_peer_flush_tids_cmd(struct ath11k *ar,
+ 					u8 peer_addr[ETH_ALEN],
+ 					struct peer_flush_params *param);

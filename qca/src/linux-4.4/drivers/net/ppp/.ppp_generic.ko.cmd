@@ -1,0 +1,1 @@
+cmd_drivers/net/ppp/ppp_generic.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/net/ppp/ppp_generic.ko drivers/net/ppp/ppp_generic.o drivers/net/ppp/ppp_generic.mod.o

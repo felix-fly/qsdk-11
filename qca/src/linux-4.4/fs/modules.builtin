@@ -1,0 +1,9 @@
+kernel/fs/binfmt_script.ko
+kernel/fs/mbcache.ko
+kernel/fs/configfs/configfs.ko
+kernel/fs/ext4/ext4.ko
+kernel/fs/jbd2/jbd2.ko
+kernel/fs/jffs2/jffs2.ko
+kernel/fs/overlayfs/overlay.ko
+kernel/fs/squashfs/squashfs.ko
+kernel/fs/ubifs/ubifs.ko

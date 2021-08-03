@@ -1,0 +1,321 @@
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -21,6 +21,7 @@
+ #include "hw.h"
+ #include "hal_rx.h"
+ #include "reg.h"
++#include "db_ring.h"
+ #ifndef CONFIG_QCOM_QMI_HELPERS
+ #include <soc/qcom/subsystem_restart.h>
+ #endif
+@@ -691,6 +692,8 @@ struct ath11k_base {
+ 		u32 fw_crash_counter;
+ 	} stats;
+ 	struct ath11k_ftm_event_obj ftm_event_obj;
++	struct ath11k_db_ring_cap *db_caps;
++	u32 num_db_cap;
+ };
+ 
+ struct ath11k_fw_stats_pdev {
+--- /dev/null
++++ b/drivers/net/wireless/ath/ath11k/db_ring.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: ISC */
++/*
++ * Copyright (c) 2019 The Linux Foundation. All rights reserved.
++ */
++
++#ifndef ATH11K_DB_RING_H
++#define ATH11K_DB_RING_H
++
++#include <linux/types.h>
++
++struct ath11k_db_ring_cap {
++	u32 pdev_id;
++	enum wmi_direct_buffer_module id;
++	u32 min_elem;
++	u32 min_buf_sz;
++	u32 min_buf_align;
++};
++
++#endif /* ATH11K_DB_RING_H */
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -28,6 +28,11 @@ struct wmi_tlv_svc_ready_parse {
+ 	bool wmi_svc_bitmap_done;
+ };
+ 
++struct wmi_tlv_dma_ring_caps_parse {
++	struct wmi_dma_ring_capabilities *dma_ring_caps;
++	u32 n_dma_ring_caps;
++};
++
+ struct wmi_tlv_svc_rdy_ext_parse {
+ 	struct ath11k_service_ext_param param;
+ 	struct wmi_soc_mac_phy_hw_mode_caps *hw_caps;
+@@ -40,9 +45,19 @@ struct wmi_tlv_svc_rdy_ext_parse {
+ 	struct wmi_soc_hal_reg_capabilities *soc_hal_reg_caps;
+ 	struct wmi_hal_reg_capabilities_ext *ext_hal_reg_caps;
+ 	u32 n_ext_hal_reg_caps;
++	struct wmi_tlv_dma_ring_caps_parse dma_caps_parse;
+ 	bool hw_mode_done;
+ 	bool mac_phy_done;
+ 	bool ext_hal_reg_done;
++	bool mac_phy_chainmask_combo_done;
++	bool mac_phy_chainmask_cap_done;
++	bool oem_dma_ring_cap_done;
++	bool dma_ring_cap_done;
++};
++
++struct wmi_tlv_svc_rdy_ext2_parse {
++	struct wmi_tlv_dma_ring_caps_parse dma_caps_parse;
++	bool dma_ring_cap_done;
+ };
+ 
+ struct wmi_tlv_rdy_parse {
+@@ -3025,6 +3040,95 @@ static int ath11k_wmi_tlv_ext_soc_hal_re
+ 	return 0;
+ }
+ 
++static int ath11k_wmi_tlv_dma_ring_caps_parse(struct ath11k_base *soc,
++					      u16 tag, u16 len,
++					      const void *ptr, void *data)
++{
++	struct wmi_tlv_dma_ring_caps_parse *parse = data;
++
++	if (tag != WMI_TAG_DMA_RING_CAPABILITIES)
++		return -EPROTO;
++
++	parse->n_dma_ring_caps++;
++	return 0;
++}
++
++static int ath11k_wmi_alloc_db_ring_caps(struct ath11k_base *ab,
++					 u32 num_cap)
++{
++	size_t sz;
++	void *ptr;
++
++	sz = num_cap * sizeof(struct ath11k_db_ring_cap);
++	ptr = kzalloc(sz, GFP_ATOMIC);
++	if (!ptr)
++		return -ENOMEM;
++
++	ab->db_caps = ptr;
++	ab->num_db_cap = num_cap;
++
++	return 0;
++}
++
++static void ath11k_wmi_free_db_ring_caps(struct ath11k_base *ab)
++{
++	kfree(ab->db_caps);
++	ab->db_caps = NULL;
++}
++
++static int ath11k_wmi_tlv_dma_ring_caps(struct ath11k_base *ab,
++					u16 len, const void *ptr, void *data)
++{
++	struct wmi_tlv_dma_ring_caps_parse *dma_caps_parse = data;
++	struct wmi_dma_ring_capabilities *dma_caps;
++	struct ath11k_db_ring_cap *dir_buff_caps;
++	int ret;
++	u32 i;
++
++	dma_caps_parse->n_dma_ring_caps = 0;
++	dma_caps = (struct wmi_dma_ring_capabilities *)ptr;
++	ret = ath11k_wmi_tlv_iter(ab, ptr, len,
++				  ath11k_wmi_tlv_dma_ring_caps_parse,
++				  dma_caps_parse);
++	if (ret) {
++		ath11k_warn(ab, "failed to parse dma ring caps tlv %d\n", ret);
++		return ret;
++	}
++
++	if (!dma_caps_parse->n_dma_ring_caps)
++		return 0;
++
++	if (ab->num_db_cap) {
++		ath11k_warn(ab, "Already processed, so ignoring dma ring caps\n");
++		return 0;
++	}
++
++	ret = ath11k_wmi_alloc_db_ring_caps(ab, dma_caps_parse->n_dma_ring_caps);
++	if (ret)
++		return ret;
++
++	dir_buff_caps = ab->db_caps;
++	for (i = 0; i < dma_caps_parse->n_dma_ring_caps; i++) {
++		if (dma_caps[i].module_id >= WMI_DIRECT_BUF_MAX) {
++			ath11k_warn(ab, "Invalid module id %d\n", dma_caps[i].module_id);
++			ret = -EINVAL;
++			goto free_dir_buff;
++		}
++
++		dir_buff_caps[i].id = dma_caps[i].module_id;
++		dir_buff_caps[i].pdev_id = DP_HW2SW_MACID(dma_caps[i].pdev_id);
++		dir_buff_caps[i].min_elem = dma_caps[i].min_elem;
++		dir_buff_caps[i].min_buf_sz = dma_caps[i].min_buf_sz;
++		dir_buff_caps[i].min_buf_align = dma_caps[i].min_buf_align;
++	}
++
++	return 0;
++
++free_dir_buff:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
++}
++
+ static int ath11k_wmi_tlv_svc_rdy_ext_parse(struct ath11k_base *ab,
+ 					    u16 tag, u16 len,
+ 					    const void *ptr, void *data)
+@@ -3083,7 +3187,19 @@ static int ath11k_wmi_tlv_svc_rdy_ext_pa
+ 				return ret;
+ 
+ 			svc_rdy_ext->ext_hal_reg_done = true;
+-			complete(&ab->wmi_sc.service_ready);
++		} else if (!svc_rdy_ext->mac_phy_chainmask_combo_done) {
++			svc_rdy_ext->mac_phy_chainmask_combo_done = true;
++		} else if (!svc_rdy_ext->mac_phy_chainmask_cap_done) {
++			svc_rdy_ext->mac_phy_chainmask_cap_done = true;
++		} else if (!svc_rdy_ext->oem_dma_ring_cap_done) {
++			svc_rdy_ext->oem_dma_ring_cap_done = true;
++		} else if (!svc_rdy_ext->dma_ring_cap_done) {
++			ret = ath11k_wmi_tlv_dma_ring_caps(ab, len, ptr,
++							   &svc_rdy_ext->dma_caps_parse);
++			if (ret)
++				return ret;
++
++			svc_rdy_ext->dma_ring_cap_done = true;
+ 		}
+ 		break;
+ 
+@@ -3104,10 +3220,65 @@ static int ath11k_service_ready_ext_even
+ 				  &svc_rdy_ext);
+ 	if (ret) {
+ 		ath11k_warn(ab, "failed to parse tlv %d\n", ret);
+-		return ret;
++		goto err;
++	}
++
++	if (!test_bit(WMI_TLV_SERVICE_EXT2_MSG, ab->wmi_sc.svc_map))
++		complete(&ab->wmi_sc.service_ready);
++
++	return 0;
++
++err:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
++}
++
++static int ath11k_wmi_tlv_svc_rdy_ext2_parse(struct ath11k_base *ab,
++					     u16 tag, u16 len,
++					     const void *ptr, void *data)
++{
++	struct wmi_tlv_svc_rdy_ext2_parse *parse = data;
++	int ret;
++
++	switch (tag) {
++	case WMI_TAG_ARRAY_STRUCT:
++		if (!parse->dma_ring_cap_done) {
++			ret = ath11k_wmi_tlv_dma_ring_caps(ab, len, ptr,
++							   &parse->dma_caps_parse);
++			if (ret)
++				return ret;
++
++			parse->dma_ring_cap_done = true;
++		}
++		break;
++	default:
++		break;
++	}
++
++	return 0;
++}
++
++static int ath11k_service_ready_ext2_event(struct ath11k_base *ab,
++					   struct sk_buff *skb)
++{
++	struct wmi_tlv_svc_rdy_ext2_parse svc_rdy_ext2 = { };
++	int ret;
++
++	ret = ath11k_wmi_tlv_iter(ab, skb->data, skb->len,
++				  ath11k_wmi_tlv_svc_rdy_ext2_parse,
++				  &svc_rdy_ext2);
++	if (ret) {
++		ath11k_warn(ab, "failed to parse ext2 event tlv %d\n", ret);
++		goto err;
+ 	}
+ 
++	complete(&ab->wmi_sc.service_ready);
++
+ 	return 0;
++
++err:
++	ath11k_wmi_free_db_ring_caps(ab);
++	return ret;
+ }
+ 
+ static int ath11k_pull_vdev_start_resp_tlv(struct ath11k_base *ab, struct sk_buff *skb,
+@@ -5508,6 +5679,9 @@ static void ath11k_wmi_tlv_op_rx(struct
+ 	case WMI_SERVICE_READY_EXT_EVENTID:
+ 		ath11k_service_ready_ext_event(ab, skb);
+ 		break;
++	case WMI_SERVICE_READY_EXT2_EVENTID:
++		ath11k_service_ready_ext2_event(ab, skb);
++		break;
+ 	case WMI_REG_CHAN_LIST_CC_EVENTID:
+ 		ath11k_reg_chan_list_event(ab, skb);
+ 		break;
+@@ -5788,4 +5962,6 @@ void ath11k_wmi_detach(struct ath11k_bas
+ 
+ 	for (i = 0; i < sc->htc.wmi_ep_count; i++)
+ 		ath11k_wmi_pdev_detach(sc, i);
++
++	ath11k_wmi_free_db_ring_caps(sc);
+ }
+--- a/drivers/net/wireless/ath/ath11k/wmi.h
++++ b/drivers/net/wireless/ath/ath11k/wmi.h
+@@ -571,6 +571,11 @@ enum wmi_tlv_event_id {
+ 	WMI_PDEV_DMA_RING_CFG_RSP_EVENTID,
+ 	WMI_PDEV_DMA_RING_BUF_RELEASE_EVENTID,
+ 	WMI_PDEV_CTL_FAILSAFE_CHECK_EVENTID,
++	WMI_PDEV_CSC_SWITCH_COUNT_STATUS_EVENTID,
++	WMI_PDEV_COLD_BOOT_CAL_DATA_EVENTID,
++	WMI_PDEV_RAP_INFO_EVENTID,
++	WMI_CHAN_RF_CHARACTERIZATION_INFO_EVENTID,
++	WMI_SERVICE_READY_EXT2_EVENTID,
+ 	WMI_VDEV_START_RESP_EVENTID = WMI_TLV_CMD(WMI_GRP_VDEV),
+ 	WMI_VDEV_STOPPED_EVENTID,
+ 	WMI_VDEV_INSTALL_KEY_COMPLETE_EVENTID,
+@@ -2004,6 +2009,14 @@ enum wmi_beacon_gen_mode {
+ 	WMI_BEACON_BURST_MODE = 1
+ };
+ 
++enum wmi_direct_buffer_module {
++	WMI_DIRECT_BUF_SPECTRAL = 0,
++	WMI_DIRECT_BUF_CFR = 1,
++
++	/* keep it last */
++	WMI_DIRECT_BUF_MAX
++};
++
+ struct wmi_host_pdev_band_to_mac {
+ 	u32 pdev_id;
+ 	u32 start_freq;
+@@ -2308,6 +2321,15 @@ struct wmi_mac_addr {
+ 	} __packed;
+ } __packed;
+ 
++struct wmi_dma_ring_capabilities {
++	u32 tlv_header;
++	u32 pdev_id;
++	u32 module_id;
++	u32 min_elem;
++	u32 min_buf_sz;
++	u32 min_buf_align;
++} __packed;
++
+ struct wmi_ready_event {
+ 	struct wmi_abi_version fw_abi_vers;
+ 	struct wmi_mac_addr mac_addr;

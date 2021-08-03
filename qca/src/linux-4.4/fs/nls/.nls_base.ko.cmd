@@ -1,0 +1,1 @@
+cmd_fs/nls/nls_base.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o fs/nls/nls_base.ko fs/nls/nls_base.o fs/nls/nls_base.mod.o

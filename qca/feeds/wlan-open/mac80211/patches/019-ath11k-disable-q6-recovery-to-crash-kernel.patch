@@ -1,0 +1,10 @@
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -669,6 +669,7 @@ int ath11k_ahb_power_up(struct ath11k_ba
+ 	subsys_info->subsys_handle = subsystem_get(subsys_info->subsys_desc.name);
+ 	ret = 0;
+ #else
++	sc->tgt_rproc->recovery_disabled = true;
+ 	ret = rproc_boot(sc->tgt_rproc);
+ 	if (ret)
+ 		ath11k_err(sc, "failed to boot the remote processor Q6\n");

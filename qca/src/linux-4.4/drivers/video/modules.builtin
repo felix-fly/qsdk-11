@@ -1,0 +1,7 @@
+kernel/drivers/video/fbdev/core/fb.ko
+kernel/drivers/video/fbdev/core/cfbfillrect.ko
+kernel/drivers/video/fbdev/core/cfbcopyarea.ko
+kernel/drivers/video/fbdev/core/cfbimgblt.ko
+kernel/drivers/video/fbdev/core/fb_sys_fops.ko
+kernel/drivers/video/fbdev/qcom/mdss-qpic.ko
+kernel/drivers/video/fbdev/qcom/qpic_panel_er_ssd1963.ko

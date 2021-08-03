@@ -1,0 +1,12 @@
+qcom-ipq4019-ap.dk07.1-c4.o: \
+ arch/arm/boot/dts/qcom-ipq4019-ap.dk07.1-c4.dts \
+ arch/arm/boot/dts/qcom-ipq4019-ap.dk07.1.dtsi \
+ arch/arm/boot/dts/qcom-ipq4019.dtsi arch/arm/boot/dts/skeleton.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/clock/qcom,gcc-ipq4019.h \
+ arch/arm/boot/dts/include/dt-bindings/reset/qcom,gcc-ipq4019.h \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/arm-gic.h \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h \
+ arch/arm/boot/dts/include/dt-bindings/soc/ipq,tcsr.h \
+ arch/arm/boot/dts/include/dt-bindings/input/input.h \
+ arch/arm/boot/dts/include/dt-bindings/input/linux-event-codes.h \
+ arch/arm/boot/dts/include/dt-bindings/gpio/gpio.h

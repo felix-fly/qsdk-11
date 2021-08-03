@@ -1,0 +1,1 @@
+cmd_drivers/thermal/qcom/qcom_tsens.o := arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/thermal/qcom/qcom_tsens.o drivers/thermal/qcom/tsens.o drivers/thermal/qcom/tsens-common.o drivers/thermal/qcom/tsens-8960.o drivers/thermal/qcom/tsens-ipq8064.o drivers/thermal/qcom/tsens-ipq807x.o 

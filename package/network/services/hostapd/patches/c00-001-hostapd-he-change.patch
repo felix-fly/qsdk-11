@@ -1,0 +1,139 @@
+From 260a4753916f375dae3fbff0363e20ae763eda37 Mon Sep 17 00:00:00 2001
+From: John Crispin <john@phrozen.org>
+Date: Thu, 25 Apr 2019 21:09:26 +0200
+Subject: [PATCH 09/10] HE: add code to dynamically turn on TWT
+
+This allows us to dynamically turn TWT on and off using a nl80211
+attribute.
+
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ src/ap/beacon.c              | 3 +++
+ src/ap/ieee802_11.h          | 1 +
+ src/ap/ieee802_11_he.c       | 7 +++++++
+ src/common/ieee802_11_defs.h | 2 ++
+ src/drivers/driver.h         | 5 +++++
+ src/drivers/driver_nl80211.c | 8 ++++++++
+ src/drivers/nl80211_copy.h   | 2 ++
+ 7 files changed, 28 insertions(+)
+
+--- a/src/ap/beacon.c
++++ b/src/ap/beacon.c
+@@ -1433,6 +1433,12 @@ int ieee802_11_set_beacon(struct hostapd
+ 	params.proberesp_ies = proberesp;
+ 	params.assocresp_ies = assocresp;
+ 	params.reenable = hapd->reenable_beacon;
++#ifdef CONFIG_IEEE80211AX
++	params.twt_responder = hostapd_get_he_twt_responder(hapd);
++	params.he_spr = !!hapd->iface->conf->spr.sr_control;
++	params.he_spr_srg_obss_pd_min_offset = hapd->iface->conf->spr.srg_obss_pd_min_offset;
++	params.he_spr_srg_obss_pd_max_offset = hapd->iface->conf->spr.srg_obss_pd_max_offset;
++#endif
+ 	hapd->reenable_beacon = 0;
+ 
+ 	if (cmode &&
+--- a/src/ap/ieee802_11.h
++++ b/src/ap/ieee802_11.h
+@@ -95,6 +95,7 @@ u16 set_sta_vht_opmode(struct hostapd_da
+ u16 copy_sta_he_capab(struct hostapd_data *hapd, struct sta_info *sta,
+ 		      enum ieee80211_op_mode opmode, const u8 *he_capab,
+ 		      size_t he_capab_len);
++int hostapd_get_he_twt_responder(struct hostapd_data *hapd);
+ void hostapd_tx_status(struct hostapd_data *hapd, const u8 *addr,
+ 		       const u8 *buf, size_t len, int ack);
+ void hostapd_eapol_tx_status(struct hostapd_data *hapd, const u8 *dst,
+--- a/src/ap/ieee802_11_he.c
++++ b/src/ap/ieee802_11_he.c
+@@ -346,3 +346,10 @@ u16 copy_sta_he_capab(struct hostapd_dat
+ 
+ 	return WLAN_STATUS_SUCCESS;
+ }
++
++int hostapd_get_he_twt_responder(struct hostapd_data *hapd)
++{
++	u8 *mac_cap = hapd->iface->current_mode->he_capab[IEEE80211_MODE_AP].mac_cap;
++
++	return mac_cap[0] & HE_MACCAP_TWT_RESPONDER;
++}
+--- a/src/common/ieee802_11_defs.h
++++ b/src/common/ieee802_11_defs.h
+@@ -2139,6 +2139,8 @@ struct ieee80211_spatial_reuse {
+ 
+ /* HE Capabilities Information defines */
+ 
++#define HE_MACCAP_TWT_RESPONDER			((u8) BIT(3))
++
+ #define HE_PHYCAP_CHANNEL_WIDTH_SET_IDX		0
+ #define HE_PHYCAP_CHANNEL_WIDTH_MASK		((u8) (BIT(1) | BIT(2) | \
+ 						      BIT(3) | BIT(4)))
+--- a/src/drivers/driver.h
++++ b/src/drivers/driver.h
+@@ -1440,6 +1440,27 @@ struct wpa_driver_ap_params {
+ 	 * type 11 as defined in IEEE Std 802.11-2016, 9.4.2.22.13
+ 	 */
+ 	const struct wpabuf *civic;
++
++	/**
++	 * twt_responder - Whether Target Wait Time responder is enabled
++	 */
++	int twt_responder;
++
++	/**
++	 * he_spr - Whether Spatial Reuse is enabled
++	 */
++	 int he_spr;
++
++	/**
++	 * he_spr_srg_obss_pd_min_offset - minimum tx power offset
++	 */
++	 int he_spr_srg_obss_pd_min_offset;
++
++	/**
++	 * he_spr_srg_obss_pd_max_offset - maximum tx power offset
++	 */
++	 int he_spr_srg_obss_pd_max_offset;
++
+ };
+ 
+ struct wpa_driver_mesh_bss_params {
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -4290,6 +4290,27 @@ static int wpa_driver_nl80211_set_ap(voi
+ 		nla_nest_end(msg, ftm);
+ 	}
+ 
++#ifdef CONFIG_IEEE80211AX
++	if (params->twt_responder) {
++		wpa_printf(MSG_DEBUG, "nl80211: twt_responder=%d",
++			   params->twt_responder);
++		if (nla_put_flag(msg, NL80211_ATTR_TWT_RESPONDER))
++			goto fail;
++	}
++
++	if (params->he_spr) {
++		struct nlattr *spr = nla_nest_start(msg, NL80211_ATTR_HE_OBSS_PD);
++		wpa_printf(MSG_DEBUG, "nl80211: he_spr=%d",
++			   params->he_spr);
++
++		if (nla_put_u32(msg, NL80211_ATTR_HE_OBSS_PD_MIN_OFFSET, params->he_spr_srg_obss_pd_min_offset))
++			goto fail;
++		if (nla_put_u32(msg, NL80211_ATTR_HE_OBSS_PD_MAX_OFFSET, params->he_spr_srg_obss_pd_max_offset))
++			goto fail;
++
++		nla_nest_end(msg, spr);
++	}
++#endif
+ 	ret = send_and_recv_msgs(drv, msg, NULL, NULL);
+ 	if (ret) {
+ 		wpa_printf(MSG_DEBUG, "nl80211: Beacon set failed: %d (%s)",
+--- a/src/drivers/nl80211_copy.h
++++ b/src/drivers/nl80211_copy.h
+@@ -2794,6 +2794,8 @@ enum nl80211_attrs {
+ 	NL80211_ATTR_STA_TX_POWER_SETTING,
+ 	NL80211_ATTR_STA_TX_POWER,
+ 
++	NL80211_ATTR_TWT_RESPONDER,
++
+ 	/* add attributes here, update the policy in nl80211.c */
+ 
+ 	__NL80211_ATTR_AFTER_LAST,

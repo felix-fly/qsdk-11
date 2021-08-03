@@ -1,0 +1,13 @@
+kernel/net/802/p8022.ko
+kernel/net/802/psnap.ko
+kernel/net/802/stp.ko
+kernel/net/8021q/vlan_core.ko
+kernel/net/8021q/8021q.ko
+kernel/net/bridge/bridge.ko
+kernel/net/ipv4/tcp_cubic.ko
+kernel/net/ipv6/ipv6.ko
+kernel/net/ipv6/inet6_hashtables.ko
+kernel/net/llc/llc.ko
+kernel/net/packet/af_packet.ko
+kernel/net/sched/sch_fq_codel.ko
+kernel/net/unix/unix.ko

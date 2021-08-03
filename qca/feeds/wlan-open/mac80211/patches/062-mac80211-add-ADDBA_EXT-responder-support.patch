@@ -1,0 +1,230 @@
+From: John Crispin <john@phrozen.org>
+Subject: [PATCH V3 1/2] mac80211: add support for parsing ADDBA_EXT IEs
+
+ADDBA_EXT IEs can be used to negotiate the BA fragmentation level.
+
+Signed-off-by: Shashidhar Lakkavalli <slakkavalli@datto.com>
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ include/linux/ieee80211.h  | 8 ++++++++
+ net/mac80211/ieee80211_i.h | 1 +
+ net/mac80211/util.c        | 7 +++++++
+ 3 files changed, 16 insertions(+)
+
+--- a/include/linux/ieee80211.h
++++ b/include/linux/ieee80211.h
+@@ -881,6 +881,14 @@ struct ieee80211_tpc_report_ie {
+ 	u8 link_margin;
+ } __packed;
+ 
++#define IEEE80211_ADDBA_EXT_FRAG_LEVEL_MASK	GENMASK(2, 1)
++#define IEEE80211_ADDBA_EXT_FRAG_LEVEL_SHIFT	1
++#define IEEE80211_ADDBA_EXT_NO_FRAG		BIT(0)
++
++struct ieee80211_addba_ext_ie {
++	u8 data;
++} __packed;
++
+ struct ieee80211_mgmt {
+ 	__le16 frame_control;
+ 	__le16 duration;
+@@ -973,6 +981,8 @@ struct ieee80211_mgmt {
+ 					__le16 capab;
+ 					__le16 timeout;
+ 					__le16 start_seq_num;
++					/* followed by BA Extension */
++					u8 variable[0];
+ 				} __packed addba_req;
+ 				struct{
+ 					u8 action_code;
+@@ -1719,6 +1729,7 @@ int ieee80211_get_vht_max_nss(struct iee
+ #define IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_LEVEL_2		0x10
+ #define IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_LEVEL_3		0x18
+ #define IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_MASK			0x18
++#define IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_SHIFT		3
+ #define IEEE80211_HE_MAC_CAP0_MAX_NUM_FRAG_MSDU_1		0x00
+ #define IEEE80211_HE_MAC_CAP0_MAX_NUM_FRAG_MSDU_2		0x20
+ #define IEEE80211_HE_MAC_CAP0_MAX_NUM_FRAG_MSDU_4		0x40
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -1507,6 +1507,7 @@ struct ieee802_11_elems {
+ 	u8 max_bssid_indicator;
+ 	u8 dtim_count;
+ 	u8 dtim_period;
++	const struct ieee80211_addba_ext_ie *addba_ext_ie;
+ 
+ 	/* length of them, respectively */
+ 	u8 ext_capab_len;
+@@ -1805,7 +1806,8 @@ void __ieee80211_stop_rx_ba_session(stru
+ void ___ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 				      u8 dialog_token, u16 timeout,
+ 				      u16 start_seq_num, u16 ba_policy, u16 tid,
+-				      u16 buf_size, bool tx, bool auto_seq);
++				      u16 buf_size, bool tx, bool auto_seq,
++				      const struct ieee80211_addba_ext_ie *addbaext);
+ void ieee80211_sta_tear_down_BA_sessions(struct sta_info *sta,
+ 					 enum ieee80211_agg_stop_reason reason);
+ void ieee80211_process_delba(struct ieee80211_sub_if_data *sdata,
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -1200,6 +1200,13 @@ _ieee802_11_parse_elems_crc(const u8 *st
+ 
+ 			elems->cisco_dtpc_elem = pos;
+ 			break;
++		case WLAN_EID_ADDBA_EXT:
++			if (elen != sizeof(struct ieee80211_addba_ext_ie)) {
++				elem_parse_failed = true;
++				break;
++			}
++			elems->addba_ext_ie = (void *)pos;
++			break;
+ 		case WLAN_EID_TIMEOUT_INTERVAL:
+ 			if (elen >= sizeof(struct ieee80211_timeout_interval_ie))
+ 				elems->timeout_int = (void *)pos;
+--- a/net/mac80211/agg-rx.c
++++ b/net/mac80211/agg-rx.c
+@@ -178,17 +178,53 @@ static void sta_rx_agg_reorder_timer_exp
+ 	rcu_read_unlock();
+ }
+ 
+-static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *da, u16 tid,
++static void ieee80211_add_addbaext(struct ieee80211_sub_if_data *sdata,
++				   struct sk_buff *skb,
++				   const struct ieee80211_addba_ext_ie *req)
++{
++	struct ieee80211_supported_band *sband;
++	struct ieee80211_addba_ext_ie *resp;
++	const struct ieee80211_sta_he_cap *he_cap;
++	u8 frag_level, cap_frag_level;
++	u8 *pos;
++
++	sband = ieee80211_get_sband(sdata);
++	he_cap = ieee80211_get_he_iftype_cap(sband, sdata->vif.type);
++	if (!he_cap)
++		return;
++
++	pos = skb_put_zero(skb, 2 + sizeof(struct ieee80211_addba_ext_ie));
++	*pos++ = WLAN_EID_ADDBA_EXT;
++	*pos++ = sizeof(struct ieee80211_addba_ext_ie);
++	resp = (struct ieee80211_addba_ext_ie *)pos;
++	resp->data = req->data & IEEE80211_ADDBA_EXT_NO_FRAG;
++
++	frag_level = (req->data & IEEE80211_ADDBA_EXT_FRAG_LEVEL_MASK) >>
++		     IEEE80211_ADDBA_EXT_FRAG_LEVEL_SHIFT;
++	cap_frag_level = (he_cap->he_cap_elem.mac_cap_info[0] &
++			  IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_MASK) >>
++			 IEEE80211_HE_MAC_CAP0_DYNAMIC_FRAG_SHIFT;
++	if (frag_level > cap_frag_level)
++		frag_level = cap_frag_level;
++	resp->data |= (frag_level << IEEE80211_ADDBA_EXT_FRAG_LEVEL_SHIFT) &
++		      IEEE80211_ADDBA_EXT_FRAG_LEVEL_MASK;
++}
++
++static void ieee80211_send_addba_resp(struct sta_info *sta, u8 *da, u16 tid,
+ 				      u8 dialog_token, u16 status, u16 policy,
+-				      u16 buf_size, u16 timeout)
++				      u16 buf_size, u16 timeout,
++				      const struct ieee80211_addba_ext_ie *addbaext)
+ {
++	struct ieee80211_sub_if_data *sdata = sta->sdata;
+ 	struct ieee80211_local *local = sdata->local;
+ 	struct sk_buff *skb;
+ 	struct ieee80211_mgmt *mgmt;
+ 	bool amsdu = ieee80211_hw_check(&local->hw, SUPPORTS_AMSDU_IN_AMPDU);
+ 	u16 capab;
+ 
+-	skb = dev_alloc_skb(sizeof(*mgmt) + local->hw.extra_tx_headroom);
++	skb = dev_alloc_skb(sizeof(*mgmt) +
++		    (addbaext ? 2 + sizeof(struct ieee80211_addba_ext_ie) : 0) +
++		    local->hw.extra_tx_headroom);
+ 	if (!skb)
+ 		return;
+ 
+@@ -222,13 +258,17 @@ static void ieee80211_send_addba_resp(st
+ 	mgmt->u.action.u.addba_resp.timeout = cpu_to_le16(timeout);
+ 	mgmt->u.action.u.addba_resp.status = cpu_to_le16(status);
+ 
++	if (sta->sta.he_cap.has_he && addbaext)
++		ieee80211_add_addbaext(sdata, skb, addbaext);
++
+ 	ieee80211_tx_skb(sdata, skb);
+ }
+ 
+ void ___ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 				      u8 dialog_token, u16 timeout,
+ 				      u16 start_seq_num, u16 ba_policy, u16 tid,
+-				      u16 buf_size, bool tx, bool auto_seq)
++				      u16 buf_size, bool tx, bool auto_seq,
++				      const struct ieee80211_addba_ext_ie *addbaext)
+ {
+ 	struct ieee80211_local *local = sta->sdata->local;
+ 	struct tid_ampdu_rx *tid_agg_rx;
+@@ -410,21 +450,22 @@ end:
+ 	}
+ 
+ 	if (tx)
+-		ieee80211_send_addba_resp(sta->sdata, sta->sta.addr, tid,
++		ieee80211_send_addba_resp(sta, sta->sta.addr, tid,
+ 					  dialog_token, status, 1, buf_size,
+-					  timeout);
++					  timeout, addbaext);
+ }
+ 
+ static void __ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 					    u8 dialog_token, u16 timeout,
+ 					    u16 start_seq_num, u16 ba_policy,
+ 					    u16 tid, u16 buf_size, bool tx,
+-					    bool auto_seq)
++					    bool auto_seq,
++					    const struct ieee80211_addba_ext_ie *addbaext)
+ {
+ 	mutex_lock(&sta->ampdu_mlme.mtx);
+ 	___ieee80211_start_rx_ba_session(sta, dialog_token, timeout,
+ 					 start_seq_num, ba_policy, tid,
+-					 buf_size, tx, auto_seq);
++					 buf_size, tx, auto_seq, addbaext);
+ 	mutex_unlock(&sta->ampdu_mlme.mtx);
+ }
+ 
+@@ -434,7 +475,9 @@ void ieee80211_process_addba_request(str
+ 				     size_t len)
+ {
+ 	u16 capab, tid, timeout, ba_policy, buf_size, start_seq_num;
++	struct ieee802_11_elems elems = { 0 };
+ 	u8 dialog_token;
++	int ies_len;
+ 
+ 	/* extract session parameters from addba request frame */
+ 	dialog_token = mgmt->u.action.u.addba_req.dialog_token;
+@@ -447,9 +490,19 @@ void ieee80211_process_addba_request(str
+ 	tid = (capab & IEEE80211_ADDBA_PARAM_TID_MASK) >> 2;
+ 	buf_size = (capab & IEEE80211_ADDBA_PARAM_BUF_SIZE_MASK) >> 6;
+ 
++	ies_len = len - offsetof(struct ieee80211_mgmt,
++				 u.action.u.addba_req.variable);
++	if (ies_len) {
++		ieee802_11_parse_elems(mgmt->u.action.u.addba_req.variable,
++                                ies_len, true, &elems, mgmt->bssid, NULL);
++		if (elems.parse_error)
++			return;
++	}
++
+ 	__ieee80211_start_rx_ba_session(sta, dialog_token, timeout,
+ 					start_seq_num, ba_policy, tid,
+-					buf_size, true, false);
++					buf_size, true, false,
++					elems.addba_ext_ie);
+ }
+ 
+ void ieee80211_manage_rx_ba_offl(struct ieee80211_vif *vif,
+--- a/net/mac80211/ht.c
++++ b/net/mac80211/ht.c
+@@ -359,7 +359,7 @@ void ieee80211_ba_session_work(struct wo
+ 				       sta->ampdu_mlme.tid_rx_manage_offl))
+ 			___ieee80211_start_rx_ba_session(sta, 0, 0, 0, 1, tid,
+ 							 IEEE80211_MAX_AMPDU_BUF_HT,
+-							 false, true);
++							 false, true, NULL);
+ 
+ 		if (test_and_clear_bit(tid + IEEE80211_NUM_TIDS,
+ 				       sta->ampdu_mlme.tid_rx_manage_offl))

@@ -1,0 +1,71 @@
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -2404,6 +2404,40 @@ static int ath11k_station_disassoc(struc
+ 	return 0;
+ }
+ 
++static int ath11k_mac_op_sta_set_txpwr(struct ieee80211_hw *hw,
++				struct ieee80211_vif *vif,
++				struct ieee80211_sta *sta)
++{
++	struct ath11k *ar = hw->priv;
++	struct ath11k_vif *arvif = (void *)vif->drv_priv;
++	int ret = 0;
++	s16 txpwr;
++
++	if (sta->txpwr.type == NL80211_TX_POWER_AUTOMATIC) {
++		txpwr = 0;
++	} else {
++		txpwr = sta->txpwr.power;
++		if (!txpwr)
++			return -EINVAL;
++	}
++
++	if (txpwr > ATH11K_TX_POWER_MAX_VAL || txpwr < ATH11K_TX_POWER_MIN_VAL)
++		return -EINVAL;
++
++	mutex_lock(&ar->conf_mutex);
++
++	ret = ath11k_wmi_set_peer_param(ar, sta->addr, arvif->vdev_id,
++					WMI_PEER_USE_FIXED_PWR, txpwr);
++	if (ret) {
++		ath11k_warn(ar->ab, "failed to set tx power for station ret: %d\n",
++			    ret);
++		goto out;
++	}
++out:
++	mutex_unlock(&ar->conf_mutex);
++	return ret;
++}
++
+ static void ath11k_sta_rc_update_wk(struct work_struct *wk)
+ {
+ 	struct ath11k *ar;
+@@ -5026,6 +5060,7 @@ static const struct ieee80211_ops ath11k
+ 	.hw_scan                        = ath11k_mac_op_hw_scan,
+ 	.cancel_hw_scan                 = ath11k_mac_op_cancel_hw_scan,
+ 	.set_key                        = ath11k_mac_op_set_key,
++	.sta_set_txpwr                  = ath11k_mac_op_sta_set_txpwr,
+ 	.sta_state                      = ath11k_mac_op_sta_state,
+ 	.sta_rc_update			= ath11k_mac_op_sta_rc_update,
+ 	.conf_tx                        = ath11k_mac_op_conf_tx,
+@@ -5286,6 +5321,7 @@ static int ath11k_mac_register(struct at
+ 	ar->hw->wiphy->n_iface_combinations = ARRAY_SIZE(ath11k_if_comb);
+ 
+ 	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
++	wiphy_ext_feature_set(ar->hw->wiphy, NL80211_EXT_FEATURE_STA_TX_PWR);
+ 
+ 	ar->hw->wiphy->cipher_suites = cipher_suites;
+ 	ar->hw->wiphy->n_cipher_suites = ARRAY_SIZE(cipher_suites);
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -35,6 +35,9 @@
+ /* Pending management packets threshold for dropping probe responses */
+ #define ATH11K_PRB_RSP_DROP_THRESHOLD ((ATH11K_TX_MGMT_TARGET_MAX_SUPPORT_WMI * 3) / 4)
+ 
++#define ATH11K_TX_POWER_MAX_VAL	70
++#define ATH11K_TX_POWER_MIN_VAL	0
++
+ #define ATH11K_INVALID_HW_MAC_ID	0xFF
+ 
+ enum ath11k_supported_bw {

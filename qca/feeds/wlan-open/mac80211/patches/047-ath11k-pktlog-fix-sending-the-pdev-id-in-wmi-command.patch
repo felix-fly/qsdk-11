@@ -1,0 +1,64 @@
+--- a/drivers/net/wireless/ath/ath11k/debug.h
++++ b/drivers/net/wireless/ath/ath11k/debug.h
+@@ -71,8 +71,6 @@ struct debug_htt_stats_req {
+ 
+ #define ATH11K_FW_STATS_BUF_SIZE (1024 * 1024)
+ 
+-#define ATH11K_HTT_PKTLOG_MAX_SIZE 2048
+-
+ enum ath11k_pktlog_filter {
+ 	ATH11K_PKTLOG_RX		= 0x000000001,
+ 	ATH11K_PKTLOG_TX		= 0x000000002,
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1268,17 +1268,13 @@ static void ath11k_htt_pktlog(struct ath
+ 
+ 	len = FIELD_GET(HTT_T2H_PPDU_STATS_INFO_PAYLOAD_SIZE, data->hdr);
+ 
+-	if (len > ATH11K_HTT_PKTLOG_MAX_SIZE) {
+-		ath11k_warn(ab, "htt pktlog buffer size %d, expected < %d\n",
+-			    len,
+-			    ATH11K_HTT_PKTLOG_MAX_SIZE);
++	pdev_id = FIELD_GET(HTT_T2H_PPDU_STATS_INFO_PDEV_ID, data->hdr);
++	ar = ath11k_mac_get_ar_by_pdev_id(ab, pdev_id);
++	if (!ar) {
++		ath11k_warn(ab, "invalid pdev id %d on htt pktlog\n", pdev_id);
+ 		return;
+ 	}
+ 
+-	pdev_id = FIELD_GET(HTT_T2H_PPDU_STATS_INFO_PDEV_ID, data->hdr);
+-	pdev_id = DP_HW2SW_MACID(pdev_id);
+-	ar = ab->pdevs[pdev_id].ar;
+-
+ 	trace_ath11k_htt_pktlog(ar, data->payload, len);
+ 	ath11k_htt_pktlog_process(ar, (u8 *)data->payload);
+ }
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -2468,7 +2468,7 @@ int ath11k_wmi_pdev_peer_pktlog_filter(s
+ 	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PEER_PKTLOG_FILTER_CMD) |
+ 			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
+ 
+-	cmd->pdev_id = ar->pdev->pdev_id;
++	cmd->pdev_id = DP_HW2SW_MACID(ar->pdev->pdev_id);
+ 	cmd->num_mac = 1;
+ 	cmd->enable = enable;
+ 
+@@ -2630,7 +2630,7 @@ int ath11k_wmi_pdev_pktlog_enable(struct
+ 	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PKTLOG_ENABLE_CMD) |
+ 			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
+ 
+-	cmd->pdev_id = ar->pdev->pdev_id;
++	cmd->pdev_id = DP_HW2SW_MACID(ar->pdev->pdev_id);
+ 	cmd->evlist = pktlog_filter;
+ 	cmd->enable = ATH11K_WMI_PKTLOG_ENABLE_FORCE;
+ 
+@@ -2660,7 +2660,7 @@ int ath11k_wmi_pdev_pktlog_disable(struc
+ 	cmd->tlv_header = FIELD_PREP(WMI_TLV_TAG, WMI_TAG_PDEV_PKTLOG_DISABLE_CMD) |
+ 			  FIELD_PREP(WMI_TLV_LEN, sizeof(*cmd) - TLV_HDR_SIZE);
+ 
+-	cmd->pdev_id = ar->pdev->pdev_id;
++	cmd->pdev_id = DP_HW2SW_MACID(ar->pdev->pdev_id);
+ 
+ 	ret = ath11k_wmi_cmd_send(wmi, skb,
+ 				  WMI_PDEV_PKTLOG_DISABLE_CMDID);

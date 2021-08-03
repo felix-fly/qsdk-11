@@ -1,0 +1,1 @@
+cmd_drivers/usb/dwc3/dwc3-qcom.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/dwc3/dwc3-qcom.ko drivers/usb/dwc3/dwc3-qcom.o drivers/usb/dwc3/dwc3-qcom.mod.o

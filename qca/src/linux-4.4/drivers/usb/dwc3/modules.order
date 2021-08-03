@@ -1,0 +1,3 @@
+kernel/drivers/usb/dwc3/dwc3.ko
+kernel/drivers/usb/dwc3/dwc3-qcom.ko
+kernel/drivers/usb/dwc3/dbm.ko

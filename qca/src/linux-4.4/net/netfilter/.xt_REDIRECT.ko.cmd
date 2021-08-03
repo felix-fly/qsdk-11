@@ -1,0 +1,1 @@
+cmd_net/netfilter/xt_REDIRECT.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o net/netfilter/xt_REDIRECT.ko net/netfilter/xt_REDIRECT.o net/netfilter/xt_REDIRECT.mod.o

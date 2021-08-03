@@ -1,0 +1,1 @@
+cmd_drivers/ata/ahci_platform.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/ata/ahci_platform.ko drivers/ata/ahci_platform.o drivers/ata/ahci_platform.mod.o

@@ -1,0 +1,183 @@
+--- a/drivers/net/wireless/ath/ath11k/ahb.c
++++ b/drivers/net/wireless/ath/ath11k/ahb.c
+@@ -669,7 +669,6 @@ int ath11k_ahb_power_up(struct ath11k_ba
+ 	subsys_info->subsys_handle = subsystem_get(subsys_info->subsys_desc.name);
+ 	ret = 0;
+ #else
+-	sc->tgt_rproc->recovery_disabled = true;
+ 	ret = rproc_boot(sc->tgt_rproc);
+ 	if (ret)
+ 		ath11k_err(sc, "failed to boot the remote processor Q6\n");
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -540,6 +540,45 @@ err_firmware_stop:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_QCOM_QMI_HELPERS
++
++void ath11k_core_dump_bp_stats(struct ath11k_base *ab)
++{
++	int len = 0;
++	const int size = 4096;
++	char *buf;
++
++	buf = kzalloc(size, GFP_KERNEL);
++	if (!buf)
++		return;
++
++	len = ath11k_fill_bp_stats_buf(ab, buf, len, size - 1);
++
++	buf[len] = '\0';
++
++	ath11k_info(ab, "ATH11K Driver Stats\n%s\n", buf);
++
++	kfree(buf);
++}
++
++/* Print the driver stats and crash the system on receving this notification */
++int ath11k_core_ssr_notifier_cb(struct notifier_block *nb, unsigned long event,
++				void *data)
++{
++	struct ath11k_qmi *qmi = container_of(nb, struct ath11k_qmi, ssr_nb);
++
++	/* TODO: currently wcss uses "rproc" as its name, but since this might be
++	 * changed to correspondig name, the name is not compared now. Print the stats
++	 * only if the notification is received for the expected rproc */
++
++	ath11k_core_dump_bp_stats(qmi->ab);
++	/* TODO Add more driver stats */
++
++	/* Crash the system once all the stats are dumped */
++	BUG_ON(1);
++}
++#endif
++
+ int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
+ {
+ 	int ret;
+@@ -585,6 +624,15 @@ int ath11k_core_qmi_firmware_ready(struc
+ 		ath11k_err(ab, "failed to create pdev core: %d\n", ret);
+ 		goto err_core_stop;
+ 	}
++
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	/* Register a notifier after mac registration
++	 * to be called on fw crash
++	 */
++	ab->qmi.ssr_nb.notifier_call = ath11k_core_ssr_notifier_cb;
++	qcom_register_ssr_notifier(&ab->qmi.ssr_nb);
++#endif
++
+ 	ath11k_ahb_ext_irq_enable(ab);
+ 	mutex_unlock(&ab->core_lock);
+ 
+@@ -771,6 +819,12 @@ void ath11k_core_deinit(struct ath11k_ba
+ {
+ 	mutex_lock(&sc->core_lock);
+ 
++#ifdef CONFIG_QCOM_QMI_HELPERS
++	/* Unregister the ssr notifier as we are not intersted
++	 * in receving these notifications after mac is unregistered.
++	 */
++	qcom_unregister_ssr_notifier(&sc->qmi.ssr_nb);
++#endif
+ 	ath11k_core_pdev_destroy(sc);
+ 	ath11k_core_stop(sc);
+ 
+--- a/drivers/net/wireless/ath/ath11k/debug.c
++++ b/drivers/net/wireless/ath/ath11k/debug.c
+@@ -852,21 +852,12 @@ static int ath11k_fill_bp_stats(struct a
+ 	return len;
+ }
+ 
+-static ssize_t ath11k_debug_dump_soc_ring_stats(struct file *file,
+-					      char __user *user_buf,
+-					      size_t count, loff_t *ppos)
++int ath11k_fill_bp_stats_buf(struct ath11k_base *ab,
++			     char *buf, int len, int size)
+ {
+-	struct ath11k_base *ab = file->private_data;
+ 	struct ath11k_bp_stats *bp_stats;
+-	int len = 0, retval;
+-	u8 i, pdev_idx;
+-	const int size = 4096;
+ 	bool stats_rxd = false;
+-	char *buf;
+-
+-	buf = kzalloc(size, GFP_KERNEL);
+-	if (!buf)
+-		return -ENOMEM;
++	u8 i, pdev_idx;
+ 
+ 	len += scnprintf(buf + len, size - len, "\nRing Stats\n==========\n");
+ 	len += scnprintf(buf + len, size - len, "Backpressure Stats\n");
+@@ -908,6 +899,24 @@ static ssize_t ath11k_debug_dump_soc_rin
+ 	if (len > size)
+ 		len = size;
+ 
++	return len;
++}
++
++static ssize_t ath11k_debug_dump_soc_ring_stats(struct file *file,
++					      char __user *user_buf,
++					      size_t count, loff_t *ppos)
++{
++	struct ath11k_base *ab = file->private_data;
++	int len = 0, retval;
++	const int size = 4096;
++	char *buf;
++
++	buf = kzalloc(size, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	len = ath11k_fill_bp_stats_buf(ab, buf, len, size);
++
+ 	retval = simple_read_from_buffer(user_buf, count, ppos, buf, len);
+ 	kfree(buf);
+ 
+--- a/drivers/net/wireless/ath/ath11k/debug.h
++++ b/drivers/net/wireless/ath/ath11k/debug.h
+@@ -143,6 +143,8 @@ void ath11k_debug_fw_stats_process(struc
+ 
+ void ath11k_debug_fw_stats_init(struct ath11k *ar);
+ int ath11k_dbg_htt_stats_req(struct ath11k *ar);
++int ath11k_fill_bp_stats_buf(struct ath11k_base *ab,
++			     char *buf, int len, int size);
+ 
+ static inline bool ath11k_debug_is_pktlog_lite_mode_enabled(struct ath11k *ar)
+ {
+@@ -231,6 +233,12 @@ static inline bool ath11k_debug_is_pktlo
+ {
+ 	return false;
+ }
++
++int ath11k_fill_bp_stats_buf(struct ath11k_base *ab,
++			     char *buf, int len, int size)
++{
++	return 0;
++}
+ #endif /* CPTCFG_ATH11K_DEBUGFS */
+ 
+ #ifdef CPTCFG_MAC80211_DEBUGFS
+--- a/drivers/net/wireless/ath/ath11k/qmi.h
++++ b/drivers/net/wireless/ath/ath11k/qmi.h
+@@ -8,7 +8,9 @@
+ 
+ #ifdef CONFIG_QCOM_QMI_HELPERS
+ #include <linux/mutex.h>
++#include <linux/notifier.h>
+ #include <linux/soc/qcom/qmi.h>
++#include <linux/remoteproc/qcom_rproc.h>
+ #else
+ #include <linux/qmi_encdec.h>
+ #include <soc/qcom/msm_qmi_interface.h>
+@@ -115,6 +117,7 @@ struct ath11k_qmi {
+ 	struct workqueue_struct *event_wq;
+ 	struct list_head event_list;
+ 	spinlock_t event_lock; /* spinlock for qmi event list */
++	struct notifier_block ssr_nb;
+ #else
+ 	struct ath11k_base *sc;
+ 	struct notifier_block qmi_service_nb;

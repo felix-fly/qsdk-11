@@ -1,0 +1,4 @@
+kernel/drivers/dma/virt-dma.ko
+kernel/drivers/dma/qcom_adm.ko
+kernel/drivers/dma/qcom_adm.ko
+kernel/drivers/dma/qcom/bam_dma.ko

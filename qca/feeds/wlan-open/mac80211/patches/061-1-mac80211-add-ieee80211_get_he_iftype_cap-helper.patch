@@ -1,0 +1,57 @@
+From: John Crispin <john@phrozen.org>
+Subject: [PATCH 1/2] mac80211: add ieee80211_get_he_iftype_cap() helper
+
+This function is similar to ieee80211_get_he_sta_cap() but allows passing
+the iftype. Also make ieee80211_get_he_sta_cap() use the new helper
+rather than duplicating the code.
+
+Signed-off-by: Shashidhar Lakkavalli <slakkavalli@datto.com>
+Signed-off-by: John Crispin <john@phrozen.org>
+---
+ include/net/cfg80211.h | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -379,16 +379,18 @@ ieee80211_get_sband_iftype_data(const st
+ }
+ 
+ /**
+- * ieee80211_get_he_sta_cap - return HE capabilities for an sband's STA
+- * @sband: the sband to search for the STA on
++ * ieee80211_get_he_iftype_cap - return HE capabilities for an sband's iftype
++ * @sband: the sband to search for the iftype on
++ * @iftype: enum nl80211_iftype
+  *
+  * Return: pointer to the struct ieee80211_sta_he_cap, or NULL is none found
+  */
+ static inline const struct ieee80211_sta_he_cap *
+-ieee80211_get_he_sta_cap(const struct ieee80211_supported_band *sband)
++ieee80211_get_he_iftype_cap(const struct ieee80211_supported_band *sband,
++			    u8 iftype)
+ {
+ 	const struct ieee80211_sband_iftype_data *data =
+-		ieee80211_get_sband_iftype_data(sband, NL80211_IFTYPE_STATION);
++		ieee80211_get_sband_iftype_data(sband, iftype);
+ 
+ 	if (data && data->he_cap.has_he)
+ 		return &data->he_cap;
+@@ -397,6 +399,18 @@ ieee80211_get_he_sta_cap(const struct ie
+ }
+ 
+ /**
++ * ieee80211_get_he_sta_cap - return HE capabilities for an sband's STA
++ * @sband: the sband to search for the STA on
++ *
++ * Return: pointer to the struct ieee80211_sta_he_cap, or NULL is none found
++ */
++static inline const struct ieee80211_sta_he_cap *
++ieee80211_get_he_sta_cap(const struct ieee80211_supported_band *sband)
++{
++	return ieee80211_get_he_iftype_cap(sband, NL80211_IFTYPE_STATION);
++}
++
++/**
+  * wiphy_read_of_freq_limits - read frequency limits from device tree
+  *
+  * @wiphy: the wireless device to get extra limits for

@@ -1,0 +1,1 @@
+cmd_net/ipv6/netfilter/ip6table_raw.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o net/ipv6/netfilter/ip6table_raw.ko net/ipv6/netfilter/ip6table_raw.o net/ipv6/netfilter/ip6table_raw.mod.o

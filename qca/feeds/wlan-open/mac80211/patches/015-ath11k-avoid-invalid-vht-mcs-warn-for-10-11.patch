@@ -1,0 +1,20 @@
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1939,12 +1939,16 @@ static void ath11k_dp_rx_h_rate(struct a
+ 	case RX_MSDU_START_PKT_TYPE_11AC:
+ 		rx_status->encoding = RX_ENC_VHT;
+ 		rx_status->rate_idx = rate_mcs;
+-		if (rate_mcs > ATH11K_VHT_MCS_MAX) {
++		if (rate_mcs > ATH11K_HE_MCS_MAX) {
+ 			ath11k_warn(ar->ab,
+ 				    "Received with invalid mcs in VHT mode %d\n",
+ 				     rate_mcs);
+ 			break;
+ 		}
++
++		if (rate_mcs > ATH11K_VHT_MCS_MAX)
++			rx_status->rate_idx = ATH11K_VHT_MCS_MAX;
++
+ 		rx_status->nss = nss;
+ 		if (sgi)
+ 			rx_status->enc_flags |= RX_ENC_FLAG_SHORT_GI;

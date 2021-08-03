@@ -1,0 +1,40 @@
+--- a/backport-include/linux/skbuff.h
++++ b/backport-include/linux/skbuff.h
+@@ -357,7 +357,7 @@ static inline void *backport___skb_push(
+ }
+ #define __skb_push LINUX_BACKPORT(__skb_push)
+ 
+-static inline void *skb_put_zero(struct sk_buff *skb, unsigned int len)
++static inline void *backport_skb_put_zero(struct sk_buff *skb, unsigned int len)
+ {
+ 	void *tmp = skb_put(skb, len);
+ 
+@@ -365,9 +365,10 @@ static inline void *skb_put_zero(struct
+ 
+ 	return tmp;
+ }
++#define skb_put_zero LINUX_BACKPORT(skb_put_zero)
+ 
+-static inline void *skb_put_data(struct sk_buff *skb, const void *data,
+-				 unsigned int len)
++static inline void *backport_skb_put_data(struct sk_buff *skb, const void *data,
++					  unsigned int len)
+ {
+ 	void *tmp = skb_put(skb, len);
+ 
+@@ -375,11 +376,14 @@ static inline void *skb_put_data(struct
+ 
+ 	return tmp;
+ }
++#define skb_put_data LINUX_BACKPORT(skb_put_data)
+ 
+-static inline void skb_put_u8(struct sk_buff *skb, u8 val)
++static inline void backport_skb_put_u8(struct sk_buff *skb, u8 val)
+ {
+ 	*(u8 *)skb_put(skb, 1) = val;
+ }
++#define skb_put_u8 LINUX_BACKPORT(skb_put_u8)
++
+ #endif
+ 
+ #if LINUX_VERSION_IS_LESS(4,20,0)

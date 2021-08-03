@@ -1,0 +1,1 @@
+cmd_drivers/clk/qcom/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/clk/qcom/built-in.o drivers/clk/qcom/clk-qcom.o drivers/clk/qcom/gcc-ipq6018.o drivers/clk/qcom/apss-ipq6018.o drivers/clk/qcom/kpss-xcc.o drivers/clk/qcom/clk-rpm.o 

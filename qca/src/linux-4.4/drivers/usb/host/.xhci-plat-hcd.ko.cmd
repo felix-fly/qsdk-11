@@ -1,0 +1,1 @@
+cmd_drivers/usb/host/xhci-plat-hcd.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/host/xhci-plat-hcd.ko drivers/usb/host/xhci-plat-hcd.o drivers/usb/host/xhci-plat-hcd.mod.o

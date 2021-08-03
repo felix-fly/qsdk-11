@@ -1,0 +1,15 @@
+Index: backports-20190626-4.4.60-4c6476d00657/drivers/net/wireless/ath/ath11k/dp.c
+===================================================================
+--- backports-20190626-4.4.60-4c6476d00657.orig/drivers/net/wireless/ath/ath11k/dp.c	2019-08-06 19:46:20.695700456 +0530
++++ backports-20190626-4.4.60-4c6476d00657/drivers/net/wireless/ath/ath11k/dp.c	2019-08-06 19:55:19.478652575 +0530
+@@ -480,6 +480,10 @@
+ 	*n_link_desc = n_mpdu_link_desc + n_mpdu_queue_desc +
+ 		      n_tx_msdu_link_desc + n_rx_msdu_link_desc;
+ 
++
++	if (*n_link_desc & (*n_link_desc - 1))
++		*n_link_desc = 1 << fls(*n_link_desc);
++
+ 	ret = ath11k_dp_srng_setup(ab, &dp->wbm_idle_ring,
+ 				   HAL_WBM_IDLE_LINK, 0, 0, *n_link_desc);
+ 	if (ret) {

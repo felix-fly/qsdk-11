@@ -1,0 +1,440 @@
+# 1 "arch/arm/boot/dts/qcom-apq8084-mtp.dts"
+# 1 "<command-line>"
+# 1 "arch/arm/boot/dts/qcom-apq8084-mtp.dts"
+# 1 "arch/arm/boot/dts/qcom-apq8084.dtsi" 1
+/dts-v1/;
+
+# 1 "arch/arm/boot/dts/skeleton.dtsi" 1
+
+
+
+
+
+
+/ {
+ #address-cells = <1>;
+ #size-cells = <1>;
+ chosen { };
+ aliases { };
+ memory { device_type = "memory"; reg = <0 0>; };
+};
+# 4 "arch/arm/boot/dts/qcom-apq8084.dtsi" 2
+
+# 1 "./arch/arm/boot/dts/include/dt-bindings/clock/qcom,gcc-apq8084.h" 1
+# 6 "arch/arm/boot/dts/qcom-apq8084.dtsi" 2
+# 1 "./arch/arm/boot/dts/include/dt-bindings/gpio/gpio.h" 1
+# 7 "arch/arm/boot/dts/qcom-apq8084.dtsi" 2
+
+/ {
+ model = "Qualcomm APQ 8084";
+ compatible = "qcom,apq8084";
+ interrupt-parent = <&intc>;
+
+ cpus {
+  #address-cells = <1>;
+  #size-cells = <0>;
+
+  cpu@0 {
+   device_type = "cpu";
+   compatible = "qcom,krait";
+   reg = <0>;
+   enable-method = "qcom,kpss-acc-v2";
+   next-level-cache = <&L2>;
+   qcom,acc = <&acc0>;
+   qcom,saw = <&saw0>;
+   cpu-idle-states = <&CPU_SPC>;
+  };
+
+  cpu@1 {
+   device_type = "cpu";
+   compatible = "qcom,krait";
+   reg = <1>;
+   enable-method = "qcom,kpss-acc-v2";
+   next-level-cache = <&L2>;
+   qcom,acc = <&acc1>;
+   qcom,saw = <&saw1>;
+   cpu-idle-states = <&CPU_SPC>;
+  };
+
+  cpu@2 {
+   device_type = "cpu";
+   compatible = "qcom,krait";
+   reg = <2>;
+   enable-method = "qcom,kpss-acc-v2";
+   next-level-cache = <&L2>;
+   qcom,acc = <&acc2>;
+   qcom,saw = <&saw2>;
+   cpu-idle-states = <&CPU_SPC>;
+  };
+
+  cpu@3 {
+   device_type = "cpu";
+   compatible = "qcom,krait";
+   reg = <3>;
+   enable-method = "qcom,kpss-acc-v2";
+   next-level-cache = <&L2>;
+   qcom,acc = <&acc3>;
+   qcom,saw = <&saw3>;
+   cpu-idle-states = <&CPU_SPC>;
+  };
+
+  L2: l2-cache {
+   compatible = "qcom,arch-cache";
+   cache-level = <2>;
+   qcom,saw = <&saw_l2>;
+  };
+
+  idle-states {
+   CPU_SPC: spc {
+    compatible = "qcom,idle-state-spc",
+      "arm,idle-state";
+    entry-latency-us = <150>;
+    exit-latency-us = <200>;
+    min-residency-us = <2000>;
+   };
+  };
+ };
+
+ cpu-pmu {
+  compatible = "qcom,krait-pmu";
+  interrupts = <1 7 0xf04>;
+ };
+
+ timer {
+  compatible = "arm,armv7-timer";
+  interrupts = <1 2 0xf08>,
+        <1 3 0xf08>,
+        <1 4 0xf08>,
+        <1 1 0xf08>;
+  clock-frequency = <19200000>;
+ };
+
+ soc: soc {
+  #address-cells = <1>;
+  #size-cells = <1>;
+  ranges;
+  compatible = "simple-bus";
+
+  intc: interrupt-controller@f9000000 {
+   compatible = "qcom,msm-qgic2";
+   interrupt-controller;
+   #interrupt-cells = <3>;
+   reg = <0xf9000000 0x1000>,
+         <0xf9002000 0x1000>;
+  };
+
+  timer@f9020000 {
+   #address-cells = <1>;
+   #size-cells = <1>;
+   ranges;
+   compatible = "arm,armv7-timer-mem";
+   reg = <0xf9020000 0x1000>;
+   clock-frequency = <19200000>;
+
+   frame@f9021000 {
+    frame-number = <0>;
+    interrupts = <0 8 0x4>,
+          <0 7 0x4>;
+    reg = <0xf9021000 0x1000>,
+          <0xf9022000 0x1000>;
+   };
+
+   frame@f9023000 {
+    frame-number = <1>;
+    interrupts = <0 9 0x4>;
+    reg = <0xf9023000 0x1000>;
+    status = "disabled";
+   };
+
+   frame@f9024000 {
+    frame-number = <2>;
+    interrupts = <0 10 0x4>;
+    reg = <0xf9024000 0x1000>;
+    status = "disabled";
+   };
+
+   frame@f9025000 {
+    frame-number = <3>;
+    interrupts = <0 11 0x4>;
+    reg = <0xf9025000 0x1000>;
+    status = "disabled";
+   };
+
+   frame@f9026000 {
+    frame-number = <4>;
+    interrupts = <0 12 0x4>;
+    reg = <0xf9026000 0x1000>;
+    status = "disabled";
+   };
+
+   frame@f9027000 {
+    frame-number = <5>;
+    interrupts = <0 13 0x4>;
+    reg = <0xf9027000 0x1000>;
+    status = "disabled";
+   };
+
+   frame@f9028000 {
+    frame-number = <6>;
+    interrupts = <0 14 0x4>;
+    reg = <0xf9028000 0x1000>;
+    status = "disabled";
+   };
+  };
+
+  saw0: power-controller@f9089000 {
+   compatible = "qcom,apq8084-saw2-v2.1-cpu", "qcom,saw2";
+   reg = <0xf9089000 0x1000>, <0xf9009000 0x1000>;
+  };
+
+  saw1: power-controller@f9099000 {
+   compatible = "qcom,apq8084-saw2-v2.1-cpu", "qcom,saw2";
+   reg = <0xf9099000 0x1000>, <0xf9009000 0x1000>;
+  };
+
+  saw2: power-controller@f90a9000 {
+   compatible = "qcom,apq8084-saw2-v2.1-cpu", "qcom,saw2";
+   reg = <0xf90a9000 0x1000>, <0xf9009000 0x1000>;
+  };
+
+  saw3: power-controller@f90b9000 {
+   compatible = "qcom,apq8084-saw2-v2.1-cpu", "qcom,saw2";
+   reg = <0xf90b9000 0x1000>, <0xf9009000 0x1000>;
+  };
+
+  saw_l2: power-controller@f9012000 {
+   compatible = "qcom,saw2";
+   reg = <0xf9012000 0x1000>;
+   regulator;
+  };
+
+  acc0: clock-controller@f9088000 {
+   compatible = "qcom,kpss-acc-v2";
+   reg = <0xf9088000 0x1000>,
+         <0xf9008000 0x1000>;
+  };
+
+  acc1: clock-controller@f9098000 {
+   compatible = "qcom,kpss-acc-v2";
+   reg = <0xf9098000 0x1000>,
+         <0xf9008000 0x1000>;
+  };
+
+  acc2: clock-controller@f90a8000 {
+   compatible = "qcom,kpss-acc-v2";
+   reg = <0xf90a8000 0x1000>,
+         <0xf9008000 0x1000>;
+  };
+
+  acc3: clock-controller@f90b8000 {
+   compatible = "qcom,kpss-acc-v2";
+   reg = <0xf90b8000 0x1000>,
+         <0xf9008000 0x1000>;
+  };
+
+  restart@fc4ab000 {
+   compatible = "qcom,pshold";
+   reg = <0xfc4ab000 0x4>;
+  };
+
+  gcc: clock-controller@fc400000 {
+   compatible = "qcom,gcc-apq8084";
+   #clock-cells = <1>;
+   #reset-cells = <1>;
+   #power-domain-cells = <1>;
+   reg = <0xfc400000 0x4000>;
+  };
+
+  tlmm: pinctrl@fd510000 {
+   compatible = "qcom,apq8084-pinctrl";
+   reg = <0xfd510000 0x4000>;
+   gpio-controller;
+   #gpio-cells = <2>;
+   interrupt-controller;
+   #interrupt-cells = <2>;
+   interrupts = <0 208 0>;
+  };
+
+  blsp2_uart2: serial@f995e000 {
+   compatible = "qcom,msm-uartdm-v1.4", "qcom,msm-uartdm";
+   reg = <0xf995e000 0x1000>;
+   interrupts = <0 114 0x0>;
+   clocks = <&gcc 142>, <&gcc 126>;
+   clock-names = "core", "iface";
+   status = "disabled";
+  };
+
+  sdhci@f9824900 {
+   compatible = "qcom,sdhci-msm-v4";
+   reg = <0xf9824900 0x11c>, <0xf9824000 0x800>;
+   reg-names = "hc_mem", "core_mem";
+   interrupts = <0 123 0>, <0 138 0>;
+   interrupt-names = "hc_irq", "pwr_irq";
+   clocks = <&gcc 248>, <&gcc 247>;
+   clock-names = "core", "iface";
+   status = "disabled";
+  };
+
+  sdhci@f98a4900 {
+   compatible = "qcom,sdhci-msm-v4";
+   reg = <0xf98a4900 0x11c>, <0xf98a4000 0x800>;
+   reg-names = "hc_mem", "core_mem";
+   interrupts = <0 125 0>, <0 221 0>;
+   interrupt-names = "hc_irq", "pwr_irq";
+   clocks = <&gcc 252>, <&gcc 251>;
+   clock-names = "core", "iface";
+   status = "disabled";
+  };
+
+  spmi_bus: spmi@fc4cf000 {
+   compatible = "qcom,spmi-pmic-arb";
+   reg-names = "core", "intr", "cnfg";
+   reg = <0xfc4cf000 0x1000>,
+         <0xfc4cb000 0x1000>,
+         <0xfc4ca000 0x1000>;
+   interrupt-names = "periph_irq";
+   interrupts = <0 190 0>;
+   qcom,ee = <0>;
+   qcom,channel = <0>;
+   #address-cells = <2>;
+   #size-cells = <0>;
+   interrupt-controller;
+   #interrupt-cells = <4>;
+  };
+ };
+};
+# 2 "arch/arm/boot/dts/qcom-apq8084-mtp.dts" 2
+# 1 "arch/arm/boot/dts/qcom-pma8084.dtsi" 1
+# 1 "./arch/arm/boot/dts/include/dt-bindings/iio/qcom,spmi-vadc.h" 1
+# 2 "arch/arm/boot/dts/qcom-pma8084.dtsi" 2
+# 1 "./arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h" 1
+# 3 "arch/arm/boot/dts/qcom-pma8084.dtsi" 2
+# 1 "./arch/arm/boot/dts/include/dt-bindings/spmi/spmi.h" 1
+# 4 "arch/arm/boot/dts/qcom-pma8084.dtsi" 2
+
+&spmi_bus {
+
+ usid0: pma8084@0 {
+  compatible = "qcom,spmi-pmic";
+  reg = <0x0 0>;
+  #address-cells = <1>;
+  #size-cells = <0>;
+
+  rtc@6000 {
+   compatible = "qcom,pm8941-rtc";
+   reg = <0x6000 0x100>,
+         <0x6100 0x100>;
+   reg-names = "rtc", "alarm";
+   interrupts = <0x0 0x61 0x1 1>;
+  };
+
+  pma8084_gpios: gpios@c000 {
+   compatible = "qcom,pma8084-gpio";
+   reg = <0xc000 0x1600>;
+   gpio-controller;
+   #gpio-cells = <2>;
+   interrupts = <0 0xc0 0 0>,
+         <0 0xc1 0 0>,
+         <0 0xc2 0 0>,
+         <0 0xc3 0 0>,
+         <0 0xc4 0 0>,
+         <0 0xc5 0 0>,
+         <0 0xc6 0 0>,
+         <0 0xc7 0 0>,
+         <0 0xc8 0 0>,
+         <0 0xc9 0 0>,
+         <0 0xca 0 0>,
+         <0 0xcb 0 0>,
+         <0 0xcc 0 0>,
+         <0 0xcd 0 0>,
+         <0 0xce 0 0>,
+         <0 0xcf 0 0>,
+         <0 0xd0 0 0>,
+         <0 0xd1 0 0>,
+         <0 0xd2 0 0>,
+         <0 0xd3 0 0>,
+         <0 0xd4 0 0>,
+         <0 0xd5 0 0>;
+  };
+
+  pma8084_mpps: mpps@a000 {
+   compatible = "qcom,pma8084-mpp";
+   reg = <0xa000 0x800>;
+   gpio-controller;
+   #gpio-cells = <2>;
+   interrupts = <0 0xa0 0 0>,
+         <0 0xa1 0 0>,
+         <0 0xa2 0 0>,
+         <0 0xa3 0 0>,
+         <0 0xa4 0 0>,
+         <0 0xa5 0 0>,
+         <0 0xa6 0 0>,
+         <0 0xa7 0 0>;
+  };
+
+  pma8084_temp: temp-alarm@2400 {
+   compatible = "qcom,spmi-temp-alarm";
+   reg = <0x2400 0x100>;
+   interrupts = <0 0x24 0 1>;
+   #thermal-sensor-cells = <0>;
+   io-channels = <&pma8084_vadc 0x08>;
+   io-channel-names = "thermal";
+  };
+
+  pma8084_vadc: vadc@3100 {
+   compatible = "qcom,spmi-vadc";
+   reg = <0x3100 0x100>;
+   interrupts = <0x0 0x31 0x0 1>;
+   #address-cells = <1>;
+   #size-cells = <0>;
+   #io-channel-cells = <1>;
+   io-channel-ranges;
+
+   die_temp {
+    reg = <0x08>;
+   };
+   ref_625mv {
+    reg = <0x09>;
+   };
+   ref_1250v {
+    reg = <0x0a>;
+   };
+   ref_buf_625mv {
+    reg = <0x0c>;
+   };
+   ref_gnd {
+    reg = <0x0e>;
+   };
+   ref_vdd {
+    reg = <0x0f>;
+   };
+  };
+ };
+
+ usid1: pma8084@1 {
+  compatible = "qcom,spmi-pmic";
+  reg = <0x1 0>;
+  #address-cells = <1>;
+  #size-cells = <0>;
+ };
+};
+# 3 "arch/arm/boot/dts/qcom-apq8084-mtp.dts" 2
+
+/ {
+ model = "Qualcomm APQ 8084-MTP";
+ compatible = "qcom,apq8084-mtp", "qcom,apq8084";
+
+ aliases {
+  serial0 = &blsp2_uart2;
+ };
+
+ chosen {
+  stdout-path = "serial0:115200n8";
+ };
+
+ soc {
+  serial@f995e000 {
+   status = "okay";
+  };
+ };
+};

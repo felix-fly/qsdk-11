@@ -1,0 +1,32 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=95
+boot() {
+	mount_root done
+	rm -f /sysupgrade.tgz
+	local soc_model=$(cat /proc/device-tree/model)
+	local soc_type
+
+        if ! grep -q WIFI_FW /proc/mounts; then
+		case "$soc_model" in
+		*"IPQ6018"*)
+			. /etc/init.d/wifi_fw_mount
+			mount_wifi_fw "IPQ6018"
+			;;
+		*"IPQ807x"*)
+			. /etc/init.d/wifi_fw_mount
+			mount_wifi_fw "IPQ8074"
+			;;
+		esac
+	fi
+
+	# process user commands
+	[ -f /etc/rc.local ] && {
+		sh /etc/rc.local
+	}
+
+	# set leds to normal state
+	. /etc/diag.sh
+	set_state done
+}

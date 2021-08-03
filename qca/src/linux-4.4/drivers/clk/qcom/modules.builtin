@@ -1,0 +1,5 @@
+kernel/drivers/clk/qcom/clk-qcom.ko
+kernel/drivers/clk/qcom/gcc-ipq6018.ko
+kernel/drivers/clk/qcom/apss-ipq6018.ko
+kernel/drivers/clk/qcom/kpss-xcc.ko
+kernel/drivers/clk/qcom/clk-rpm.ko

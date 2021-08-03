@@ -1,0 +1,1 @@
+cmd_drivers/input/input-core.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/input/input-core.ko drivers/input/input-core.o drivers/input/input-core.mod.o

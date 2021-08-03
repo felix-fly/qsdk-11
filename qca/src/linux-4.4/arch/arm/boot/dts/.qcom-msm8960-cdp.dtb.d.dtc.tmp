@@ -1,0 +1,1 @@
+arch/arm/boot/dts/qcom-msm8960-cdp.dtb: arch/arm/boot/dts/.qcom-msm8960-cdp.dtb.dts.tmp arch/arm/boot/dts/skeleton.dtsi

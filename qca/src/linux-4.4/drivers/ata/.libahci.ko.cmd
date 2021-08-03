@@ -1,0 +1,1 @@
+cmd_drivers/ata/libahci.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/ata/libahci.ko drivers/ata/libahci.o drivers/ata/libahci.mod.o

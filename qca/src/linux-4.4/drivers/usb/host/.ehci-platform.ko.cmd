@@ -1,0 +1,1 @@
+cmd_drivers/usb/host/ehci-platform.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/host/ehci-platform.ko drivers/usb/host/ehci-platform.o drivers/usb/host/ehci-platform.mod.o

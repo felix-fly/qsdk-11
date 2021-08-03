@@ -1,0 +1,9 @@
+qcom-apq8074-dragonboard.o: \
+ arch/arm/boot/dts/qcom-apq8074-dragonboard.dts \
+ arch/arm/boot/dts/qcom-msm8974.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h \
+ arch/arm/boot/dts/include/dt-bindings/clock/qcom,gcc-msm8974.h \
+ arch/arm/boot/dts/skeleton.dtsi arch/arm/boot/dts/qcom-pm8841.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/spmi/spmi.h \
+ arch/arm/boot/dts/qcom-pm8941.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/iio/qcom,spmi-vadc.h

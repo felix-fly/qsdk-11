@@ -1,0 +1,4 @@
+kernel/drivers/regulator/fixed.ko
+kernel/drivers/regulator/gpio-regulator.ko
+kernel/drivers/regulator/qcom_rpm-regulator.ko
+kernel/drivers/regulator/qcom_spmi-regulator.ko

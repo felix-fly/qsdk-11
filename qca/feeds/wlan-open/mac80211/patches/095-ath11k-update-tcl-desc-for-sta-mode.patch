@@ -1,0 +1,74 @@
+diff --git a/drivers/net/wireless/ath/ath11k/dp.c b/drivers/net/wireless/ath/ath11k/dp.c
+index 3c14bdb7b302..6b84386e0909 100644
+--- a/drivers/net/wireless/ath/ath11k/dp.c
++++ b/drivers/net/wireless/ath/ath11k/dp.c
+@@ -772,7 +772,7 @@ static void ath11k_dp_update_vdev_search(struct ath11k_vif *arvif)
+ 	 */
+ 	switch (arvif->vdev_type) {
+ 	case WMI_VDEV_TYPE_STA:
+-		arvif->hal_addr_search_flags = HAL_TX_ADDRY_EN;
++		arvif->hal_addr_search_flags = HAL_TX_ADDRX_EN;
+ 		arvif->search_type = HAL_TX_ADDR_SEARCH_INDEX;
+ 		break;
+ 	case WMI_VDEV_TYPE_AP:
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 5f2b16015804..95bd8316ffcb 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -1392,7 +1392,7 @@ void ath11k_dp_htt_htc_t2h_msg_handler(struct ath11k_base *ab,
+ 		ath11k_dp_get_mac_addr(resp->peer_map_ev.mac_addr_l32,
+ 				       peer_mac_h16, mac_addr);
+ 		ast_hash = FIELD_GET(HTT_T2H_PEER_MAP_INFO2_AST_HASH_VAL,
+-				     resp->peer_map_ev.info1);
++				     resp->peer_map_ev.info2);
+ 		ath11k_peer_map_event(ab, vdev_id, peer_id, mac_addr, ast_hash);
+ 		break;
+ 	case HTT_T2H_MSG_TYPE_PEER_UNMAP:
+diff --git a/drivers/net/wireless/ath/ath11k/hal_desc.h b/drivers/net/wireless/ath/ath11k/hal_desc.h
+index b13001d272a7..6c7dd6c80469 100644
+--- a/drivers/net/wireless/ath/ath11k/hal_desc.h
++++ b/drivers/net/wireless/ath/ath11k/hal_desc.h
+@@ -934,9 +934,8 @@ struct hal_reo_flush_cache {
+ #define HAL_TCL_DATA_CMD_INFO0_ENCRYPT_TYPE	GENMASK(7, 4)
+ #define HAL_TCL_DATA_CMD_INFO0_SRC_BUF_SWAP	BIT(8)
+ #define HAL_TCL_DATA_CMD_INFO0_LNK_META_SWAP	BIT(9)
+-#define HAL_TCL_DATA_CMD_INFO0_SEARCH_TYPE	BIT(12)
+-#define HAL_TCL_DATA_CMD_INFO0_ADDRX_EN		BIT(14)
+-#define HAL_TCL_DATA_CMD_INFO0_ADDRY_EN		BIT(15)
++#define HAL_TCL_DATA_CMD_INFO0_SEARCH_TYPE	GENMASK(13, 12)
++#define HAL_TCL_DATA_CMD_INFO0_ADDRX_EN		GENMASK(15, 14)
+ #define HAL_TCL_DATA_CMD_INFO0_CMD_NUM		GENMASK(31, 16)
+ 
+ #define HAL_TCL_DATA_CMD_INFO1_DATA_LEN		GENMASK(15, 0)
+diff --git a/drivers/net/wireless/ath/ath11k/hal_tx.c b/drivers/net/wireless/ath/ath11k/hal_tx.c
+index 3c04ebe23c22..ae75f0382262 100644
+--- a/drivers/net/wireless/ath/ath11k/hal_tx.c
++++ b/drivers/net/wireless/ath/ath11k/hal_tx.c
+@@ -52,10 +52,10 @@ void ath11k_hal_tx_cmd_desc_setup(struct ath11k_base *ab, void *cmd,
+ 		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_ENCAP_TYPE, ti->encap_type) |
+ 		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_ENCRYPT_TYPE,
+ 			   ti->encrypt_type) |
++		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_SEARCH_TYPE,
++			   ti->search_type) |
+ 		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_ADDRX_EN,
+ 			   ti->addr_search_flags) |
+-		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_ADDRY_EN,
+-			   ti->addr_search_flags) |
+ 		FIELD_PREP(HAL_TCL_DATA_CMD_INFO0_CMD_NUM,
+ 			   ti->meta_data_flags);
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/hal_tx.h b/drivers/net/wireless/ath/ath11k/hal_tx.h
+index 3b12dfda7423..1e42972b206f 100644
+--- a/drivers/net/wireless/ath/ath11k/hal_tx.h
++++ b/drivers/net/wireless/ath/ath11k/hal_tx.h
+@@ -11,8 +11,8 @@
+ #define HAL_TX_ADDRX_EN			1
+ #define HAL_TX_ADDRY_EN			2
+ 
+-#define HAL_TX_ADDR_SEARCH_INDEX	0
+-#define HAL_TX_ADDR_SEARCH_DEFAULT	1
++#define HAL_TX_ADDR_SEARCH_INDEX	1
++#define HAL_TX_ADDR_SEARCH_DEFAULT	0
+ 
+ struct hal_tx_info {
+ 	u16 meta_data_flags; /* %HAL_TCL_DATA_CMD_INFO0_META_ */

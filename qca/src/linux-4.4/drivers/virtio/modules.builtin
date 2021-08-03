@@ -1,0 +1,2 @@
+kernel/drivers/virtio/virtio.ko
+kernel/drivers/virtio/virtio_ring.ko
