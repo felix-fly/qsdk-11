@@ -22,7 +22,7 @@ export SHELL:=/bin/sh
 
 include $(INCLUDE_DIR)/package.mk
 
-STAMP_BUILT:=$(STAMP_BUILT)_$(shell cat $(LINUX_DIR)/.vermagic)
+STAMP_BUILT:=$(STAMP_BUILT)_$(firstword $(shell $(SCRIPT_DIR)/kconfig.pl $(LINUX_DIR)/.config | md5sum))
 
 ifeq ($(DUMP),)
   -include $(LINUX_DIR)/.config
