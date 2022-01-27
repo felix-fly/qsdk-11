@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -24,12 +24,20 @@
 
 static LIST_HEAD(nss_mirred_list);		/* List for all nss mirred actions */
 static DEFINE_SPINLOCK(nss_mirred_list_lock);	/* Lock for the nss mirred list */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+static unsigned int nss_mirred_net_id;		/* NSS mirror net ID */
+static struct tc_action_ops nss_mirred_act_ops;	/* NSS action mirror ops */
+#endif
 
 /*
  * nss_mirred_release()
  *	Cleanup the resources for nss mirred action.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 static void nss_mirred_release(struct tc_action *tc_act, int bind)
+#else
+static void nss_mirred_release(struct tc_action *tc_act)
+#endif
 {
 	struct nss_mirred_tcf *act = nss_mirred_get(tc_act);
 	struct net_device *dev = rcu_dereference_protected(act->tcfm_dev, 1);
@@ -74,10 +82,20 @@ static const struct nla_policy nss_mirred_policy[TC_NSS_MIRRED_MAX + 1] = {
  * nss_mirred_init()
  *	Initialize the nss mirred action.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 static int nss_mirred_init(struct net *net, struct nlattr *nla,
 			   struct nlattr *est, struct tc_action *tc_act, int ovr,
 			   int bind)
 {
+#else
+static int nss_mirred_init(struct net *net, struct nlattr *nla,
+			   struct nlattr *est, struct tc_action **tc_act, int ovr,
+			   int bind, bool rtnl_held, struct tcf_proto *tp,
+			   struct netlink_ext_ack *extack)
+{
+	struct tc_action_net *tn = net_generic(net, nss_mirred_net_id);
+	u32 index;
+#endif
 	struct nlattr *arr[TC_NSS_MIRRED_MAX + 1];
 	struct tc_nss_mirred *parm;
 	struct nss_mirred_tcf *act;
@@ -92,7 +110,11 @@ static int nss_mirred_init(struct net *net, struct nlattr *nla,
 	/*
 	 * Parse and validate the user configurations.
 	 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0))
 	ret = nla_parse_nested(arr, TC_NSS_MIRRED_MAX, nla, nss_mirred_policy);
+#else
+	ret = nla_parse_nested_deprecated(arr, TC_NSS_MIRRED_MAX, nla, nss_mirred_policy, extack);
+#endif
 	if (ret < 0) {
 		return ret;
 	}
@@ -193,6 +215,7 @@ static int nss_mirred_init(struct net *net, struct nlattr *nla,
 	/*
 	 * Return error if nss mirred action index is present in the hash.
 	 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	if (tcf_hash_check(parm->index, tc_act, bind)) {
 		return -EEXIST;
 	}
@@ -204,7 +227,28 @@ static int nss_mirred_init(struct net *net, struct nlattr *nla,
 	}
 
 	act = nss_mirred_get(tc_act);
+#else
+	index = parm->index;
+	ret = tcf_idr_check_alloc(tn, &index, tc_act, bind);
+	if (ret < 0) {
+		return ret;
+	}
 
+	if (ret && bind) {
+		return 0;
+	}
+
+	if (!ret) {
+		ret = tcf_idr_create(tn, index, est, tc_act, &nss_mirred_act_ops,
+				bind, true);
+		if (ret) {
+			tcf_idr_cleanup(tn, index);
+			return ret;
+		}
+	}
+
+	act = nss_mirred_get(*tc_act);
+#endif
 	/*
 	 * Fill up the nss mirred tc parameters to
 	 * its local action structure.
@@ -222,7 +266,9 @@ static int nss_mirred_init(struct net *net, struct nlattr *nla,
 	spin_lock_bh(&nss_mirred_list_lock);
 	list_add(&act->tcfm_list, &nss_mirred_list);
 	spin_unlock_bh(&nss_mirred_list_lock);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	tcf_hash_insert(tc_act);
+#endif
 
 	return ACT_P_CREATED;
 }
@@ -234,10 +280,15 @@ static int nss_mirred_init(struct net *net, struct nlattr *nla,
 static int nss_mirred_act(struct sk_buff *skb, const struct tc_action *tc_act,
 		      struct tcf_result *res)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	struct nss_mirred_tcf *act = tc_act->priv;
+#else
+	struct nss_mirred_tcf *act = nss_mirred_get(tc_act);
+#endif
 	struct net_device *dev;
 	struct sk_buff *skb_new;
 	int retval, err;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	u32 skb_tc_at = G_TC_AT(skb->tc_verd);
 
 	/*
@@ -246,6 +297,12 @@ static int nss_mirred_act(struct sk_buff *skb, const struct tc_action *tc_act,
 	if (!(skb_tc_at & AT_INGRESS)) {
 		return TC_ACT_UNSPEC;
 	}
+
+#else
+	if (!skb_at_tc_ingress(skb)) {
+		return TC_ACT_UNSPEC;
+	}
+#endif
 
 	/*
 	 * Update the last use of action.
@@ -276,9 +333,14 @@ static int nss_mirred_act(struct sk_buff *skb, const struct tc_action *tc_act,
 
 	skb_new->skb_iif = skb->dev->ifindex;
 	skb_new->dev = dev;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	skb_new->tc_verd = SET_TC_FROM(skb_new->tc_verd, skb_tc_at);
 	skb_push_rcsum(skb_new, skb->mac_len);
 	skb_sender_cpu_clear(skb_new);
+#else
+	skb_set_redirected(skb_new, skb_new->tc_at_ingress);
+	skb_push_rcsum(skb_new, skb->mac_len);
+#endif
 
 	err = dev_queue_xmit(skb_new);
 	if (!err) {
@@ -300,12 +362,21 @@ static int nss_mirred_dump(struct sk_buff *skb, struct tc_action *tc_act, int bi
 {
 	struct tcf_t filter;
 	unsigned char *tail = skb_tail_pointer(skb);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	struct nss_mirred_tcf *act = tc_act->priv;
+#else
+	struct nss_mirred_tcf *act = nss_mirred_get(tc_act);
+#endif
 	struct tc_nss_mirred opt = {
 		.index   = act->tcf_index,
 		.action  = act->tcf_action,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 		.refcnt  = act->tcf_refcnt - ref,
 		.bindcnt = act->tcf_bindcnt - bind,
+#else
+		.refcnt  = refcount_read(&act->tcf_refcnt) - ref,
+		.bindcnt = atomic_read(&act->tcf_bindcnt) - bind,
+#endif
 		.from_ifindex = act->tcfm_from_ifindex,
 		.to_ifindex = act->tcfm_to_ifindex,
 	};
@@ -470,6 +541,64 @@ static int nss_mirred_device_event(struct notifier_block *unused,
 	return NOTIFY_DONE;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+/*
+ * nss_mirred_walker
+ *	nssmirred tcf_action walker
+ */
+static int nss_mirred_walker(struct net *net, struct sk_buff *skb,
+		struct netlink_callback *cb, int type,
+		const struct tc_action_ops *ops,
+		struct netlink_ext_ack *extack)
+{
+	struct tc_action_net *tn = net_generic(net, nss_mirred_net_id);
+
+	return tcf_generic_walker(tn, skb, cb, type, ops, extack);
+}
+
+/*
+ * nss_mirred_search
+ *	nssmirred search idr function.
+ */
+static int nss_mirred_search(struct net *net, struct tc_action **a, u32 index)
+{
+	struct tc_action_net *tn = net_generic(net, nss_mirred_net_id);
+
+	return tcf_idr_search(tn, a, index);
+}
+
+/*
+ * nss_mirred_dev_put
+ *	Release igs dev
+ */
+static void nss_mirred_dev_put(void *priv)
+{
+	struct net_device *dev = priv;
+
+	dev_put(dev);
+}
+
+/*
+ * nss_mirred_device
+ *	Get the igs dev.
+ */
+static struct net_device *nss_mirred_device(const struct tc_action *a, tc_action_priv_destructor *destructor)
+{
+	struct nss_mirred_tcf *m = nss_mirred_get(a);
+	struct net_device *dev;
+
+	rcu_read_lock();
+	dev = rcu_dereference(m->tcfm_dev);
+	if (dev) {
+		dev_hold(dev);
+		*destructor = nss_mirred_dev_put;
+	}
+	rcu_read_unlock();
+
+	return dev;
+}
+#endif
+
 /*
  * nss_mirred_device_notifier
  *	nss mirred device notifier structure.
@@ -482,14 +611,22 @@ static struct notifier_block nss_mirred_device_notifier = {
  * nss_mirred_act_ops
  *	Registration structure for nss mirred action.
  */
-struct tc_action_ops nss_mirred_act_ops = {
+static struct tc_action_ops nss_mirred_act_ops = {
 	.kind		=	"nssmirred",
-	.type		=	TCA_ACT_MIRRED_NSS,
 	.owner		=	THIS_MODULE,
 	.act		=	nss_mirred_act,
 	.dump		=	nss_mirred_dump,
 	.cleanup	=	nss_mirred_release,
 	.init		=	nss_mirred_init,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
+	.type		=	TCA_ACT_MIRRED_NSS,
+#else
+	.id		=	TCA_ID_MIRRED_NSS,
+	.walk		=	nss_mirred_walker,
+	.lookup		=	nss_mirred_search,
+	.size           =       sizeof(struct nss_mirred_tcf),
+	.get_dev	=	nss_mirred_device
+#endif
 };
 
 /*
@@ -514,6 +651,52 @@ struct nf_hook_ops nss_mirred_igs_nf_ops[] __read_mostly = {
 	},
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+/*
+ * nss_mirred_init_net
+ *	nssmirred net init function.
+ */
+static __net_init int nss_mirred_init_net(struct net *net)
+{
+	struct tc_action_net *tn = net_generic(net, nss_mirred_net_id);
+	nf_register_net_hooks(net, nss_mirred_igs_nf_ops,
+			ARRAY_SIZE(nss_mirred_igs_nf_ops));
+
+	return tc_action_net_init(net, tn, &nss_mirred_act_ops);
+}
+
+/*
+ * nss_mirred_exit_net
+ *	nssmirred net exit function.
+ */
+static void __net_exit nss_mirred_exit_net(struct net *net)
+{
+	nf_unregister_net_hooks(net, nss_mirred_igs_nf_ops,
+			ARRAY_SIZE(nss_mirred_igs_nf_ops));
+}
+
+/*
+ * nss_mirred_exit_batch_net
+ *	nssmirred exit_batch_net function.
+ */
+static void __net_exit nss_mirred_exit_batch_net(struct list_head *net_list)
+{
+	tc_action_net_exit(net_list, nss_mirred_net_id);
+}
+
+/*
+ * nss_mirred_net_ops
+ *	Per netdevice ops.
+ */
+static struct pernet_operations nss_mirred_net_ops = {
+	.init = nss_mirred_init_net,
+	.exit = nss_mirred_exit_net,
+	.exit_batch = nss_mirred_exit_batch_net,
+	.id   = &nss_mirred_net_id,
+	.size = sizeof(struct tc_action_net),
+};
+#endif
+
 /*
  * nss_mirred_init_module()
  *	nssmirred init function.
@@ -525,6 +708,7 @@ static int __init nss_mirred_init_module(void)
 		return err;
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	err = tcf_register_action(&nss_mirred_act_ops, NSS_MIRRED_TAB_MASK);
 	if (err) {
 		unregister_netdevice_notifier(&nss_mirred_device_notifier);
@@ -538,6 +722,18 @@ static int __init nss_mirred_init_module(void)
 		unregister_netdevice_notifier(&nss_mirred_device_notifier);
 		return err;
 	}
+#else
+	err = tcf_register_action(&nss_mirred_act_ops, &nss_mirred_net_ops);
+	if (err) {
+		unregister_netdevice_notifier(&nss_mirred_device_notifier);
+		return err;
+	}
+#endif
+
+	/*
+	 * Set the IGS module reference variable.
+	 */
+	nss_igs_module_save(&nss_mirred_act_ops, THIS_MODULE);
 
 	nss_ifb_init();
 	return 0;
@@ -549,12 +745,21 @@ static int __init nss_mirred_init_module(void)
  */
 static void __exit nss_mirred_cleanup_module(void)
 {
+	/*
+	 * Reset the IGS module reference variable.
+	 */
+	nss_igs_module_save(&nss_mirred_act_ops, NULL);
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	nf_unregister_hooks(nss_mirred_igs_nf_ops, ARRAY_SIZE(nss_mirred_igs_nf_ops));
 
 	/*
 	 * Un-register nss mirred action.
 	 */
 	tcf_unregister_action(&nss_mirred_act_ops);
+#else
+	tcf_unregister_action(&nss_mirred_act_ops, &nss_mirred_net_ops);
+#endif
 	unregister_netdevice_notifier(&nss_mirred_device_notifier);
 }
 

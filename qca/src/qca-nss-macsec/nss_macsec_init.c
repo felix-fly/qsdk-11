@@ -25,7 +25,9 @@
 #else
 #include <linux/of.h>
 #include <linux/of_mdio.h>
+#ifdef MACSEC_IPQ806X_SUPPORT
 #include <soc/qcom/socinfo.h>
+#endif
 #endif
 
 #include <linux/platform_device.h>

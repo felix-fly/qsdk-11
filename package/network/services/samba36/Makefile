@@ -11,8 +11,8 @@ PKG_NAME:=samba
 PKG_VERSION:=3.6.25
 PKG_RELEASE:=7
 
-PKG_SOURCE_URL:=http://ftp.samba.org/pub/samba \
-	http://ftp.samba.org/pub/samba/stable
+PKG_SOURCE_URL:=https://download.samba.org/pub/samba \
+		https://download.samba.org/pub/samba/stable
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_MD5SUM:=76da2fa64edd94a0188531e7ecb27c4e
 
@@ -37,15 +37,15 @@ define Package/samba36-server
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Samba 3.6 SMB/CIFS server
-  URL:=http://www.samba.org/
-  DEPENDS:=+USE_GLIBC:librt $(ICONV_DEPENDS) +libuuid
+  URL:=https://www.samba.org/
+  DEPENDS:=+USE_GLIBC:librt $(ICONV_DEPENDS)
 endef
 
 define Package/samba36-client
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Samba 3.6 SMB/CIFS client
-  URL:=http://www.samba.org/
+  URL:=https://www.samba.org/
   DEPENDS:=+libreadline +libncurses
 endef
 

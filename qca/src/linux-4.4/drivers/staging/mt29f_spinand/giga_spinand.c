@@ -58,6 +58,20 @@ static struct nand_ecclayout ath79_spinand_oob_128_gd = {
 
 /* Only ecc un-protected fields in the spare area included */
 /* ECC parity code stored in the additional hidden spare area */
+static struct nand_ecclayout fidelix_oob_64 = {
+	.eccbytes = 0,
+	.eccpos = {},
+	.oobfree = {
+		{.offset = 0,  .length = 4},
+		{.offset = 8, .length = 12},
+		{.offset = 24, .length = 12},
+		{.offset = 40, .length = 12},
+		{.offset = 56, .length = 8},
+	}
+};
+
+/* Only ecc un-protected fields in the spare area included */
+/* ECC parity code stored in the additional hidden spare area */
 static struct nand_ecclayout macronix_oob_64 = {
 	.eccbytes = 0,
 	.eccpos = {},
@@ -142,6 +156,20 @@ void macronix_set_defaults(struct spi_device *spi_nand)
 	chip->ecc.layout = &macronix_oob_64;
 }
 
+void fidelix_set_defaults(struct spi_device *spi_nand)
+{
+	struct mtd_info *mtd = dev_get_drvdata(&spi_nand->dev);
+	struct nand_chip *chip = (struct nand_chip *)mtd->priv;
+
+	chip->ecc.size  = 0x800;
+	chip->ecc.bytes = 0x0;
+	chip->ecc.steps = 0x0;
+
+	chip->ecc.strength = 1;
+	chip->ecc.total = 0;
+	chip->ecc.layout = &fidelix_oob_64;
+}
+
 void gigadevice_read_cmd(struct spinand_cmd *cmd, u32 page_id)
 {
 	cmd->addr[0] = (u8)(page_id >> 16);
@@ -152,6 +180,20 @@ void gigadevice_read_cmd(struct spinand_cmd *cmd, u32 page_id)
 void toshiba_read_cmd(struct spinand_cmd *cmd, u32 page_id)
 {
 	cmd->addr[0] = ((u8)(page_id >> 16) % 2);
+	cmd->addr[1] = (u8)(page_id >> 8);
+	cmd->addr[2] = (u8)(page_id);
+}
+
+void fidelix_read_cmd(struct spinand_cmd *cmd, u32 page_id)
+{
+	u32 plane_id = GET_PLANE_ID(page_id);
+
+	if (plane_id)
+		page_id = page_id - FIDELIX_PAGES_PER_PLANE;
+
+	page_id = INSERT_PLANE_CMD_BIT(page_id, plane_id);
+
+	cmd->addr[0] = (u8)(page_id >> 16);
 	cmd->addr[1] = (u8)(page_id >> 8);
 	cmd->addr[2] = (u8)(page_id);
 }
@@ -185,6 +227,27 @@ void toshiba_read_data(struct spinand_cmd *cmd, u16 column, u32 page_id)
 {
 	cmd->addr[0] = ((u8)(column >> 8) & TOSHIBA_NORM_RW_MASK);
 	cmd->addr[1] = (u8)(column);
+}
+
+void fidelix_read_data(struct spinand_cmd *cmd, u16 column, u32 page_id)
+{
+	cmd->addr[0] = (((u8)(column >> 8) & FIDELIX_NORM_RW_MASK)
+				| SET_CMD_PLANE_BIT(GET_PLANE_ID(page_id)));
+	cmd->addr[1] = (u8)(column);
+}
+
+void fidelix_write_cmd(struct spinand_cmd *cmd, u32 page_id)
+{
+	u32 plane_id = GET_PLANE_ID(page_id);
+
+	if (plane_id)
+		page_id = page_id - FIDELIX_PAGES_PER_PLANE;
+
+	page_id = INSERT_PLANE_CMD_BIT(page_id, plane_id);
+
+	cmd->addr[0] = (u8)(page_id >> 16);
+	cmd->addr[1] = (u8)(page_id >> 8);
+	cmd->addr[2] = (u8)(page_id);
 }
 
 void gigadevice_write_cmd(struct spinand_cmd *cmd, u32 page_id)
@@ -223,6 +286,27 @@ void toshiba_write_data(struct spinand_cmd *cmd, u16 column, u32 page_id)
 {
 	cmd->addr[0] = ((u8)(column >> 8) & TOSHIBA_NORM_RW_MASK);
 	cmd->addr[1] = (u8)(column);
+}
+
+void fidelix_write_data(struct spinand_cmd *cmd, u16 column, u32 page_id)
+{
+	cmd->addr[0] = (((u8)(column >> 8) & FIDELIX_NORM_RW_MASK)
+				| SET_CMD_PLANE_BIT(GET_PLANE_ID(page_id)));
+	cmd->addr[1] = (u8)(column);
+}
+
+void fidelix_erase_blk(struct spinand_cmd *cmd, u32 page_id)
+{
+	u32 plane_id = GET_PLANE_ID(page_id);
+
+	if (plane_id)
+		page_id = page_id - FIDELIX_PAGES_PER_PLANE;
+
+	page_id = INSERT_PLANE_CMD_BIT(page_id, plane_id);
+
+	cmd->addr[0] = (u8)(page_id >> 16);
+	cmd->addr[1] = (u8)(page_id >> 8);
+	cmd->addr[2] = (u8)(page_id);
 }
 
 void gigadevice_erase_blk(struct spinand_cmd *cmd, u32 page_id)
@@ -327,6 +411,15 @@ int macronix_parse_id(struct spi_device *spi_nand,
 		      struct spinand_ops *ops, u8 *nand_id, u8 *id)
 {
 	if (nand_id[1] != NAND_MFR_MACRONIX)
+		return -EINVAL;
+
+	return 0;
+}
+
+int fidelix_parse_id(struct spi_device *spi_nand,
+		     struct spinand_ops *ops, u8 *nand_id, u8 *id)
+{
+	if (nand_id[1] != NAND_MFR_FIDELIX)
 		return -EINVAL;
 
 	return 0;

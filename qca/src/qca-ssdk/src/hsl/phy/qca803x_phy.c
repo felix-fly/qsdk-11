@@ -21,10 +21,6 @@
 
 #define QCA803X_PHY_DELAYED_INIT_TICKS msecs_to_jiffies(1000)
 
-#define PHY_RTN_ON_READ_ERROR(phy_data) \
-    do { if (phy_data == 0xffff) return(SW_READ_ERROR); } while(0);
-
-
 typedef struct {
 	a_uint32_t dev_id;
 	a_uint32_t combo_phy_bmp;
@@ -964,7 +960,7 @@ a_bool_t qca803x_phy_speed_duplex_resolved(a_uint32_t dev_id, a_uint32_t phy_id)
 
 	return A_TRUE;
 }
-
+#endif
 /******************************************************************************
 *
 * qca803x_phy_get_phy_id - get the phy id
@@ -983,7 +979,7 @@ qca803x_phy_get_phy_id(a_uint32_t dev_id, a_uint32_t phy_id,
 
 	return SW_OK;
 }
-#endif
+
 /******************************************************************************
 *
 * qca803x_phy_off - power off the phy
@@ -1770,6 +1766,117 @@ qca803x_phy_get_combo_fiber_mode(a_uint32_t dev_id, a_uint32_t phy_id,
 
 	return SW_OK;
 }
+
+/******************************************************************************
+*
+* qca803x_phy_set_counter_status - set counter status
+*
+*/
+sw_error_t
+qca803x_phy_set_counter_status(a_uint32_t dev_id, a_uint32_t phy_id,
+			a_bool_t enable)
+{
+	a_uint16_t phy_data;
+	a_uint16_t frame_dir = 0;
+
+	phy_data = qca803x_phy_mmd_read(dev_id, phy_id,
+					QCA803X_PHY_MMD7_NUM,
+					QCA803X_PHY_MMD7_FRAME_CTRL);
+	frame_dir = (phy_data & QCA803X_PHY_MMD7_FRAME_DIR) >> 14;
+
+	/*for qca803x phy, tx and rx cannot be all enabled one time,
+	  so we will enable tx or rx based current state, enable rx if
+	  current is tx and enable tx if current is rx*/
+	if (enable == A_TRUE)
+	{
+		phy_data |= QCA803X_PHY_MMD7_FRAME_CHECK;
+		/*enable RX counter*/
+		if(frame_dir)
+		{
+			SSDK_INFO("ENABLE QCA803X RX COUNTER\n");
+			phy_data &= ~QCA803X_PHY_MMD7_FRAME_DIR;
+		}
+		/*enable TX counter*/
+		else
+		{
+			SSDK_INFO("ENABLE QCA803X TX COUNTER\n");
+			phy_data |= QCA803X_PHY_MMD7_FRAME_DIR;
+		}
+	}
+	else
+	{
+		phy_data &= ~QCA803X_PHY_MMD7_FRAME_CHECK;
+	}
+
+	qca803x_phy_mmd_write(dev_id, phy_id, QCA803X_PHY_MMD7_NUM,
+			     QCA803X_PHY_MMD7_FRAME_CTRL, phy_data);
+
+	return SW_OK;
+}
+
+/******************************************************************************
+*
+* qca803x_phy_get_counter_status - get counter status
+*
+*/
+sw_error_t
+qca803x_phy_get_counter_status(a_uint32_t dev_id, a_uint32_t phy_id,
+			a_bool_t * enable)
+{
+	a_uint16_t phy_data;
+	*enable = A_FALSE;
+
+	phy_data = qca803x_phy_mmd_read(dev_id, phy_id,
+					QCA803X_PHY_MMD7_NUM,
+					QCA803X_PHY_MMD7_FRAME_CTRL);
+
+	if (phy_data & QCA803X_PHY_MMD7_FRAME_CHECK) {
+		*enable = A_TRUE;
+	}
+
+	return SW_OK;
+}
+
+/******************************************************************************
+*
+* qca803x_phy_show_counter - show counter statistics
+*
+*/
+sw_error_t
+qca803x_phy_show_counter(a_uint32_t dev_id, a_uint32_t phy_id,
+			 fal_port_counter_info_t * counter_infor)
+{
+	a_uint16_t phy_data, phy_data1;
+	a_uint16_t frame_dir = 0;
+
+	phy_data = qca803x_phy_mmd_read(dev_id, phy_id,
+					QCA803X_PHY_MMD7_NUM,
+					QCA803X_PHY_MMD7_FRAME_CTRL);
+	phy_data1 = qca803x_phy_mmd_read(dev_id, phy_id,
+					QCA803X_PHY_MMD7_NUM,
+					QCA803X_PHY_MMD7_FRAME_DATA);
+	frame_dir = (phy_data & QCA803X_PHY_MMD7_FRAME_DIR) >> 14;
+
+	if(frame_dir)
+	{
+		/*get the counter of tx*/
+		counter_infor->TxGoodFrame = phy_data1 & QCA803X_PHY_FRAME_CNT;
+		counter_infor->TxBadCRC = (phy_data1 & QCA803X_PHY_FRAME_ERROR) >> 8;
+		counter_infor->RxGoodFrame = 0;
+		counter_infor->RxBadCRC = 0;
+	}
+	else
+	{
+		/*get the counter of rx*/
+		counter_infor->TxGoodFrame = 0;
+		counter_infor->TxBadCRC = 0;
+		counter_infor->RxGoodFrame = phy_data1 & QCA803X_PHY_FRAME_CNT;
+		counter_infor->RxBadCRC = (phy_data1 & QCA803X_PHY_FRAME_ERROR) >> 8;
+	}
+
+	return SW_OK;
+}
+
 #endif
 /******************************************************************************
 *
@@ -1781,17 +1888,34 @@ sw_error_t
 qca803x_phy_get_status(a_uint32_t dev_id, a_uint32_t phy_id,
 		struct port_phy_status *phy_status)
 {
-	a_uint16_t phy_data;
+	a_uint16_t phy_data, phy_data1;
 
 	phy_data = qca803x_phy_reg_read(dev_id, phy_id, QCA803X_PHY_SPEC_STATUS);
 	PHY_RTN_ON_READ_ERROR(phy_data);
+	phy_data1 = qca803x_phy_debug_read(dev_id, phy_id,
+		QCA803X_DEBUG_MSE_THRESH);
+	PHY_RTN_ON_READ_ERROR(phy_data1);
 
 	/*get phy link status*/
 	if (phy_data & QCA803X_STATUS_LINK_PASS) {
 		phy_status->link_status = A_TRUE;
+		if((phy_data1 & QCA803X_PHY_MSE_THRESH_MASK) !=
+			QCA803X_PHY_MSE_THRESH_LINK_UP) {
+			phy_data1 &= ~QCA803X_PHY_MSE_THRESH_MASK;
+			SW_RTN_ON_ERROR(qca803x_phy_debug_write(dev_id,
+				phy_id, QCA803X_DEBUG_MSE_THRESH,
+				phy_data1 | QCA803X_PHY_MSE_THRESH_LINK_UP));
+		}
 	}
 	else {
 		phy_status->link_status = A_FALSE;
+		if((phy_data1 & QCA803X_PHY_MSE_THRESH_MASK) !=
+			QCA803X_PHY_MSE_THRESH_LINK_DOWN) {
+			phy_data1 &= ~QCA803X_PHY_MSE_THRESH_MASK;
+			SW_RTN_ON_ERROR(qca803x_phy_debug_write(dev_id,
+				phy_id, QCA803X_DEBUG_MSE_THRESH,
+				phy_data1 | QCA803X_PHY_MSE_THRESH_LINK_DOWN));
+		}
 		return SW_OK;
 	}
 
@@ -2008,9 +2132,7 @@ static sw_error_t qca803x_phy_api_ops_init(void)
 	qca803x_phy_api_ops->phy_debug_read = qca803x_phy_debug_read;
 	qca803x_phy_api_ops->phy_mmd_write = qca803x_phy_mmd_write;
 	qca803x_phy_api_ops->phy_mmd_read = qca803x_phy_mmd_read;
-#ifndef IN_PORTCONTROL_MINI
 	qca803x_phy_api_ops->phy_id_get = qca803x_phy_get_phy_id;
-#endif
 	qca803x_phy_api_ops->phy_power_off = qca803x_phy_poweroff;
 	qca803x_phy_api_ops->phy_power_on = qca803x_phy_poweron;
 #ifndef IN_PORTCONTROL_MINI
@@ -2035,6 +2157,9 @@ static sw_error_t qca803x_phy_api_ops_init(void)
 	qca803x_phy_api_ops->phy_combo_medium_status_get = qca803x_phy_get_combo_current_medium_type;
 	qca803x_phy_api_ops->phy_combo_fiber_mode_set = qca803x_phy_set_combo_fiber_mode;
 	qca803x_phy_api_ops->phy_combo_fiber_mode_get = qca803x_phy_get_combo_fiber_mode;
+	qca803x_phy_api_ops->phy_counter_set = qca803x_phy_set_counter_status;
+	qca803x_phy_api_ops->phy_counter_get = qca803x_phy_get_counter_status;
+	qca803x_phy_api_ops->phy_counter_show = qca803x_phy_show_counter;
 #endif
 	qca803x_phy_api_ops->phy_get_status = qca803x_phy_get_status;
 	qca803x_phy_api_ops->phy_eee_adv_set = qca803x_phy_set_eee_adv;
@@ -2150,6 +2275,7 @@ qca803x_phy_hw_init(a_uint32_t dev_id, a_uint32_t port_bmp)
 {
 	sw_error_t  ret = SW_OK;
 	a_uint32_t port_id = 0, phy_addr = 0, mac_mode = 0;
+	a_uint16_t phy_data= 0;
 
 	for (port_id = 0; port_id < SW_MAX_NR_PORT; port_id ++)
 	{
@@ -2177,6 +2303,14 @@ qca803x_phy_hw_init(a_uint32_t dev_id, a_uint32_t port_bmp)
 				g_qca803x_phy.combo_phy_bmp |= (0x1 << phy_addr);
 				qca803x_phy_interface_set_mode(dev_id, phy_addr, PORT_RGMII_AMDET);
 			}
+			/*config the times that MSE is over threshold as max*/
+			phy_data = qca803x_phy_debug_read(dev_id, phy_addr,
+				QCA803X_DEBUG_MSE_OVER_THRESH_TIMES);
+			PHY_RTN_ON_READ_ERROR(phy_data);
+			ret = qca803x_phy_debug_write(dev_id, phy_addr,
+				QCA803X_DEBUG_MSE_OVER_THRESH_TIMES, phy_data |
+				QCA803X_PHY_MSE_OVER_THRESH_TIMES_MAX);
+			SW_RTN_ON_ERROR(ret);
 		}
 	}
 

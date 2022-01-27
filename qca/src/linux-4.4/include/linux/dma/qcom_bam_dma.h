@@ -24,6 +24,8 @@
 #define DESC_FLAG_EOB BIT(13)
 #define DESC_FLAG_NWD BIT(12)
 #define DESC_FLAG_CMD BIT(11)
+#define DESC_FLAG_LOCK BIT(10)
+#define DESC_FLAG_UNLOCK BIT(9)
 
 /*
  * QCOM BAM DMA SGL struct
@@ -154,8 +156,17 @@ static inline int qcom_bam_map_sg(struct device *dev,
 static inline void qcom_prep_bam_ce(struct bam_cmd_element *bam_ce,
 				uint32_t addr, uint32_t command, uint32_t data)
 {
+#if IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)
+	u8 *p = (u8 *)bam_ce;
+
+	p[0] = (addr >>  0) & 0xff;
+	p[1] = (addr >>  8) & 0xff;
+	p[2] = (addr >> 16) & 0xff;
+	p[3] = command;
+#else
 	bam_ce->addr = cpu_to_le32(addr);
 	bam_ce->command = cpu_to_le32(command);
+#endif
 	bam_ce->data = cpu_to_le32(data);
 	bam_ce->mask = 0xFFFFFFFF;
 }

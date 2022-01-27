@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -41,7 +41,26 @@
 #define RATE_STATS_LOCK_ACQUIRE(lock) qdf_spin_lock_bh(lock)
 #define RATE_STATS_LOCK_RELEASE(lock) qdf_spin_unlock_bh(lock)
 
+#define STATS_CTX_LOCK_CREATE(lock) qdf_spinlock_create(lock)
+#define STATS_CTX_LOCK_DESTROY(lock) qdf_spinlock_destroy(lock)
+#define STATS_CTX_LOCK_ACQUIRE(lock) qdf_spin_lock_bh(lock)
+#define STATS_CTX_LOCK_RELEASE(lock) qdf_spin_unlock_bh(lock)
+
 struct cdp_pdev;
+
+/**
+ * enum dp_ppdu_type - enum for ppdu_type
+ * @DP_PPDU_TYPE_SU: single user PPDU
+ * @DP_PPDU_TYPE_MU_MIMO: multi user mimo ppdu
+ * @DP_PPDU_TYPE_MU_OFDMA: multi user ofdma ppdu
+ * @DP_PPDU_TYPE_MU_OFDMA_MIMO: multi user mimo/ofdma ppdu
+ */
+enum dp_ppdu_type {
+	DP_PPDU_TYPE_SU,
+	DP_PPDU_TYPE_MU_MIMO,
+	DP_PPDU_TYPE_MU_OFDMA,
+	DP_PPDU_TYPE_MU_OFDMA_MIMO,
+};
 
 /**
  * struct wlan_peer_tx_rate_stats - peer tx rate statistics
@@ -72,19 +91,85 @@ struct wlan_peer_rx_rate_stats {
 };
 
 /**
- * struct wlan_peer_rate_stats - Peer rate statistics ctx
+ * struct wlan_peer_avg_rate_stats - Peer avg rate statistics
+ * @stats: array containing avg rate stats
+ * @lock: lock protecting list
+ */
+struct wlan_peer_avg_rate_stats {
+	struct wlan_avg_rate_stats stats;
+	qdf_spinlock_t lock;
+};
+
+/**
+ * struct wlan_peer_rx_link_stats - Peer Rx Link statistics
+ * @stats: array containing rx rate stats
+ * @lock: lock protecting list
+ */
+struct wlan_peer_rx_link_stats {
+	struct wlan_rx_link_stats stats;
+	qdf_spinlock_t lock;
+};
+
+/**
+ * struct wlan_peer_tx_link_stats - Peer Tx Link statistics
+ * @stats: array containing rx rate stats
+ * @lock: lock protecting list
+ */
+struct wlan_peer_tx_link_stats {
+	struct wlan_tx_link_stats stats;
+	qdf_spinlock_t lock;
+};
+
+/**
+ * struct wlan_peer_rate_stats - Rate statistics
  * @tx: tx rate statistics
  * @rx: rx rate statistics
- * @mac_addr: peer MAC address
- * @peer_cookie: cookie for unique session of peer
- * @pdev: dp pdev
  */
-struct wlan_peer_rate_stats_ctx {
+struct wlan_peer_rate_stats {
 	struct wlan_peer_tx_rate_stats tx;
 	struct wlan_peer_rx_rate_stats rx;
+};
+
+/**
+ * struct wlan_peer_link_metrics - Peer link metrics
+ * @tx: tx link quality stats
+ * @rx: rx link quality stats
+ */
+struct wlan_peer_link_metrics {
+	struct wlan_peer_tx_link_stats tx;
+	struct wlan_peer_rx_link_stats rx;
+};
+
+/**
+ * struct wlan_peer_rate_stats_ctx - Peer statistics context
+ * @rate_stats: Rate statistics (version 1 stats)
+ * @link_metrics: Link Metrics (version 2 stats)
+ * @avg: Avg rate statistics
+ * @mac_addr: peer MAC address
+ * @peer_cookie: cookie for unique session of peer
+ * @pdev_id: id of dp pdev
+ */
+struct wlan_peer_rate_stats_ctx {
+	struct wlan_peer_rate_stats *rate_stats;
+	struct wlan_peer_link_metrics *link_metrics;
+	struct wlan_peer_avg_rate_stats avg;
 	uint8_t mac_addr[WLAN_MAC_ADDR_LEN];
 	uint64_t peer_cookie;
-	struct cdp_pdev *pdev;
+	uint8_t pdev_id;
+};
+
+/**
+ * enum rdk_stats_version - Peer statistics versions
+ * @RDK_STATS_DISABLED: peer statistics disabled
+ * @RDK_RATE_STATS: peer rate statistics enabled
+ * @RDK_LINK_STATS: peer link metrics enabled
+ * @RDK_ALL_STATS: peer all statistics enabled
+ */
+enum rdk_stats_version {
+	RDK_STATS_DISABLED = 0,
+	RDK_RATE_STATS = 1,
+	RDK_LINK_STATS = 2,
+	RDK_ALL_STATS = 3,
 };
 
 /**
@@ -98,6 +183,10 @@ struct wlan_peer_rate_stats_ctx {
  * @rxs_cache_hit: cache hit for rate index received from cache database
  * @txs_cache_miss: rate index recevied is not in cache database
  * @rxs_cache_miss: rate index recevied is not in cache database
+ * @stats_ver: peer statistics version
+ * @is_lithium: is lithium or legacy
+ * @tx_ctx_lock: tx context soc level lock
+ * @rx_ctx_lock: rx context soc level lock
  */
 struct wlan_soc_rate_stats_ctx {
 	struct cdp_soc_t *soc;
@@ -109,7 +198,10 @@ struct wlan_soc_rate_stats_ctx {
 	uint32_t rxs_cache_hit;
 	uint32_t txs_cache_miss;
 	uint32_t rxs_cache_miss;
+	enum rdk_stats_version stats_ver;
 	bool is_lithium;
+	qdf_spinlock_t tx_ctx_lock;
+	qdf_spinlock_t rx_ctx_lock;
 };
 
 /**

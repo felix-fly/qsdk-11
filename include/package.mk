@@ -186,6 +186,12 @@ define Build/DefaultTargets
 	$(Build/Prepare)
 	$(foreach hook,$(Hooks/Prepare/Post),$(call $(hook))$(sep))
 	touch $$@
+	if [[ "$(CONFIG_FOSSID_SCAN)" == *'s'* ]]; then \
+		[[ -f "$(TOPDIR)/scripts/fossid.sh" ]] && \
+		$(TOPDIR)/scripts/fossid.sh --build_scan "$(BOARD)" "$(SUBTARGET)" \
+		"$(PKG_BUILD_DIR)" "$(BUILD_DIR)" "$(CONFIG_FOSSID_SCAN)" || \
+		echo "$(TOPDIR)/scripts/fossid.sh is missing"; \
+	fi
 
   $(call Build/Exports,$(STAMP_CONFIGURED))
   $(STAMP_CONFIGURED): $(STAMP_PREPARED)
@@ -250,8 +256,13 @@ define Build/IncludeOverlay
   endef
 endef
 
+define Build/qsdk-package
+  $(eval -include $(wildcard $(call FindPackage,$(basename $(notdir $(CURDIR))))/$(PKG_NAME).mk))
+endef
+
 define BuildPackage
   $(Build/IncludeOverlay)
+  $(Build/qsdk-package)
   $(eval $(Package/Default))
   $(eval $(Package/$(1)))
 

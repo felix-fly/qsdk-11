@@ -22,8 +22,14 @@
 #ifndef _NSS_IGS_H_
 #define _NSS_IGS_H_
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+#ifdef CONFIG_NET_CLS_ACT
+#include <net/act_api.h>
+#endif
+#endif
+
 /**
- * @addtogroup NSS ingress shaper subsystem
+ * @addtogroup nss_ingress_shaper_subsystem
  * @{
  */
 
@@ -162,6 +168,44 @@ extern void nss_igs_unregister_if(uint32_t if_num);
  * True if interface is an ingress shaper interface.
  */
 extern bool nss_igs_verify_if_num(uint32_t if_num);
+
+
+#ifdef CONFIG_NET_CLS_ACT
+/*
+ * nss_igs_module_save()
+ *	Save the ingress shaping module reference.
+ *
+ * @datatypes
+ * tc_action_ops \n
+ * module
+ *
+ * @param[in] act     Operation structure for ingress shaping action.
+ * @param[in] module  Module structure of ingress shaping module.
+ *
+ * @return
+ * None.
+ */
+extern void nss_igs_module_save(struct tc_action_ops *act, struct module *module);
+#endif
+
+/*
+ * nss_igs_module_get()
+ *	Get the ingress shaping module reference.
+ *
+ * @return
+ * False if not able to take the ingress shaping module reference, otherwise true.
+ *
+ */
+extern bool nss_igs_module_get(void);
+
+/*
+ * nss_igs_module_put()
+ *	Release the ingress shaping module reference.
+ *
+ * @return
+ * None.
+ */
+extern void nss_igs_module_put(void);
 
 /**
  * @}

@@ -1,3 +1,8 @@
+# Any varying coverage in these files is non-deterministic
+# and is generally not a function of system call inputs.
+KCOV_INSTRUMENT		:= n
+
+KASAN_SANITIZE := n
 
 obj-y += mutex.o semaphore.o rwsem.o percpu-rwsem.o
 
@@ -13,6 +18,7 @@ obj-$(CONFIG_LOCKDEP) += lockdep.o
 ifeq ($(CONFIG_PROC_FS),y)
 obj-$(CONFIG_LOCKDEP) += lockdep_proc.o
 endif
+
 obj-$(CONFIG_SMP) += spinlock.o
 obj-$(CONFIG_LOCK_SPIN_ON_OWNER) += osq_lock.o
 obj-$(CONFIG_SMP) += lglock.o

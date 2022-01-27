@@ -30,15 +30,18 @@
 #define DATA_OPT2_TLV_TYPE		0x11
 
 #define TEST_MED_DATA_SIZE_V01		8192
+#define TEST_SML_DATA_SIZE_V01		255
 #define TEST_MAX_NAME_SIZE_V01		255
 
 #define TEST_PING_REQ_MSG_ID_V01	0x20
 #define TEST_DATA_REQ_MSG_ID_V01	0x21
 
+#define TEST_PMIC_GET_RAIL_INFO		0x29
+
+#define TEST_PMIC_SET_RAIL_VOLT		0x2A
+
 #define TEST_PING_REQ_MAX_MSG_LEN_V01	266
 #define TEST_DATA_REQ_MAX_MSG_LEN_V01	8456
-
-struct file *qmi_fp;	/* for getting private_data */
 
 /* Number of iterations to run during test */
 static unsigned long niterations = 5;
@@ -55,20 +58,12 @@ module_param_named(nthreads, nthreads, ulong, S_IRUGO | S_IWUSR | S_IWGRP);
 /* Variable to hold the test result */
 static unsigned long test_res;
 
-/* List to hold the incoming command from user-space */
-static struct list_head data_list;
-
 /* Data element to be queued during multiple commands */
 struct test_qmi_data {
 	struct list_head list;
 	char data[64];
 	atomic_t refs_count;
 };
-
-static unsigned long test_count;
-
-/* Completion variable to avoid race between threads and fs write operation */
-static struct completion qmi_complete;
 
 /* DebugFS directory structure for QMI */
 static struct qmi_dir {
@@ -82,8 +77,9 @@ static struct qmi_dir {
 	{"nthreads", &nthreads, S_IRUGO | S_IWUGO},
 };
 
-static atomic_t cnt, async_cnt, async_rsp, async_req, pass, fail;
 static struct mutex status_print_lock;
+u8 rail_id;
+u32 rail_voltage_uv;
 
 struct test_name_type_v01 {
 	u32 name_len;
@@ -108,6 +104,180 @@ static struct qmi_elem_info test_name_type_v01_ei[] = {
 		.tlv_type	= QMI_COMMON_TLV_TYPE,
 		.offset		= offsetof(struct test_name_type_v01,
 					   name),
+	},
+	{}
+};
+
+struct qmi_pmic_railinfo {
+	u8 rail_id;
+	u8 cpr_mode;
+	char name[14];
+	u32 voltage_uv; /* value in micro volts */
+}__packed;
+
+struct pmic_rail_info_req_v01 {
+	union {
+		char arr[4];
+		u32 rail_id;
+	};
+
+	u8 client_name_valid;
+	struct test_name_type_v01 client_name;
+}__packed;
+
+static struct qmi_elem_info pmic_rail_info_req_v01_ei[] = {
+	{
+		.data_type	= QMI_UNSIGNED_1_BYTE,
+		.elem_len	= 4,
+		.elem_size	= sizeof(char),
+		.array_type	= STATIC_ARRAY,
+		.tlv_type	= PING_REQ1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_req_v01,
+					   arr),
+	},
+	{
+		.data_type	= QMI_OPT_FLAG,
+		.elem_len	= 1,
+		.elem_size	= sizeof(u8),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_req_v01,
+					   client_name_valid),
+	},
+	{
+		.data_type	= QMI_STRUCT,
+		.elem_len	= 1,
+		.elem_size	= sizeof(struct test_name_type_v01),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_req_v01,
+					   client_name),
+		.ei_array	= test_name_type_v01_ei,
+	},
+	{}
+};
+
+struct pmic_rail_info_resp_v01 {
+	struct qmi_response_type_v01 resp;
+
+	u8 data_valid;
+	struct qmi_pmic_railinfo railinfo;
+}__packed;
+
+static struct qmi_elem_info pmic_rail_info_resp_v01_ei[] = {
+	{
+		.data_type	= QMI_STRUCT,
+		.elem_len	= 1,
+		.elem_size	= sizeof(struct qmi_response_type_v01),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= DATA_RESP1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_resp_v01,
+					   resp),
+		.ei_array	= qmi_response_type_v01_ei,
+	},
+	{
+		.data_type	= QMI_OPT_FLAG,
+		.elem_len	= 1,
+		.elem_size	= sizeof(u8),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= DATA_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_resp_v01,
+					   data_valid),
+	},
+	{
+		.data_type	= QMI_UNSIGNED_1_BYTE,
+		.elem_len	= 20,
+		.elem_size	= sizeof(u8),
+		.array_type	= STATIC_ARRAY,
+		.tlv_type	= DATA_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_info_resp_v01,
+					   railinfo),
+	},
+	{}
+};
+
+union pmic_rail_volt_set_req_v01 {
+	char arr[5];
+	struct {
+		u8 rail_id;
+		u32 rail_voltage_uv; /* value in micro volts */
+	}__packed;
+}__packed;
+
+static struct qmi_elem_info pmic_rail_volt_set_req_v01_ei[] = {
+	{
+		.data_type	= QMI_UNSIGNED_1_BYTE,
+		.elem_len	= 5,
+		.elem_size	= sizeof(char),
+		.array_type	= STATIC_ARRAY,
+		.tlv_type	= DATA_REQ1_TLV_TYPE,
+		.offset		= offsetof(union pmic_rail_volt_set_req_v01,
+					   arr),
+
+	},
+	{}
+};
+
+struct pmic_rail_volt_set_resp_v01 {
+	struct qmi_response_type_v01 resp;
+
+	u8 data_valid;
+	union {
+		char arr[4];
+		u32 rail_voltage_uv; /* value in micro volts */
+	};
+
+	u8 service_name_valid;
+	struct test_name_type_v01 service_name;
+}__packed;
+
+static struct qmi_elem_info pmic_rail_volt_set_resp_v01_ei[] = {
+	{
+		.data_type	= QMI_STRUCT,
+		.elem_len	= 1,
+		.elem_size	= sizeof(struct qmi_response_type_v01),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_RESP1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_volt_set_resp_v01,
+					   resp),
+		.ei_array	= qmi_response_type_v01_ei,
+	},
+	{
+		.data_type	= QMI_OPT_FLAG,
+		.elem_len	= 1,
+		.elem_size	= sizeof(u8),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_volt_set_resp_v01,
+					   data_valid),
+	},
+	{
+		.data_type	= QMI_UNSIGNED_1_BYTE,
+		.elem_len	= 4,
+		.elem_size	= sizeof(char),
+		.array_type	= STATIC_ARRAY,
+		.tlv_type	= PING_OPT1_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_volt_set_resp_v01,
+					   arr),
+	},
+	{
+		.data_type	= QMI_OPT_FLAG,
+		.elem_len	= 1,
+		.elem_size	= sizeof(u8),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_OPT2_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_volt_set_resp_v01,
+					   service_name_valid),
+	},
+	{
+		.data_type	= QMI_STRUCT,
+		.elem_len	= 1,
+		.elem_size	= sizeof(struct test_name_type_v01),
+		.array_type	= NO_ARRAY,
+		.tlv_type	= PING_OPT2_TLV_TYPE,
+		.offset		= offsetof(struct pmic_rail_volt_set_resp_v01,
+					   service_name),
+		.ei_array	= test_name_type_v01_ei,
 	},
 	{}
 };
@@ -397,7 +567,8 @@ static void ping_pong_cb(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 	else if (!resp->pong_valid || memcmp(resp->pong, "pong", 4))
 		txn->result = -EINVAL;
 
-	pr_info("Response for ping is %s\n", resp->pong);
+	pr_info("Response for ping from %d:%d handle[%p] is %s\n",
+			qmi->sq.sq_port, qmi->sq.sq_node, qmi, resp->pong);
 	complete(&txn->completion);
 }
 
@@ -465,7 +636,8 @@ static ssize_t data_write(struct file *file, const char __user *user_buf,
 		goto out;
 	}
 
-	pr_info("Response data is %s\n", resp->data);
+	pr_info("Response for data from %d:%d handle[%p] is %s\n",
+			qmi->sq.sq_port, qmi->sq.sq_node, qmi, resp->data);
 	ret = count;
 
 out:
@@ -480,6 +652,140 @@ static const struct file_operations data_fops = {
 	.write = data_write,
 };
 
+static ssize_t pmic_write(struct file *fp, const char __user *user_buf,
+			  size_t count, loff_t *ppos)
+
+{
+	struct qmi_handle *qmi = fp->private_data;
+	struct qmi_txn txn;
+	int ret;
+
+	if (count < 1)
+		return 0;
+
+	if (!strncmp(fp->f_path.dentry->d_iname, "rail_id",
+		     sizeof(fp->f_path.dentry->d_iname))) {
+		struct pmic_rail_info_req_v01 req = {};
+
+		ret = kstrtou8_from_user(user_buf, count, 0, &rail_id);
+		if (ret)
+			return ret;
+
+		req.rail_id = rail_id;
+
+		ret = qmi_txn_init(qmi, &txn, NULL, NULL);
+		if (ret < 0)
+			return ret;
+
+		ret = qmi_send_request(qmi, NULL,
+				       &txn, TEST_PMIC_GET_RAIL_INFO,
+				       TEST_SML_DATA_SIZE_V01,
+				       pmic_rail_info_req_v01_ei, &req);
+
+	} else if (!strncmp(fp->f_path.dentry->d_iname, "rail_voltage_uv",
+		   sizeof(fp->f_path.dentry->d_iname))) {
+		union pmic_rail_volt_set_req_v01 req = {};
+
+		ret = kstrtouint_from_user(user_buf, count, 0,
+					   &rail_voltage_uv);
+		if (ret)
+			return ret;
+
+		req.rail_id = rail_id;
+		req.rail_voltage_uv = rail_voltage_uv;
+
+		ret = qmi_txn_init(qmi, &txn, NULL, NULL);
+		if (ret < 0)
+			return ret;
+
+		ret = qmi_send_request(qmi, NULL, &txn,
+				       TEST_PMIC_SET_RAIL_VOLT,
+				       TEST_SML_DATA_SIZE_V01,
+				       pmic_rail_volt_set_req_v01_ei, &req);
+	} else {
+		return -EIO;
+	}
+
+	if (ret < 0) {
+		qmi_txn_cancel(&txn);
+		return ret;
+	}
+
+	ret = qmi_txn_wait(&txn, 5 * HZ);
+	if (ret < 0)
+		count = ret;
+
+	return count;
+}
+
+static ssize_t pmic_read(struct file *fp, char __user *buf,
+		size_t count, loff_t *pos)
+{
+	char _buf[16] = {0};
+
+	if (!strncmp(fp->f_path.dentry->d_iname, "rail_id",
+		     sizeof(fp->f_path.dentry->d_iname))) {
+		snprintf(_buf, sizeof(_buf), "%u\n", rail_id);
+	} else if (!strncmp(fp->f_path.dentry->d_iname, "rail_voltage_uv",
+			    sizeof(fp->f_path.dentry->d_iname))) {
+		snprintf(_buf, sizeof(_buf), "%u\n", rail_voltage_uv);
+	}
+
+	return simple_read_from_buffer(buf, count, pos, _buf, strnlen(_buf, 16));
+}
+
+static const struct file_operations pmic_fops = {
+	.open = simple_open,
+	.write = pmic_write,
+	.read = pmic_read,
+};
+
+static void rail_info_cb(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
+			 struct qmi_txn *txn, const void *data)
+{
+	const struct pmic_rail_info_resp_v01 *resp = data;
+
+	if (!txn) {
+		pr_err("spurious rail info response\n");
+		return;
+	}
+
+	if (resp->resp.result == QMI_RESULT_FAILURE_V01)
+		txn->result = -ENXIO;
+	else if (!resp->data_valid)
+		txn->result = -EINVAL;
+
+	pr_info("Rail info requested from %d:%d handle[%p]\n",
+		qmi->sq.sq_port, qmi->sq.sq_node, qmi);
+	pr_info("==========================================================\n");
+	pr_info("Rail ID   CPR Mode  Rail Voltage(uV)   Name \n");
+	pr_info("%02d        %02d        %08d           %s\n",
+		resp->railinfo.rail_id,  resp->railinfo.cpr_mode,
+		resp->railinfo.voltage_uv, resp->railinfo.name);
+	pr_info("==========================================================\n");
+
+	complete(&txn->completion);
+}
+
+static void volt_set_cb(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
+			 struct qmi_txn *txn, const void *data)
+{
+	const struct pmic_rail_volt_set_resp_v01 *resp = data;
+
+	if (!txn) {
+		pr_err("spurious voltage set response\n");
+		return;
+	}
+
+	if (resp->resp.result == QMI_RESULT_FAILURE_V01)
+		txn->result = -ENXIO;
+
+	pr_info("Voltage set requested from %d:%d handle[%p] is successful!\n",
+		qmi->sq.sq_port, qmi->sq.sq_node, qmi);
+
+	complete(&txn->completion);
+}
+
 static struct qmi_msg_handler qmi_sample_handlers[] = {
 	{
 		.type = QMI_RESPONSE,
@@ -487,6 +793,20 @@ static struct qmi_msg_handler qmi_sample_handlers[] = {
 		.ei = test_ping_resp_msg_v01_ei,
 		.decoded_size = sizeof(struct test_ping_req_msg_v01),
 		.fn = ping_pong_cb
+	},
+	{
+		.type = QMI_RESPONSE,
+		.msg_id = TEST_PMIC_GET_RAIL_INFO,
+		.ei = pmic_rail_info_resp_v01_ei,
+		.decoded_size = sizeof(struct pmic_rail_info_resp_v01),
+		.fn = rail_info_cb
+	},
+	{
+		.type = QMI_RESPONSE,
+		.msg_id = TEST_PMIC_SET_RAIL_VOLT,
+		.ei = pmic_rail_volt_set_resp_v01_ei,
+		.decoded_size = sizeof(struct pmic_rail_volt_set_resp_v01),
+		.fn = volt_set_cb
 	},
 	{}
 };
@@ -501,33 +821,36 @@ struct qmi_sample {
 	struct dentry *de_nthreads;
 	struct dentry *de_niterations;
 	struct dentry *de_data_size;
+	struct dentry *de_pmic_dir;
+	struct dentry *de_rail_id;
+	struct dentry *de_rail_voltage_uv;
 };
 
 static struct dentry *qmi_debug_dir;
 
-static void update_status(void)
+static void update_status(struct qmi_handle *qmi)
 {
 	unsigned int max = nthreads * niterations;
-	unsigned int count = atomic_read(&cnt);
+	unsigned int count = atomic_read(&qmi->cnt);
 	unsigned int percent;
 	static unsigned int pre_percent;
 
 	percent = (count * 100)/max;
 
 	if (percent > pre_percent)
-		pr_info("Completed(%d%%)...\n", percent);
+		pr_info("Client %s Completed(%d%%)...\n",
+				(current->comm + 4), percent);
 
 	pre_percent = percent;
 }
 
-static int test_qmi_ping_pong_send_msg(void)
+static int test_qmi_ping_pong_send_msg(struct qmi_handle *qmi)
 {
-	struct qmi_handle *qmi = qmi_fp->private_data;
 	struct test_ping_req_msg_v01 req = {};
 	struct qmi_txn txn;
 	int ret;
 
-	atomic_inc(&cnt);
+	atomic_inc(&qmi->cnt);
 
 	memcpy(req.ping, "ping", sizeof(req.ping));
 
@@ -540,53 +863,56 @@ static int test_qmi_ping_pong_send_msg(void)
 			TEST_PING_REQ_MAX_MSG_LEN_V01,
 			test_ping_req_msg_v01_ei, &req);
 	if (ret < 0) {
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		qmi_txn_cancel(&txn);
 		return ret;
 	}
 
 	ret = qmi_txn_wait(&txn, 5 * HZ);
-	if (ret < 0)
-		test_count = ret;
+	if (ret < 0) {
+		pr_err("Failed to get response on the txn\n");
+		atomic_inc(&qmi->fail);
+		return ret;
+	}
 
-	atomic_inc(&pass);
+	atomic_inc(&qmi->pass);
 	mutex_lock(&status_print_lock);
-	update_status();
+	update_status(qmi);
 	mutex_unlock(&status_print_lock);
-	return test_count;
+	return ret;
 
 }
 
-static int test_qmi_data_send_msg(unsigned int data_len)
+static int test_qmi_data_send_msg(struct qmi_handle *qmi, unsigned int data_len)
 {
-	struct qmi_handle *qmi = qmi_fp->private_data;
 	struct test_data_resp_msg_v01 *resp;
 	struct test_data_req_msg_v01 *req;
 	struct qmi_txn txn;
 	int ret, i;
 
-	atomic_inc(&cnt);
+	atomic_inc(&qmi->cnt);
 
 	req = kzalloc(sizeof(*req), GFP_KERNEL);
 	if (!req) {
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		return -ENOMEM;
 	}
 
 	resp = kzalloc(sizeof(*resp), GFP_KERNEL);
 	if (!resp) {
 		kfree(req);
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		return -ENOMEM;
 	}
 
 	req->data_len = data_len;
 	for (i = 0; i < req->data_len; i = i + sizeof(int))
 		memcpy(req->data + i, (uint8_t *)&i, sizeof(int));
+	req->client_name_valid = 0;
 
 	ret = qmi_txn_init(qmi, &txn, test_data_resp_msg_v01_ei, resp);
 	if (ret < 0) {
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		goto out;
 	}
 
@@ -596,30 +922,31 @@ static int test_qmi_data_send_msg(unsigned int data_len)
 			test_data_req_msg_v01_ei, req);
 	if (ret < 0) {
 		qmi_txn_cancel(&txn);
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		goto out;
 	}
 
 	ret = qmi_txn_wait(&txn, 5 * HZ);
 
 	if (ret < 0) {
+		atomic_inc(&qmi->fail);
 		goto out;
-	} else if (!resp->data_valid ||
+	}
+
+	if (!resp->data_valid ||
 			resp->data_len != req->data_len ||
 			memcmp(resp->data, req->data, req->data_len)) {
 		pr_err("response data doesn't match expectation\n");
-		atomic_inc(&fail);
+		atomic_inc(&qmi->fail);
 		ret = -EINVAL;
 		goto out;
 	} else {
-		pr_info("Data valid\n");
-		atomic_inc(&pass);
+		pr_debug("Data valid\n");
+		atomic_inc(&qmi->pass);
 	}
 
-	ret = test_count;
-
 	mutex_lock(&status_print_lock);
-	update_status();
+	update_status(qmi);
 	mutex_unlock(&status_print_lock);
 
 out:
@@ -633,19 +960,23 @@ int qmi_process_user_input(void *data)
 {
 	struct test_qmi_data *qmi_data, *temp_qmi_data;
 	unsigned short index = 0;
+	struct qmi_handle *qmi;
+	struct list_head *data_list = data;
 
-	wait_for_completion_timeout(&qmi_complete, msecs_to_jiffies(1000));
+	qmi = container_of(data, struct qmi_handle, data_list);
 
-	list_for_each_entry_safe(qmi_data, temp_qmi_data, &data_list, list) {
+	wait_for_completion_timeout(&qmi->complete, msecs_to_jiffies(1000));
+
+	list_for_each_entry_safe(qmi_data, temp_qmi_data, data_list, list) {
 		atomic_inc(&qmi_data->refs_count);
 
 		if (!strncmp(qmi_data->data, "ping_pong", sizeof(qmi_data->data))) {
 			for (index = 0; index < niterations; index++) {
-				test_res = test_qmi_ping_pong_send_msg();
+				test_res = test_qmi_ping_pong_send_msg(qmi);
 			}
 		} else if (!strncmp(qmi_data->data, "data", sizeof(qmi_data->data))) {
 			for (index = 0; index < niterations; index++) {
-				test_res = test_qmi_data_send_msg(data_size);
+				test_res = test_qmi_data_send_msg(qmi, data_size);
 			}
 		} else {
 			test_res = 0;
@@ -656,7 +987,7 @@ int qmi_process_user_input(void *data)
 
 		if (atomic_dec_and_test(&qmi_data->refs_count)) {
 			pr_info("Test Completed. Pass: %d Fail: %d\n",
-					atomic_read(&pass), atomic_read(&fail));
+					atomic_read(&qmi->pass), atomic_read(&qmi->fail));
 			list_del(&qmi_data->list);
 			kfree(qmi_data);
 			qmi_data = NULL;
@@ -670,27 +1001,36 @@ static int test_qmi_open(struct inode *ip, struct file *fp)
 	char thread_name[32];
 	struct task_struct *qmi_task;
 	int index = 0;
+	struct qmi_handle *qmi;
 
-	if (ip->i_private)
-		fp->private_data = ip->i_private;
-
-	atomic_set(&cnt, 0);
-	atomic_set(&pass, 0);
-	atomic_set(&fail, 0);
-	atomic_set(&async_cnt, 0);
-	atomic_set(&async_req, 0);
-	atomic_set(&async_rsp, 0);
 	for (index = 1; index < sizeof(qdentry)/sizeof(struct qmi_dir); index++) {
 		if (!strncmp(fp->f_path.dentry->d_iname, qdentry[index].string, \
 					sizeof(fp->f_path.dentry->d_iname)))
 			return 0;
 	}
+
+	if (!ip->i_private)
+		return -ENODATA;
+
+	fp->private_data = ip->i_private;
+	qmi = fp->private_data;
+
 	pr_info("Total commands: %lu (Threads: %lu Iteration: %lu)\n",
 			nthreads * niterations, nthreads, niterations);
-	init_completion(&qmi_complete);
+
+	atomic_set(&qmi->cnt, 0);
+	atomic_set(&qmi->pass, 0);
+	atomic_set(&qmi->fail, 0);
+	atomic_set(&qmi->async_cnt, 0);
+	atomic_set(&qmi->async_req, 0);
+	atomic_set(&qmi->async_rsp, 0);
+
+	init_completion(&qmi->complete);
 	for (index = 0; index < nthreads; index++) {
-		snprintf(thread_name, sizeof(thread_name), "qmi_test_""%d", index);
-		qmi_task = kthread_run(qmi_process_user_input, &data_list, thread_name);
+		snprintf(thread_name, sizeof(thread_name), "qmi_""%s_%d",
+				fp->f_path.dentry->d_parent->d_iname, index);
+		qmi_task = kthread_run(qmi_process_user_input,
+					&qmi->data_list, thread_name);
 	}
 	return 0;
 
@@ -724,8 +1064,8 @@ static ssize_t test_qmi_write(struct file *fp, const char __user *buf,
 	int len;
 	int index = 0;
 	struct test_qmi_data *qmi_data;
+	struct qmi_handle *qmi;
 
-	qmi_fp = fp;
 	if (count < 1)
 		return 0;
 
@@ -757,13 +1097,12 @@ static ssize_t test_qmi_write(struct file *fp, const char __user *buf,
 	memcpy(qmi_data->data, cmd, sizeof(cmd));
 
 	atomic_set(&qmi_data->refs_count, 0);
-	list_add_tail(&qmi_data->list, &data_list);
-	test_count = count;
-	complete_all(&qmi_complete);
 
+	qmi = fp->private_data;
+	list_add_tail(&qmi_data->list, &qmi->data_list);
+	complete_all(&qmi->complete);
 
 	return count;
-
 }
 
 static const struct file_operations debug_ops = {
@@ -800,6 +1139,7 @@ static int qmi_sample_probe(struct platform_device *pdev)
 
 	snprintf(path, sizeof(path), "%d:%d", sq->sq_node, sq->sq_port);
 
+	INIT_LIST_HEAD(&sample->qmi.data_list);
 	sample->de_dir = debugfs_create_dir(path, qmi_debug_dir);
 	if (IS_ERR(sample->de_dir)) {
 		ret = PTR_ERR(sample->de_dir);
@@ -853,10 +1193,39 @@ static int qmi_sample_probe(struct platform_device *pdev)
 		goto err_remove_de_niterations;
 	}
 
+	sample->de_pmic_dir = debugfs_create_dir("pmic", sample->de_dir);
+	if (IS_ERR(sample->de_pmic_dir)) {
+		ret = PTR_ERR(sample->de_pmic_dir);
+		goto err_remove_de_data_size;
+	}
+
+	sample->de_rail_id = debugfs_create_file("rail_id", 0600,
+						      sample->de_pmic_dir,
+						      sample, &pmic_fops);
+	if (IS_ERR(sample->de_rail_id)) {
+		ret = PTR_ERR(sample->de_rail_id);
+		goto err_remove_de_pmic_dir;
+	}
+
+	sample->de_rail_voltage_uv = debugfs_create_file("rail_voltage_uv",
+							   0600,
+							   sample->de_pmic_dir,
+							   sample, &pmic_fops);
+	if (IS_ERR(sample->de_rail_voltage_uv)) {
+		ret = PTR_ERR(sample->de_rail_voltage_uv);
+		goto err_remove_de_rail_id;
+	}
+
 	platform_set_drvdata(pdev, sample);
 
 	return 0;
 
+err_remove_de_rail_id:
+	debugfs_remove(sample->de_rail_id);
+err_remove_de_pmic_dir:
+	debugfs_remove(sample->de_pmic_dir);
+err_remove_de_data_size:
+	debugfs_remove(sample->de_data_size);
 err_remove_de_niterations:
 	debugfs_remove(sample->de_niterations);
 err_remove_de_nthreads:
@@ -876,7 +1245,12 @@ err_release_qmi_handle:
 static int qmi_sample_remove(struct platform_device *pdev)
 {
 	struct qmi_sample *sample = platform_get_drvdata(pdev);
+	struct qmi_handle *qmi = &sample->qmi;
+	struct test_qmi_data *qmi_data, *temp_qmi_data;
 
+	debugfs_remove(sample->de_rail_voltage_uv);
+	debugfs_remove(sample->de_rail_id);
+	debugfs_remove(sample->de_pmic_dir);
 	debugfs_remove(sample->de_data_size);
 	debugfs_remove(sample->de_niterations);
 	debugfs_remove(sample->de_nthreads);
@@ -886,6 +1260,12 @@ static int qmi_sample_remove(struct platform_device *pdev)
 	debugfs_remove(sample->de_dir);
 
 	qmi_handle_release(&sample->qmi);
+
+	list_for_each_entry_safe(qmi_data, temp_qmi_data, &qmi->data_list, list) {
+		list_del(&qmi_data->list);
+		kfree(qmi_data);
+	}
+	list_del(&qmi->data_list);
 
 	return 0;
 }
@@ -963,7 +1343,6 @@ static int qmi_sample_init(void)
 
 	qmi_add_lookup(&lookup_client, 15, 0, 0);
 
-	INIT_LIST_HEAD(&data_list);
 	mutex_init(&status_print_lock);
 
 	return 0;
@@ -978,19 +1357,11 @@ err_remove_debug_dir:
 
 static void qmi_sample_exit(void)
 {
-	struct test_qmi_data *qmi_data, *temp_qmi_data;
-
 	qmi_handle_release(&lookup_client);
 
 	platform_driver_unregister(&qmi_sample_driver);
 
 	debugfs_remove(qmi_debug_dir);
-
-	list_for_each_entry_safe(qmi_data, temp_qmi_data, &data_list, list) {
-		list_del(&qmi_data->list);
-		kfree(qmi_data);
-	}
-	list_del(&data_list);
 }
 
 module_init(qmi_sample_init);

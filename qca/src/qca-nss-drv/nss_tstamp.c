@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -80,7 +80,6 @@ static bool nss_tstamp_verify_if_num(uint32_t if_num)
 	return (if_num == NSS_TSTAMP_TX_INTERFACE) || (if_num == NSS_TSTAMP_RX_INTERFACE);
 }
 
-
 /*
  * nss_tstamp_interface_handler()
  *	Handle NSS -> HLOS messages for TSTAMP Statistics
@@ -92,7 +91,7 @@ static void nss_tstamp_interface_handler(struct nss_ctx_instance *nss_ctx,
 	nss_tstamp_msg_callback_t cb;
 
 	if (!nss_tstamp_verify_if_num(ncm->interface)) {
-		nss_warning("%p: invalid interface %d for tstamp_tx", nss_ctx, ncm->interface);
+		nss_warning("%px: invalid interface %d for tstamp_tx", nss_ctx, ncm->interface);
 		return;
 	}
 
@@ -100,12 +99,12 @@ static void nss_tstamp_interface_handler(struct nss_ctx_instance *nss_ctx,
 	 * Is this a valid request/response packet?
 	 */
 	if (ncm->type >= NSS_TSTAMP_MSG_TYPE_MAX) {
-		nss_warning("%p: received invalid message %d for tstamp", nss_ctx, ncm->type);
+		nss_warning("%px: received invalid message %d for tstamp", nss_ctx, ncm->type);
 		return;
 	}
 
 	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_tstamp_msg)) {
-		nss_warning("%p: Length of message is greater than required: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
+		nss_warning("%px: Length of message is greater than required: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
 		return;
 	}
 
@@ -119,7 +118,7 @@ static void nss_tstamp_interface_handler(struct nss_ctx_instance *nss_ctx,
 		nss_tstamp_stats_sync(nss_ctx, &ntm->msg.stats, ncm->interface);
 		break;
 	default:
-		nss_warning("%p: Unknown message type %d",
+		nss_warning("%px: Unknown message type %d",
 				 nss_ctx, ncm->type);
 		return;
 	}
@@ -208,7 +207,7 @@ static struct net_device *nss_tstamp_get_dev(struct sk_buff *skb)
 		break;
 
 	default:
-		nss_warning("%p:could not get dev for the skb\n", skb);
+		nss_warning("%px:could not get dev for the skb\n", skb);
 		return NULL;
 	}
 
@@ -322,7 +321,7 @@ nss_tx_status_t nss_tstamp_tx_buf(struct nss_ctx_instance *nss_ctx, struct sk_bu
 	char *align_data;
 	uint32_t hdr_sz;
 
-	nss_trace("%p: Tstamp If Tx packet, id:%d, data=%p", nss_ctx, NSS_TSTAMP_RX_INTERFACE, skb->data);
+	nss_trace("%px: Tstamp If Tx packet, id:%d, data=%px", nss_ctx, NSS_TSTAMP_RX_INTERFACE, skb->data);
 
 	/*
 	 * header size + alignment size
@@ -340,7 +339,7 @@ nss_tx_status_t nss_tstamp_tx_buf(struct nss_ctx_instance *nss_ctx, struct sk_bu
 		if (skb->end - skb->tail >= extra_head)
 			extra_tail = -extra_head;
 		if (pskb_expand_head(skb, extra_head, extra_tail, GFP_KERNEL)) {
-			nss_trace("%p: expand head room failed", nss_ctx);
+			nss_trace("%px: expand head room failed", nss_ctx);
 			return NSS_TX_FAILURE;
 		}
 	}
@@ -352,10 +351,9 @@ nss_tx_status_t nss_tstamp_tx_buf(struct nss_ctx_instance *nss_ctx, struct sk_bu
 	h2n_hdr->ts_ifnum = if_num;
 	h2n_hdr->ts_tx_hdr_sz = hdr_sz;
 
-	return nss_core_send_packet(nss_ctx, skb, NSS_TSTAMP_RX_INTERFACE, H2N_BIT_FLAG_VIRTUAL_BUFFER);
+	return nss_core_send_packet(nss_ctx, skb, NSS_TSTAMP_RX_INTERFACE, H2N_BIT_FLAG_VIRTUAL_BUFFER | H2N_BIT_FLAG_BUFFER_REUSABLE);
 }
 EXPORT_SYMBOL(nss_tstamp_tx_buf);
-
 
 /*
  * nss_tstamp_register_netdev()

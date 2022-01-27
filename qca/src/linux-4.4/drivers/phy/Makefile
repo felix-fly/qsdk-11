@@ -52,3 +52,4 @@ obj-$(CONFIG_PHY_QCOM_DWC3)		+= phy-qcom-dwc3.o
 obj-$(CONFIG_PHY_QCA_PCIE_QMP)		+= phy-qca-pcie-qmp.o
 obj-$(CONFIG_PHY_IPQ_BALDUR_USB)	+= phy-qca-baldur.o
 obj-$(CONFIG_PHY_IPQ_UNIPHY_USB)	+= phy-qca-uniphy.o
+obj-$(CONFIG_PHY_IPQ_UNIPHY_PCIE)	+= phy-qca-pcie-uniphy.o

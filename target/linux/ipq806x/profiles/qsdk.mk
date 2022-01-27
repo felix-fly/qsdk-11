@@ -96,7 +96,7 @@ NETWORKING:=mcproxy -dnsmasq dnsmasq-dhcpv6 bridge ip-full trace-cmd \
 	rp-pppoe-relay iptables-mod-extra iputils-tracepath iputils-tracepath6 \
 	kmod-nf-nathelper-extra kmod-ipt-nathelper-rtsp \
 	luci-app-upnp luci-app-ddns luci-proto-ipv6 \
-	luci-app-multiwan
+	luci-app-multiwan kmod-bonding
 
 CD_ROUTER:=kmod-ipt-ipopt kmod-bonding kmod-nat-sctp lacpd \
 	arptables ds-lite 6rd ddns-scripts xl2tpd \

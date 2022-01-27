@@ -113,14 +113,9 @@ ifeq (linux, $(OS))
 	endif
 endif
 
-ifeq (, $(findstring ISIS, $(SUPPORT_CHIP)))
+ifeq (, $(filter ISIS, $(SUPPORT_CHIP)))
   SRC_LIST=
 endif
-
-ifeq (ISISC, $(SUPPORT_CHIP))
-  SRC_LIST=
-endif
-
 
 include $(PRJ_PATH)/make/components.mk
 include $(PRJ_PATH)/make/defs.mk

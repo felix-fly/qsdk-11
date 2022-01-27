@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 - 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015 - 2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -282,6 +282,7 @@ static int edma_get_settings(struct net_device *netdev,
 
 		ecmd->advertising = phydev->advertising;
 		ecmd->autoneg = phydev->autoneg;
+		ecmd->supported = phydev->supported;
 
 		if (adapter->link_state == __EDMA_LINKDOWN) {
 			ecmd->speed =  SPEED_UNKNOWN;

@@ -3,7 +3,7 @@
  *
  * Copyright 2006-2010	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
- * Copyright 2015	Intel Deutschland GmbH
+ * Copyright 2015-2017	Intel Deutschland GmbH
  */
 
 #include <linux/if.h>
@@ -218,6 +218,8 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 
 	[NL80211_ATTR_WIPHY_FREQ] = { .type = NLA_U32 },
 	[NL80211_ATTR_WIPHY_CHANNEL_TYPE] = { .type = NLA_U32 },
+	[NL80211_ATTR_WIPHY_EDMG_CHANNELS] = { .type = NLA_U8 },
+	[NL80211_ATTR_WIPHY_EDMG_BW_CONFIG] = { .type = NLA_U8 },
 	[NL80211_ATTR_CHANNEL_WIDTH] = { .type = NLA_U32 },
 	[NL80211_ATTR_CENTER_FREQ1] = { .type = NLA_U32 },
 	[NL80211_ATTR_CENTER_FREQ2] = { .type = NLA_U32 },
@@ -359,6 +361,7 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 	[NL80211_ATTR_SCAN_FLAGS] = { .type = NLA_U32 },
 	[NL80211_ATTR_P2P_CTWINDOW] = { .type = NLA_U8 },
 	[NL80211_ATTR_P2P_OPPPS] = { .type = NLA_U8 },
+	[NL80211_ATTR_LOCAL_MESH_POWER_MODE] = {. type = NLA_U32 },
 	[NL80211_ATTR_ACL_POLICY] = {. type = NLA_U32 },
 	[NL80211_ATTR_MAC_ADDRS] = { .type = NLA_NESTED },
 	[NL80211_ATTR_STA_CAPABILITY] = { .type = NLA_U16 },
@@ -406,6 +409,10 @@ static const struct nla_policy nl80211_policy[NUM_NL80211_ATTR] = {
 				    .len = FILS_MAX_KEK_LEN },
 	[NL80211_ATTR_FILS_NONCES] = { .len = 2 * FILS_NONCE_LEN },
 	[NL80211_ATTR_EXTERNAL_AUTH_SUPPORT] = { .type = NLA_FLAG },
+	[NL80211_ATTR_VLAN_ID] = { .type = NLA_U16 },
+	[NL80211_ATTR_HE_CAPABILITY] = { .type = NLA_BINARY,
+					 .len = NL80211_HE_MAX_CAPABILITY_LEN },
+	[NL80211_ATTR_SAE_PWE] = { .type = NLA_U16 }
 };
 
 /* policy for the key attributes */
@@ -665,7 +672,7 @@ struct key_parse {
 	struct key_params p;
 	int idx;
 	int type;
-	bool def, defmgmt;
+	bool def, defmgmt, defbeacon;
 	bool def_uni, def_multi;
 };
 
@@ -679,12 +686,13 @@ static int nl80211_parse_key_new(struct nlattr *key, struct key_parse *k)
 
 	k->def = !!tb[NL80211_KEY_DEFAULT];
 	k->defmgmt = !!tb[NL80211_KEY_DEFAULT_MGMT];
+	k->defbeacon = !!tb[NL80211_KEY_DEFAULT_BEACON];
 
 	if (k->def) {
 		k->def_uni = true;
 		k->def_multi = true;
 	}
-	if (k->defmgmt)
+	if (k->defmgmt || k->defbeacon)
 		k->def_multi = true;
 
 	if (tb[NL80211_KEY_IDX])
@@ -790,10 +798,12 @@ static int nl80211_parse_key(struct genl_info *info, struct key_parse *k)
 	if (err)
 		return err;
 
-	if (k->def && k->defmgmt)
+	if ((k->def ? 1 : 0) + (k->defmgmt ? 1 : 0) +
+	    (k->defbeacon ? 1 : 0) > 1) {
 		return -EINVAL;
+	}
 
-	if (k->defmgmt) {
+	if (k->defmgmt || k->defbeacon) {
 		if (k->def_uni || !k->def_multi)
 			return -EINVAL;
 	}
@@ -802,11 +812,14 @@ static int nl80211_parse_key(struct genl_info *info, struct key_parse *k)
 		if (k->defmgmt) {
 			if (k->idx < 4 || k->idx > 5)
 				return -EINVAL;
+		} else if (k->defbeacon) {
+			if (k->idx < 6 || k->idx > 7)
+				return -EINVAL;
 		} else if (k->def) {
 			if (k->idx < 0 || k->idx > 3)
 				return -EINVAL;
 		} else {
-			if (k->idx < 0 || k->idx > 5)
+			if (k->idx < 0 || k->idx > 7)
 				return -EINVAL;
 		}
 	}
@@ -1122,6 +1135,34 @@ static int nl80211_send_coalesce(struct sk_buff *msg,
 	return 0;
 }
 
+static int
+nl80211_send_iftype_data(struct sk_buff *msg,
+			 const struct ieee80211_sband_iftype_data *iftdata)
+{
+	const struct ieee80211_sta_he_cap *he_cap = &iftdata->he_cap;
+
+	if (nl80211_put_iftypes(msg, NL80211_BAND_IFTYPE_ATTR_IFTYPES,
+				iftdata->types_mask))
+		return -ENOBUFS;
+
+	if (he_cap->has_he) {
+		if (nla_put(msg, NL80211_BAND_IFTYPE_ATTR_HE_CAP_MAC,
+			    sizeof(he_cap->he_cap_elem.mac_cap_info),
+			    he_cap->he_cap_elem.mac_cap_info) ||
+		    nla_put(msg, NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY,
+			    sizeof(he_cap->he_cap_elem.phy_cap_info),
+			    he_cap->he_cap_elem.phy_cap_info) ||
+		    nla_put(msg, NL80211_BAND_IFTYPE_ATTR_HE_CAP_MCS_SET,
+			    sizeof(he_cap->he_mcs_nss_supp),
+			    &he_cap->he_mcs_nss_supp) ||
+		    nla_put(msg, NL80211_BAND_IFTYPE_ATTR_HE_CAP_PPE,
+			    sizeof(he_cap->ppe_thres), he_cap->ppe_thres))
+			return -ENOBUFS;
+	}
+
+	return 0;
+}
+
 static int nl80211_send_band_rateinfo(struct sk_buff *msg,
 				      struct ieee80211_supported_band *sband)
 {
@@ -1150,6 +1191,41 @@ static int nl80211_send_band_rateinfo(struct sk_buff *msg,
 	     nla_put_u32(msg, NL80211_BAND_ATTR_VHT_CAPA,
 			 sband->vht_cap.cap)))
 		return -ENOBUFS;
+
+	/* add EDMG info */
+	if (sband->edmg_cap.channels &&
+	    (nla_put_u8(msg, NL80211_BAND_ATTR_EDMG_CHANNELS,
+		       sband->edmg_cap.channels) ||
+	    nla_put_u8(msg, NL80211_BAND_ATTR_EDMG_BW_CONFIG,
+		       sband->edmg_cap.bw_config)))
+
+		return -ENOBUFS;
+
+	if (sband->n_iftype_data) {
+		struct nlattr *nl_iftype_data =
+			nla_nest_start(msg, NL80211_BAND_ATTR_IFTYPE_DATA);
+		int err;
+
+		if (!nl_iftype_data)
+			return -ENOBUFS;
+
+		for (i = 0; i < sband->n_iftype_data; i++) {
+			struct nlattr *iftdata;
+
+			iftdata = nla_nest_start(msg, i + 1);
+			if (!iftdata)
+				return -ENOBUFS;
+
+			err = nl80211_send_iftype_data(msg,
+						       &sband->iftype_data[i]);
+			if (err)
+				return err;
+
+			nla_nest_end(msg, iftdata);
+		}
+
+		nla_nest_end(msg, nl_iftype_data);
+	}
 
 	/* add bitrates */
 	nl_rates = nla_nest_start(msg, NL80211_BAND_ATTR_RATES);
@@ -1491,6 +1567,7 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 		CMD(set_pmksa, SET_PMKSA);
 		CMD(del_pmksa, DEL_PMKSA);
 		CMD(flush_pmksa, FLUSH_PMKSA);
+		CMD(update_ft_ies, UPDATE_FT_IES);
 		if (rdev->wiphy.flags & WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL)
 			CMD(remain_on_channel, REMAIN_ON_CHANNEL);
 		CMD(set_bitrate_mask, SET_TX_BITRATE_MASK);
@@ -1928,6 +2005,8 @@ static int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
 
 	control_freq = nla_get_u32(info->attrs[NL80211_ATTR_WIPHY_FREQ]);
 
+	memset(chandef, 0, sizeof(*chandef));
+
 	chandef->chan = ieee80211_get_channel(&rdev->wiphy, control_freq);
 	chandef->width = NL80211_CHAN_WIDTH_20_NOHT;
 	chandef->center_freq1 = control_freq;
@@ -1965,6 +2044,18 @@ static int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
 			chandef->center_freq2 =
 				nla_get_u32(
 					info->attrs[NL80211_ATTR_CENTER_FREQ2]);
+	}
+
+	if (info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]) {
+		chandef->edmg.channels =
+		      nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]);
+
+		if (info->attrs[NL80211_ATTR_WIPHY_EDMG_BW_CONFIG])
+			chandef->edmg.bw_config =
+		     nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_BW_CONFIG]);
+	} else {
+		chandef->edmg.bw_config = 0;
+		chandef->edmg.channels = 0;
 	}
 
 	if (!cfg80211_chandef_valid(chandef))
@@ -2396,7 +2487,7 @@ static int nl80211_send_iface(struct sk_buff *msg, u32 portid, u32 seq, int flag
 
 	if (rdev->ops->get_channel) {
 		int ret;
-		struct cfg80211_chan_def chandef;
+		struct cfg80211_chan_def chandef = {};
 
 		ret = rdev_get_channel(rdev, wdev, &chandef);
 		if (ret == 0) {
@@ -2864,8 +2955,14 @@ static int nl80211_get_key(struct sk_buff *skb, struct genl_info *info)
 	void *hdr;
 	struct sk_buff *msg;
 
-	if (info->attrs[NL80211_ATTR_KEY_IDX])
+	if (info->attrs[NL80211_ATTR_KEY_IDX]) {
 		key_idx = nla_get_u8(info->attrs[NL80211_ATTR_KEY_IDX]);
+		if (key_idx > 5 &&
+		    !wiphy_ext_feature_isset(
+			    &rdev->wiphy,
+			    NL80211_EXT_FEATURE_BEACON_PROTECTION))
+			return -EINVAL;
+	}
 
 	if (key_idx > 5)
 		return -EINVAL;
@@ -2943,7 +3040,7 @@ static int nl80211_set_key(struct sk_buff *skb, struct genl_info *info)
 		return -EINVAL;
 
 	/* only support setting default key */
-	if (!key.def && !key.defmgmt)
+	if (!key.def && !key.defmgmt && !key.defbeacon)
 		return -EINVAL;
 
 	wdev_lock(dev->ieee80211_ptr);
@@ -2967,6 +3064,24 @@ static int nl80211_set_key(struct sk_buff *skb, struct genl_info *info)
 #ifdef CONFIG_CFG80211_WEXT
 		dev->ieee80211_ptr->wext.default_key = key.idx;
 #endif
+	} else if (key.defbeacon) {
+		if (key.def_uni || !key.def_multi) {
+			err = -EINVAL;
+			goto out;
+		}
+
+		if (!rdev->ops->set_default_beacon_key) {
+			err = -EOPNOTSUPP;
+			goto out;
+		}
+
+		err = nl80211_key_allowed(dev->ieee80211_ptr);
+		if (err)
+			goto out;
+
+		err = rdev_set_default_beacon_key(rdev, dev, key.idx);
+		if (err)
+			goto out;
 	} else {
 		if (key.def_uni || !key.def_multi) {
 			err = -EINVAL;
@@ -3026,6 +3141,10 @@ static int nl80211_new_key(struct sk_buff *skb, struct genl_info *info)
 	if (key.type != NL80211_KEYTYPE_PAIRWISE &&
 	    key.type != NL80211_KEYTYPE_GROUP)
 		return -EINVAL;
+
+	if (key.type == NL80211_KEYTYPE_GROUP &&
+	    info->attrs[NL80211_ATTR_VLAN_ID])
+		key.p.vlan_id = nla_get_u16(info->attrs[NL80211_ATTR_VLAN_ID]);
 
 	if (!rdev->ops->add_key)
 		return -EOPNOTSUPP;
@@ -3249,6 +3368,52 @@ static int nl80211_parse_beacon(struct nlattr *attrs[],
 	return 0;
 }
 
+static void nl80211_check_ap_rate_selectors(struct cfg80211_ap_settings *params,
+					    const u8 *rates)
+{
+	int i;
+
+	if (!rates)
+		return;
+
+	for (i = 0; i < rates[1]; i++) {
+		if (rates[2 + i] == BSS_MEMBERSHIP_SELECTOR_HT_PHY)
+			params->ht_required = true;
+		if (rates[2 + i] == BSS_MEMBERSHIP_SELECTOR_VHT_PHY)
+			params->vht_required = true;
+	}
+}
+
+/*
+ * Since the nl80211 API didn't include, from the beginning, attributes about
+ * HT/VHT requirements/capabilities, we parse them out of the IEs for the
+ * benefit of drivers that rebuild IEs in the firmware.
+ */
+static void nl80211_calculate_ap_params(struct cfg80211_ap_settings *params)
+{
+	const struct cfg80211_beacon_data *bcn = &params->beacon;
+	size_t ies_len = bcn->tail_len;
+	const u8 *ies = bcn->tail;
+	const u8 *rates;
+	const u8 *cap;
+
+	rates = cfg80211_find_ie(WLAN_EID_SUPP_RATES, ies, ies_len);
+	nl80211_check_ap_rate_selectors(params, rates);
+
+	rates = cfg80211_find_ie(WLAN_EID_EXT_SUPP_RATES, ies, ies_len);
+	nl80211_check_ap_rate_selectors(params, rates);
+
+	cap = cfg80211_find_ie(WLAN_EID_HT_CAPABILITY, ies, ies_len);
+	if (cap && cap[1] >= sizeof(*params->ht_cap))
+		params->ht_cap = (void *)(cap + 2);
+	cap = cfg80211_find_ie(WLAN_EID_VHT_CAPABILITY, ies, ies_len);
+	if (cap && cap[1] >= sizeof(*params->vht_cap))
+		params->vht_cap = (void *)(cap + 2);
+	cap = cfg80211_find_ext_ie(WLAN_EID_EXT_HE_CAPABILITY, ies, ies_len);
+	if (cap && cap[1] >= sizeof(*params->he_cap) + 1)
+		params->he_cap = (void *)(cap + 3);
+}
+
 static bool nl80211_get_ap_channel(struct cfg80211_registered_device *rdev,
 				   struct cfg80211_ap_settings *params)
 {
@@ -3458,6 +3623,8 @@ static int nl80211_start_ap(struct sk_buff *skb, struct genl_info *info)
 	params.pbss = nla_get_flag(info->attrs[NL80211_ATTR_PBSS]);
 	if (params.pbss && !rdev->wiphy.bands[IEEE80211_BAND_60GHZ])
 		return -EOPNOTSUPP;
+	nl80211_calculate_ap_params(&params);
+
 
 	wdev_lock(wdev);
 	err = rdev_start_ap(rdev, dev, &params);
@@ -3643,6 +3810,9 @@ static bool nl80211_put_sta_rate(struct sk_buff *msg, struct rate_info *info,
 	case RATE_INFO_BW_160:
 		rate_flg = NL80211_RATE_INFO_160_MHZ_WIDTH;
 		break;
+	case RATE_INFO_BW_HE_RU:
+		rate_flg = 0;
+		WARN_ON(!(info->flags & RATE_INFO_FLAGS_HE_MCS));
 	}
 
 	if (rate_flg && nla_put_flag(msg, rate_flg))
@@ -3661,6 +3831,19 @@ static bool nl80211_put_sta_rate(struct sk_buff *msg, struct rate_info *info,
 			return false;
 		if (info->flags & RATE_INFO_FLAGS_SHORT_GI &&
 		    nla_put_flag(msg, NL80211_RATE_INFO_SHORT_GI))
+			return false;
+	} else if (info->flags & RATE_INFO_FLAGS_HE_MCS) {
+		if (nla_put_u8(msg, NL80211_RATE_INFO_HE_MCS, info->mcs))
+			return false;
+		if (nla_put_u8(msg, NL80211_RATE_INFO_HE_NSS, info->nss))
+			return false;
+		if (nla_put_u8(msg, NL80211_RATE_INFO_HE_GI, info->he_gi))
+			return false;
+		if (nla_put_u8(msg, NL80211_RATE_INFO_HE_DCM, info->he_dcm))
+			return false;
+		if (info->bw == RATE_INFO_BW_HE_RU &&
+				nla_put_u8(msg, NL80211_RATE_INFO_HE_RU_ALLOC,
+					info->he_ru_alloc))
 			return false;
 	}
 
@@ -4032,7 +4215,8 @@ int cfg80211_check_station_change(struct wiphy *wiphy,
 			return -EINVAL;
 		if (params->supported_rates)
 			return -EINVAL;
-		if (params->ext_capab || params->ht_capa || params->vht_capa)
+		if (params->ext_capab || params->ht_capa || params->vht_capa ||
+			params->he_capa)
 			return -EINVAL;
 	}
 
@@ -4230,6 +4414,16 @@ static int nl80211_set_station_tdls(struct genl_info *info,
 		params->vht_capa =
 			nla_data(info->attrs[NL80211_ATTR_VHT_CAPABILITY]);
 
+	if (info->attrs[NL80211_ATTR_HE_CAPABILITY]) {
+		params->he_capa =
+			nla_data(info->attrs[NL80211_ATTR_HE_CAPABILITY]);
+		params->he_capa_len =
+			nla_len(info->attrs[NL80211_ATTR_HE_CAPABILITY]);
+
+		if (params->he_capa_len < NL80211_HE_MIN_CAPABILITY_LEN)
+			return -EINVAL;
+	}
+
 	err = nl80211_parse_sta_channel_info(info, params);
 	if (err)
 		return err;
@@ -4257,6 +4451,9 @@ static int nl80211_set_station(struct sk_buff *skb, struct genl_info *info)
 	 */
 	if (info->attrs[NL80211_ATTR_PEER_AID])
 		params.aid = nla_get_u16(info->attrs[NL80211_ATTR_PEER_AID]);
+
+	if (info->attrs[NL80211_ATTR_VLAN_ID])
+		params.vlan_id = nla_get_u16(info->attrs[NL80211_ATTR_VLAN_ID]);
 
 	if (info->attrs[NL80211_ATTR_STA_LISTEN_INTERVAL])
 		params.listen_interval =
@@ -4385,6 +4582,9 @@ static int nl80211_new_station(struct sk_buff *skb, struct genl_info *info)
 	params.listen_interval =
 		nla_get_u16(info->attrs[NL80211_ATTR_STA_LISTEN_INTERVAL]);
 
+	if (info->attrs[NL80211_ATTR_VLAN_ID])
+		params.vlan_id = nla_get_u16(info->attrs[NL80211_ATTR_VLAN_ID]);
+
 	if (info->attrs[NL80211_ATTR_PEER_AID])
 		params.aid = nla_get_u16(info->attrs[NL80211_ATTR_PEER_AID]);
 	else
@@ -4412,6 +4612,17 @@ static int nl80211_new_station(struct sk_buff *skb, struct genl_info *info)
 	if (info->attrs[NL80211_ATTR_VHT_CAPABILITY])
 		params.vht_capa =
 			nla_data(info->attrs[NL80211_ATTR_VHT_CAPABILITY]);
+
+	if (info->attrs[NL80211_ATTR_HE_CAPABILITY]) {
+		params.he_capa =
+			nla_data(info->attrs[NL80211_ATTR_HE_CAPABILITY]);
+		params.he_capa_len =
+			nla_len(info->attrs[NL80211_ATTR_HE_CAPABILITY]);
+
+		/* max len is validated in nla policy */
+		if (params.he_capa_len < NL80211_HE_MIN_CAPABILITY_LEN)
+			return -EINVAL;
+	}
 
 	if (info->attrs[NL80211_ATTR_OPMODE_NOTIF]) {
 		params.opmode_notif_used = true;
@@ -4445,6 +4656,10 @@ static int nl80211_new_station(struct sk_buff *skb, struct genl_info *info)
 	if (!(params.sta_flags_set & BIT(NL80211_STA_FLAG_WME))) {
 		params.ht_capa = NULL;
 		params.vht_capa = NULL;
+
+		/* HE requires WME */
+		if (params.he_capa_len)
+			return -EINVAL;
 	}
 
 	/* When you run into this, adjust the code below for the new flag */
@@ -7185,6 +7400,10 @@ static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 		memcpy(settings->akm_suites, data, len);
 	}
 
+	if (info->attrs[NL80211_ATTR_SAE_PWE]) {
+		settings->sae_pwe = nla_get_u16(
+					info->attrs[NL80211_ATTR_SAE_PWE]);
+	}
 	return 0;
 }
 
@@ -7925,6 +8144,15 @@ static int nl80211_connect(struct sk_buff *skb, struct genl_info *info)
 			wiphy, info->attrs[NL80211_ATTR_WIPHY_FREQ_HINT]);
 		if (!connect.channel_hint)
 			return -EINVAL;
+	}
+
+	if (info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]) {
+		connect.edmg.channels =
+		      nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_CHANNELS]);
+
+		if (info->attrs[NL80211_ATTR_WIPHY_EDMG_BW_CONFIG])
+			connect.edmg.bw_config =
+		     nla_get_u8(info->attrs[NL80211_ATTR_WIPHY_EDMG_BW_CONFIG]);
 	}
 
 	if (connect.privacy && info->attrs[NL80211_ATTR_KEYS]) {
@@ -10061,6 +10289,7 @@ static int nl80211_update_ft_ies(struct sk_buff *skb, struct genl_info *info)
 		return -EOPNOTSUPP;
 
 	if (!info->attrs[NL80211_ATTR_MDID] ||
+	    !info->attrs[NL80211_ATTR_IE] ||
 	    !is_valid_ie_attr(info->attrs[NL80211_ATTR_IE]))
 		return -EINVAL;
 

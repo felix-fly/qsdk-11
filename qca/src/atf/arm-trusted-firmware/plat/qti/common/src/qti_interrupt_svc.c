@@ -30,6 +30,9 @@ static uint64_t qti_el3_interrupt_handler(uint32_t id, uint32_t flags,
 
 	irq = plat_ic_acknowledge_interrupt();
 
+	/* Mask the CPU ID to get irq number*/
+	irq = plat_ic_get_interrupt_id(irq);
+
 	qtiseclib_invoke_isr(irq, handle);
 
 	/* End of Interrupt. */

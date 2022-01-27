@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -23,6 +23,37 @@
 #include <qdf_module.h>
 #include <cfg_ucfg_api.h>
 
+static bool
+ucfg_spectral_is_mode_specific_request(uint8_t spectral_cp_request_id)
+{
+	bool mode_specific_request;
+
+	switch (spectral_cp_request_id) {
+	case SPECTRAL_SET_CONFIG:
+	case SPECTRAL_GET_CONFIG:
+	case SPECTRAL_IS_ACTIVE:
+	case SPECTRAL_IS_ENABLED:
+	case SPECTRAL_ACTIVATE_SCAN:
+	case SPECTRAL_STOP_SCAN:
+		mode_specific_request = true;
+		break;
+	case SPECTRAL_SET_DEBUG_LEVEL:
+	case SPECTRAL_GET_DEBUG_LEVEL:
+	case SPECTRAL_GET_CAPABILITY_INFO:
+	case SPECTRAL_GET_DIAG_STATS:
+	case SPECTRAL_GET_CHAN_WIDTH:
+	case SPECTRAL_SET_DMA_DEBUG:
+		mode_specific_request = false;
+		break;
+	default:
+		spectral_err("Invalid spectral cp request id %u",
+			     spectral_cp_request_id);
+		mode_specific_request = false;
+	}
+
+	return mode_specific_request;
+}
+
 QDF_STATUS
 ucfg_spectral_control(struct wlan_objmgr_pdev *pdev,
 		      struct spectral_cp_request *sscan_req)
@@ -31,18 +62,28 @@ ucfg_spectral_control(struct wlan_objmgr_pdev *pdev,
 
 	if (!pdev) {
 		spectral_err("PDEV is NULL!");
-		return -EPERM;
+		return QDF_STATUS_E_INVAL;
 	}
 
-	if (wlan_spectral_is_feature_disabled(wlan_pdev_get_psoc(pdev))) {
-		spectral_info("Spectral is disabled");
-		return -EPERM;
+	if (wlan_spectral_is_feature_disabled_pdev(pdev)) {
+		spectral_info("Spectral feature is disabled");
+		return QDF_STATUS_COMP_DISABLED;
+	}
+
+	/* For mode specific requests, check whether
+	 * Spectral mode in the cp request is disabaled
+	 */
+	if (ucfg_spectral_is_mode_specific_request(sscan_req->req_id) &&
+	    wlan_spectral_is_mode_disabled_pdev(pdev, sscan_req->ss_mode)) {
+		spectral_info("Spectral mode %d is disabled",
+			      sscan_req->ss_mode);
+		return QDF_STATUS_E_NOSUPPORT;
 	}
 
 	sc = spectral_get_spectral_ctx_from_pdev(pdev);
 	if (!sc) {
 		spectral_err("spectral context is NULL!");
-		return -EPERM;
+		return QDF_STATUS_E_INVAL;
 	}
 
 	return sc->sptrlc_spectral_control(pdev, sscan_req);
@@ -217,3 +258,22 @@ bad:
 
 qdf_export_symbol(ucfg_spectral_extract_response);
 
+QDF_STATUS ucfg_spectral_register_to_dbr(struct wlan_objmgr_pdev *pdev)
+{
+	return spectral_pdev_open(pdev);
+}
+
+QDF_STATUS ucfg_spectral_get_version(struct wlan_objmgr_pdev *pdev,
+				     uint32_t *version, uint32_t *sub_version)
+{
+	if (!pdev || !version || !sub_version) {
+		spectral_err("invalid param");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	*version = SPECTRAL_VERSION;
+	*sub_version = SPECTRAL_SUB_VERSION;
+	spectral_debug("Spectral get version %d:%d", *version, *sub_version);
+
+	return QDF_STATUS_SUCCESS;
+}

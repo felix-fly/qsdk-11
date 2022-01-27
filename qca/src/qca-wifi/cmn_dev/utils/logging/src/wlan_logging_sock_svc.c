@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -34,6 +34,7 @@
 #include <host_diag_core_event.h>
 #include "host_diag_core_log.h"
 #include <qdf_event.h>
+#include <qdf_module.h>
 
 #ifdef CNSS_GENL
 #include <net/cnss_nl.h>
@@ -98,6 +99,15 @@
 #define HOST_LOG_FW_FLUSH_COMPLETE 0x003
 #define DIAG_TYPE_LOGS                 1
 #define PTT_MSG_DIAG_CMDS_TYPE    0x5050
+#define MAX_LOG_LINE 500
+
+/* default rate limit period - 2sec */
+#define PANIC_WIFILOG_PRINT_RATE_LIMIT_PERIOD (2*HZ)
+/* default burst for rate limit */
+#define PANIC_WIFILOG_PRINT_RATE_LIMIT_BURST_DEFAULT 250
+DEFINE_RATELIMIT_STATE(panic_wifilog_ratelimit,
+		       PANIC_WIFILOG_PRINT_RATE_LIMIT_PERIOD,
+		       PANIC_WIFILOG_PRINT_RATE_LIMIT_BURST_DEFAULT);
 
 struct log_msg {
 	struct list_head node;
@@ -140,8 +150,8 @@ struct pkt_stats_msg {
 
 #define MAX_FLUSH_TIMER_PERIOD_VALUE 3600000 /* maximum of 1 hour (in ms) */
 struct wlan_logging {
-	/* Log Fatal and ERROR to console */
-	bool log_to_console;
+	/* Console log levels */
+	uint32_t console_log_levels;
 	/* Number of buffers to be used for logging */
 	uint32_t num_buf;
 	uint32_t buffer_length;
@@ -151,6 +161,8 @@ struct wlan_logging {
 	struct list_head free_list;
 	/* Holds the filled nodes which needs to be indicated to APP */
 	struct list_head filled_list;
+	/* Holds nodes for console printing in case of kernel panic */
+	struct list_head panic_list;
 	/* Wait queue for Logger thread */
 	wait_queue_head_t wait_queue;
 	/* Logger thread */
@@ -182,7 +194,10 @@ struct wlan_logging {
 	qdf_spinlock_t flush_timer_lock;
 };
 
-static struct wlan_logging gwlan_logging;
+/* This global variable is intentionally not marked static because it
+ * is used by offline tools. Please do not use it outside this file.
+ */
+struct wlan_logging gwlan_logging;
 static struct pkt_stats_msg *gpkt_stats_buffers;
 
 #ifdef WLAN_LOGGING_BUFFERS_DYNAMICALLY
@@ -207,11 +222,14 @@ static struct log_msg gplog_msg[MAX_LOGMSG_COUNT];
 
 static inline QDF_STATUS allocate_log_msg_buffer(void)
 {
+	qdf_minidump_log(gplog_msg, sizeof(gplog_msg), "wlan_logs");
 	return QDF_STATUS_SUCCESS;
 }
 
 static inline void free_log_msg_buffer(void)
-{ }
+{
+	qdf_minidump_remove(gplog_msg, sizeof(gplog_msg), "wlan_logs");
+}
 #endif
 
 /* Need to call this with spin_lock acquired */
@@ -287,65 +305,54 @@ static int wlan_add_user_log_time_stamp(char *tbuf, size_t tbuf_sz, uint64_t ts)
 
 	qdf_get_time_of_the_day_in_hr_min_sec_usec(time_buf, sizeof(time_buf));
 
-	return scnprintf(tbuf, tbuf_sz, "[%.16s][0x%llx]%s",
-			 current_process_name(), ts, time_buf);
+	return scnprintf(tbuf, tbuf_sz, "[%.6s][0x%llx]%s",
+			 current_process_name(), (unsigned long long)ts,
+			 time_buf);
 }
 
 #ifdef WLAN_MAX_LOGS_PER_SEC
-static qdf_time_t __log_window_end_ticks;
-static qdf_atomic_t __log_window_count;
-
-/**
- * assert_on_excessive_logging() - Check for and panic on excessive logging
- *
- * Track logging count using a quasi-tumbling window, 1 second long. If the max
- * logging count for a given window is exceeded, panic.
- *
- * Return: None
- */
-static void assert_on_excessive_logging(void)
+static inline void wlan_panic_on_excessive_logging(void)
 {
-	qdf_time_t now = qdf_system_ticks();
-
-	/*
-	 * If 'now' is more recent than the end of the window, reset.
-	 *
-	 * Note: This is not thread safe, and can result in more than one reset.
-	 * For our purposes, this is fine.
-	 */
-	if (qdf_system_time_after(now, __log_window_end_ticks)) {
-		__log_window_end_ticks = now + qdf_system_ticks_per_sec;
-		qdf_atomic_set(&__log_window_count, 0);
-	}
-
-	/* this _is_ thread safe, and results in at most one panic */
-	if (qdf_atomic_inc_return(&__log_window_count) == WLAN_MAX_LOGS_PER_SEC)
+	if (qdf_detected_excessive_logging())
 		QDF_DEBUG_PANIC("Exceeded %d logs per second",
 				WLAN_MAX_LOGS_PER_SEC);
 }
 #else
-static inline void assert_on_excessive_logging(void) { }
+static inline void wlan_panic_on_excessive_logging(void) {}
 #endif /* WLAN_MAX_LOGS_PER_SEC */
 
+#ifdef QDF_TRACE_PRINT_ENABLE
+static inline void
+log_to_console(QDF_TRACE_LEVEL level, const char *timestamp, const char *msg)
+{
+	if (qdf_detected_excessive_logging()) {
+		qdf_rl_print_supressed_inc();
+		return;
+	}
+
+	qdf_rl_print_supressed_log();
+	pr_err("%s %s\n", timestamp, msg);
+}
+#else
 static inline void
 log_to_console(QDF_TRACE_LEVEL level, const char *timestamp, const char *msg)
 {
 	switch (level) {
 	case QDF_TRACE_LEVEL_FATAL:
 		pr_alert("%s %s\n", timestamp, msg);
-		assert_on_excessive_logging();
+		wlan_panic_on_excessive_logging();
 		break;
 	case QDF_TRACE_LEVEL_ERROR:
 		pr_err("%s %s\n", timestamp, msg);
-		assert_on_excessive_logging();
+		wlan_panic_on_excessive_logging();
 		break;
 	case QDF_TRACE_LEVEL_WARN:
 		pr_warn("%s %s\n", timestamp, msg);
-		assert_on_excessive_logging();
+		wlan_panic_on_excessive_logging();
 		break;
 	case QDF_TRACE_LEVEL_INFO:
 		pr_info("%s %s\n", timestamp, msg);
-		assert_on_excessive_logging();
+		wlan_panic_on_excessive_logging();
 		break;
 	case QDF_TRACE_LEVEL_INFO_HIGH:
 	case QDF_TRACE_LEVEL_INFO_MED:
@@ -356,6 +363,7 @@ log_to_console(QDF_TRACE_LEVEL level, const char *timestamp, const char *msg)
 		break;
 	}
 }
+#endif
 
 int wlan_log_to_user(QDF_TRACE_LEVEL log_level, char *to_be_sent, int length)
 {
@@ -430,7 +438,7 @@ int wlan_log_to_user(QDF_TRACE_LEVEL log_level, char *to_be_sent, int length)
 		wake_up_interruptible(&gwlan_logging.wait_queue);
 	}
 
-	if (gwlan_logging.log_to_console)
+	if (gwlan_logging.console_log_levels & BIT(log_level))
 		log_to_console(log_level, tbuf, to_be_sent);
 
 	return 0;
@@ -482,8 +490,9 @@ static int pkt_stats_fill_headers(struct sk_buff *skb)
 				cds_pkt_size);
 
 	if (unlikely(skb_headroom(skb) < cds_pkt_size)) {
-		pr_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
-			__LINE__, skb->head, skb->data, sizeof(msg_header));
+		qdf_nofl_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
+			     __LINE__, skb->head, skb->data,
+			     sizeof(msg_header));
 		return -EIO;
 	}
 
@@ -491,8 +500,9 @@ static int pkt_stats_fill_headers(struct sk_buff *skb)
 			&cds_pktlog, cds_pkt_size);
 
 	if (unlikely(skb_headroom(skb) < sizeof(int))) {
-		pr_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
-			__LINE__, skb->head, skb->data, sizeof(int));
+		qdf_nofl_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
+			     __LINE__, skb->head, skb->data,
+			     sizeof(int));
 		return -EIO;
 	}
 
@@ -513,8 +523,9 @@ static int pkt_stats_fill_headers(struct sk_buff *skb)
 	msg_header.wmsg.length = cpu_to_be16(skb->len);
 
 	if (unlikely(skb_headroom(skb) < sizeof(msg_header))) {
-		pr_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
-			__LINE__, skb->head, skb->data, sizeof(msg_header));
+		qdf_nofl_err("VPKT [%d]: Insufficient headroom, head[%pK], data[%pK], req[%zu]",
+			     __LINE__, skb->head, skb->data,
+			     sizeof(msg_header));
 		return -EIO;
 	}
 
@@ -564,8 +575,8 @@ static int pktlog_send_per_pkt_stats_to_user(void)
 		skb_new = dev_alloc_skb(MAX_SKBMSG_LENGTH);
 		if (!skb_new) {
 			if (!rate_limit) {
-				pr_err("%s: dev_alloc_skb() failed for msg size[%d] drop count = %u\n",
-					__func__, MAX_SKBMSG_LENGTH,
+				qdf_err("dev_alloc_skb() failed for msg size[%d] drop count = %u",
+					MAX_SKBMSG_LENGTH,
 					gwlan_logging.drop_count);
 			}
 			rate_limit = 1;
@@ -582,14 +593,13 @@ static int pktlog_send_per_pkt_stats_to_user(void)
 
 		ret = pkt_stats_fill_headers(pstats_msg->skb);
 		if (ret < 0) {
-			pr_err("%s failed to fill headers %d\n", __func__, ret);
+			qdf_err("Failed to fill headers %d", ret);
 			free_old_skb = true;
 			goto err;
 		}
 		ret = nl_srv_bcast_diag(pstats_msg->skb);
 		if (ret < 0) {
-			pr_info("%s: Send Failed %d drop_count = %u\n",
-				__func__, ret,
+			qdf_info("Send Failed %d drop_count = %u", ret,
 				++gwlan_logging.pkt_stat_drop_cnt);
 		} else {
 			ret = 0;
@@ -640,9 +650,8 @@ static int send_filled_buffers_to_user(void)
 		skb = dev_alloc_skb(MAX_LOGMSG_LENGTH);
 		if (!skb) {
 			if (!rate_limit) {
-				pr_err
-					("%s: dev_alloc_skb() failed for msg size[%d] drop count = %u\n",
-					__func__, MAX_LOGMSG_LENGTH,
+				qdf_err("dev_alloc_skb() failed for msg size[%d] drop count = %u",
+					MAX_LOGMSG_LENGTH,
 					gwlan_logging.drop_count);
 			}
 			rate_limit = 1;
@@ -669,10 +678,9 @@ static int send_filled_buffers_to_user(void)
 			list_add_tail(&plog_msg->node,
 				      &gwlan_logging.free_list);
 			spin_unlock_irqrestore(&gwlan_logging.spin_lock, flags);
-			pr_err("%s: drop_count = %u\n", __func__,
-			       ++gwlan_logging.drop_count);
-			pr_err("%s: nlmsg_put() failed for msg size[%d]\n",
-			       __func__, tot_msg_len);
+			qdf_err("drop_count = %u", ++gwlan_logging.drop_count);
+			qdf_err("nlmsg_put() failed for msg size[%d]",
+				tot_msg_len);
 			dev_kfree_skb(skb);
 			skb = NULL;
 			ret = -EINVAL;
@@ -691,8 +699,8 @@ static int send_filled_buffers_to_user(void)
 		ret = nl_srv_bcast_host_logs(skb);
 		/* print every 64th drop count */
 		if (ret < 0 && (!(gwlan_logging.drop_count % 0x40))) {
-			pr_err("%s: Send Failed %d drop_count = %u\n",
-			       __func__, ret, ++gwlan_logging.drop_count);
+			qdf_err("Send Failed %d drop_count = %u",
+				ret, ++gwlan_logging.drop_count);
 		}
 	}
 
@@ -800,9 +808,7 @@ static int wlan_logging_thread(void *Arg)
 						  || gwlan_logging.exit));
 
 		if (ret_wait_status == -ERESTARTSYS) {
-			pr_err
-				("%s: wait_event_interruptible returned -ERESTARTSYS",
-				__func__);
+			qdf_err("wait_event_interruptible returned -ERESTARTSYS");
 			break;
 		}
 
@@ -874,10 +880,12 @@ void wlan_logging_set_active(bool active)
 	gwlan_logging.is_active = active;
 }
 
-void wlan_logging_set_log_to_console(bool log_to_console)
+void wlan_set_console_log_levels(uint32_t console_log_levels)
 {
-	gwlan_logging.log_to_console = log_to_console;
+	gwlan_logging.console_log_levels = console_log_levels;
 }
+
+qdf_export_symbol(wlan_set_console_log_levels);
 
 static void flush_log_buffers_timer(void *dummy)
 {
@@ -911,6 +919,127 @@ int wlan_logging_set_flush_timer(uint32_t milliseconds)
 	return 0;
 }
 
+static int panic_wifilog_ratelimit_print(void)
+{
+	return __ratelimit(&panic_wifilog_ratelimit);
+}
+
+/**
+ * wlan_logging_dump_last_logs() - Panic notifier callback's helper function
+ *
+ * This function prints buffered logs in chunks of MAX_LOG_LINE.
+ */
+static void wlan_logging_dump_last_logs(void)
+{
+	char *log;
+	struct log_msg *plog_msg;
+	char textbuf[MAX_LOG_LINE];
+	unsigned int filled_length;
+	unsigned int text_len;
+	unsigned long flags;
+
+	/* Iterate over panic list */
+	pr_err("\n");
+	while (!list_empty(&gwlan_logging.panic_list)) {
+		plog_msg = (struct log_msg *)
+			   (gwlan_logging.panic_list.next);
+		list_del_init(gwlan_logging.panic_list.next);
+		log = &plog_msg->logbuf[sizeof(tAniHdr)];
+		filled_length = plog_msg->filled_length;
+		while (filled_length) {
+			text_len = scnprintf(textbuf,
+					     sizeof(textbuf),
+					     "%s", log);
+			if (panic_wifilog_ratelimit_print())
+				pr_err("%s\n", textbuf);
+			log += text_len;
+			filled_length -= text_len;
+		}
+		spin_lock_irqsave(&gwlan_logging.spin_lock, flags);
+		list_add_tail(&plog_msg->node,
+			      &gwlan_logging.free_list);
+		spin_unlock_irqrestore(&gwlan_logging.spin_lock, flags);
+	}
+}
+
+/**
+ * wlan_logging_panic_handler() - Panic notifier callback
+ *
+ * This function extracts log buffers in filled list and
+ * current node.Sends them to helper function for printing.
+ */
+static int wlan_logging_panic_handler(struct notifier_block *this,
+				      unsigned long event, void *ptr)
+{
+	char *log;
+	struct log_msg *plog_msg;
+	unsigned long flags;
+
+	spin_lock_irqsave(&gwlan_logging.spin_lock, flags);
+	/* Iterate over nodes queued for app */
+	while (!list_empty(&gwlan_logging.filled_list)) {
+		plog_msg = (struct log_msg *)
+			   (gwlan_logging.filled_list.next);
+		list_del_init(gwlan_logging.filled_list.next);
+		list_add_tail(&plog_msg->node,
+			      &gwlan_logging.panic_list);
+	}
+	/* Check current node */
+	if (gwlan_logging.pcur_node &&
+	    gwlan_logging.pcur_node->filled_length) {
+		plog_msg = gwlan_logging.pcur_node;
+		log = &plog_msg->logbuf[sizeof(tAniHdr)];
+		log[plog_msg->filled_length] = '\0';
+		list_add_tail(&gwlan_logging.pcur_node->node,
+			      &gwlan_logging.panic_list);
+		if (!list_empty(&gwlan_logging.free_list)) {
+			gwlan_logging.pcur_node =
+				(struct log_msg *)(gwlan_logging.free_list.next);
+			list_del_init(gwlan_logging.free_list.next);
+			gwlan_logging.pcur_node->filled_length = 0;
+		} else
+			gwlan_logging.pcur_node = NULL;
+	}
+	spin_unlock_irqrestore(&gwlan_logging.spin_lock, flags);
+
+	wlan_logging_dump_last_logs();
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block panic_nb = {
+	.notifier_call  = wlan_logging_panic_handler,
+};
+
+int wlan_logging_notifier_init(bool dump_at_kernel_enable)
+{
+	int ret;
+
+	if (gwlan_logging.is_active &&
+	    !dump_at_kernel_enable) {
+		ret = atomic_notifier_chain_register(&panic_notifier_list,
+						     &panic_nb);
+		if (ret) {
+			QDF_TRACE_ERROR(QDF_MODULE_ID_QDF,
+					"Failed to register panic notifier");
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+int wlan_logging_notifier_deinit(bool dump_at_kernel_enable)
+{
+	if (gwlan_logging.is_active &&
+	    !dump_at_kernel_enable) {
+		atomic_notifier_chain_unregister(&panic_notifier_list,
+						 &panic_nb);
+	}
+
+	return 0;
+}
+
 static void flush_timer_init(void)
 {
 	qdf_spinlock_create(&gwlan_logging.flush_timer_lock);
@@ -921,28 +1050,37 @@ static void flush_timer_init(void)
 	gwlan_logging.flush_timer_period = 0;
 }
 
+static void flush_timer_deinit(void)
+{
+	gwlan_logging.is_flush_timer_initialized = false;
+	qdf_spin_lock(&gwlan_logging.flush_timer_lock);
+	qdf_timer_stop(&gwlan_logging.flush_timer);
+	qdf_timer_free(&gwlan_logging.flush_timer);
+	qdf_spin_unlock(&gwlan_logging.flush_timer_lock);
+	qdf_spinlock_destroy(&gwlan_logging.flush_timer_lock);
+}
+
 int wlan_logging_sock_init_svc(void)
 {
 	int i = 0, j, pkt_stats_size;
 	unsigned long irq_flag;
 
-	flush_timer_init();
 	spin_lock_init(&gwlan_logging.spin_lock);
 	spin_lock_init(&gwlan_logging.pkt_stats_lock);
 
-	gwlan_logging.log_to_console = false;
+	gwlan_logging.console_log_levels = 0;
 	gwlan_logging.num_buf = MAX_LOGMSG_COUNT;
 	gwlan_logging.buffer_length = MAX_LOGMSG_LENGTH;
 
 	if (allocate_log_msg_buffer() != QDF_STATUS_SUCCESS) {
-		pr_err("%s: Could not allocate memory for log_msg\n",
-		       __func__);
+		qdf_err("Could not allocate memory for log_msg");
 		return -ENOMEM;
 	}
 
 	spin_lock_irqsave(&gwlan_logging.spin_lock, irq_flag);
 	INIT_LIST_HEAD(&gwlan_logging.free_list);
 	INIT_LIST_HEAD(&gwlan_logging.filled_list);
+	INIT_LIST_HEAD(&gwlan_logging.panic_list);
 
 	for (i = 0; i < gwlan_logging.num_buf; i++) {
 		list_add(&gplog_msg[i].node, &gwlan_logging.free_list);
@@ -953,12 +1091,13 @@ int wlan_logging_sock_init_svc(void)
 	list_del_init(gwlan_logging.free_list.next);
 	spin_unlock_irqrestore(&gwlan_logging.spin_lock, irq_flag);
 
+	flush_timer_init();
+
 	/* Initialize the pktStats data structure here */
 	pkt_stats_size = sizeof(struct pkt_stats_msg);
 	gpkt_stats_buffers = vmalloc(MAX_PKTSTATS_BUFF * pkt_stats_size);
 	if (!gpkt_stats_buffers) {
-		pr_err("%s: Could not allocate memory for Pkt stats\n",
-			__func__);
+		qdf_err("Could not allocate memory for Pkt stats");
 		goto err1;
 	}
 	qdf_mem_zero(gpkt_stats_buffers,
@@ -974,7 +1113,7 @@ int wlan_logging_sock_init_svc(void)
 	for (i = 0; i < MAX_PKTSTATS_BUFF; i++) {
 		gpkt_stats_buffers[i].skb = dev_alloc_skb(MAX_PKTSTATS_LENGTH);
 		if (!gpkt_stats_buffers[i].skb) {
-			pr_err("%s: Memory alloc failed for skb", __func__);
+			qdf_err("Memory alloc failed for skb");
 			/* free previously allocated skb and return */
 			for (j = 0; j < i ; j++)
 				dev_kfree_skb(gpkt_stats_buffers[j].skb);
@@ -1001,8 +1140,7 @@ int wlan_logging_sock_init_svc(void)
 	gwlan_logging.thread = kthread_create(wlan_logging_thread, NULL,
 					      "wlan_logging_thread");
 	if (IS_ERR(gwlan_logging.thread)) {
-		pr_err("%s: Could not Create LogMsg Thread Controller",
-		       __func__);
+		qdf_err("Could not Create LogMsg Thread Controller");
 		goto err3;
 	}
 	wake_up_process(gwlan_logging.thread);
@@ -1023,22 +1161,13 @@ err2:
 	vfree(gpkt_stats_buffers);
 	gpkt_stats_buffers = NULL;
 err1:
+	flush_timer_deinit();
 	spin_lock_irqsave(&gwlan_logging.spin_lock, irq_flag);
 	gwlan_logging.pcur_node = NULL;
 	spin_unlock_irqrestore(&gwlan_logging.spin_lock, irq_flag);
 	free_log_msg_buffer();
 
 	return -ENOMEM;
-}
-
-static void flush_timer_deinit(void)
-{
-	gwlan_logging.is_flush_timer_initialized = false;
-	qdf_spin_lock(&gwlan_logging.flush_timer_lock);
-	qdf_timer_stop(&gwlan_logging.flush_timer);
-	qdf_timer_free(&gwlan_logging.flush_timer);
-	qdf_spin_unlock(&gwlan_logging.flush_timer_lock);
-	qdf_spinlock_destroy(&gwlan_logging.flush_timer_lock);
 }
 
 int wlan_logging_sock_deinit_svc(void)
@@ -1062,10 +1191,6 @@ int wlan_logging_sock_deinit_svc(void)
 	wake_up_interruptible(&gwlan_logging.wait_queue);
 	wait_for_completion(&gwlan_logging.shutdown_comp);
 
-	spin_lock_irqsave(&gwlan_logging.spin_lock, irq_flag);
-	gwlan_logging.pcur_node = NULL;
-	spin_unlock_irqrestore(&gwlan_logging.spin_lock, irq_flag);
-
 	spin_lock_irqsave(&gwlan_logging.pkt_stats_lock, irq_flag);
 	gwlan_logging.pkt_stats_pcur_node = NULL;
 	gwlan_logging.pkt_stats_msg_idx = 0;
@@ -1075,11 +1200,17 @@ int wlan_logging_sock_deinit_svc(void)
 			dev_kfree_skb(gpkt_stats_buffers[i].skb);
 	}
 	spin_unlock_irqrestore(&gwlan_logging.pkt_stats_lock, irq_flag);
-
 	vfree(gpkt_stats_buffers);
 	gpkt_stats_buffers = NULL;
-	free_log_msg_buffer();
+
+	/* Delete the Flush timer then mark pcur_node NULL */
 	flush_timer_deinit();
+
+	spin_lock_irqsave(&gwlan_logging.spin_lock, irq_flag);
+	gwlan_logging.pcur_node = NULL;
+	spin_unlock_irqrestore(&gwlan_logging.spin_lock, irq_flag);
+
+	free_log_msg_buffer();
 
 	return 0;
 }
@@ -1133,8 +1264,7 @@ void wlan_flush_host_logs_for_fatal(void)
 	unsigned long flags;
 
 	if (gwlan_logging.flush_timer_period == 0)
-		pr_info("%s:flush all host logs Setting HOST_LOG_POST_MASK\n",
-			__func__);
+		qdf_info("Flush all host logs Setting HOST_LOG_POST_MAS");
 	spin_lock_irqsave(&gwlan_logging.spin_lock, flags);
 	wlan_queue_logmsg_for_app();
 	spin_unlock_irqrestore(&gwlan_logging.spin_lock, flags);
@@ -1181,8 +1311,8 @@ static int wlan_get_pkt_stats_free_node(void)
 		if (
 			cds_is_multicast_logging() &&
 			(!(gwlan_logging.pkt_stat_drop_cnt % 0x40))) {
-			pr_err("%s: drop_count = %u\n",
-				__func__, gwlan_logging.pkt_stat_drop_cnt);
+			qdf_err("drop_count = %u",
+				gwlan_logging.pkt_stat_drop_cnt);
 		}
 		list_del_init(gwlan_logging.pkt_stat_filled_list.next);
 		ret = 1;
@@ -1217,7 +1347,7 @@ void wlan_pkt_stats_to_logger_thread(void *pl_hdr, void *pkt_dump, void *data)
 	pktlog_hdr = (struct ath_pktlog_hdr *)pl_hdr;
 
 	if (!pktlog_hdr) {
-		pr_err("%s : Invalid pkt_stats_header\n", __func__);
+		qdf_err("Invalid pkt_stats_header");
 		return;
 	}
 
@@ -1308,7 +1438,7 @@ static void driver_hal_status_map(uint8_t *status)
 /*
  * send_packetdump() - send packet dump
  * @soc: soc handle
- * @vdev: vdev handle
+ * @vdev_id: ID of the virtual device handle
  * @netbuf: netbuf
  * @status: status of tx packet
  * @type: type of packet
@@ -1320,19 +1450,19 @@ static void driver_hal_status_map(uint8_t *status)
  *
  */
 static void send_packetdump(ol_txrx_soc_handle soc,
-			    struct cdp_vdev *vdev, qdf_nbuf_t netbuf,
+			    uint8_t vdev_id, qdf_nbuf_t netbuf,
 			    uint8_t status, uint8_t type)
 {
 	struct ath_pktlog_hdr pktlog_hdr = {0};
 	struct packet_dump pd_hdr = {0};
 
 	if (!netbuf) {
-		pr_err("%s: Invalid netbuf.\n", __func__);
+		qdf_err("Invalid netbuf");
 		return;
 	}
 
 	/* Send packet dump only for STA interface */
-	if (wlan_op_mode_sta != cdp_get_opmode(soc, vdev))
+	if (wlan_op_mode_sta != cdp_get_opmode(soc, vdev_id))
 		return;
 
 #if defined(HELIUMPLUS)
@@ -1385,17 +1515,7 @@ static void send_packetdump_monitor(uint8_t type)
 	wlan_pkt_stats_to_logger_thread(&pktlog_hdr, &pd_hdr, NULL);
 }
 
-/**
- * wlan_deregister_txrx_packetdump() - tx/rx packet dump
- *  deregistration
- *
- * This function is used to deregister tx/rx packet dump callbacks
- * with ol, pe and htt layers
- *
- * Return: None
- *
- */
-void wlan_deregister_txrx_packetdump(void)
+void wlan_deregister_txrx_packetdump(uint8_t pdev_id)
 {
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
@@ -1403,7 +1523,7 @@ void wlan_deregister_txrx_packetdump(void)
 		return;
 
 	if (gtx_count || grx_count) {
-		cdp_deregister_packetdump_cb(soc);
+		cdp_deregister_packetdump_cb(soc, pdev_id);
 		wma_deregister_packetdump_callback();
 		send_packetdump_monitor(STOP_MONITOR);
 		csr_packetdump_timer_stop();
@@ -1418,6 +1538,7 @@ void wlan_deregister_txrx_packetdump(void)
 /*
  * check_txrx_packetdump_count() - function to check
  * tx/rx packet dump global counts
+ * @pdev_id: datapath pdev identifier
  *
  * This function is used to check global counts of tx/rx
  * packet dump functionality.
@@ -1426,14 +1547,14 @@ void wlan_deregister_txrx_packetdump(void)
  *             0 otherwise
  *
  */
-static bool check_txrx_packetdump_count(void)
+static bool check_txrx_packetdump_count(uint8_t pdev_id)
 {
 	if (gtx_count == MAX_NUM_PKT_LOG ||
 		grx_count == MAX_NUM_PKT_LOG) {
 		LOGGING_TRACE(QDF_TRACE_LEVEL_DEBUG,
 			"%s gtx_count: %d grx_count: %d deregister packetdump",
 			__func__, gtx_count, grx_count);
-		wlan_deregister_txrx_packetdump();
+		wlan_deregister_txrx_packetdump(pdev_id);
 		return 1;
 	}
 	return 0;
@@ -1442,7 +1563,8 @@ static bool check_txrx_packetdump_count(void)
 /*
  * tx_packetdump_cb() - tx packet dump callback
  * @soc: soc handle
- * @vdev: vdev handle
+ * @pdev_id: datapath pdev id
+ * @vdev_id: vdev id
  * @netbuf: netbuf
  * @status: status of tx packet
  * @type: packet type
@@ -1454,27 +1576,29 @@ static bool check_txrx_packetdump_count(void)
  *
  */
 static void tx_packetdump_cb(ol_txrx_soc_handle soc,
-			     struct cdp_vdev *vdev, qdf_nbuf_t netbuf,
+			     uint8_t pdev_id, uint8_t vdev_id,
+			     qdf_nbuf_t netbuf,
 			     uint8_t status, uint8_t type)
 {
 	bool temp;
 
-	if (!soc || !vdev)
+	if (!soc)
 		return;
 
-	temp = check_txrx_packetdump_count();
+	temp = check_txrx_packetdump_count(pdev_id);
 	if (temp)
 		return;
 
 	driver_hal_status_map(&status);
-	send_packetdump(soc, vdev, netbuf, status, type);
+	send_packetdump(soc, vdev_id, netbuf, status, type);
 }
 
 
 /*
  * rx_packetdump_cb() - rx packet dump callback
  * @soc: soc handle
- * @vdev: vdev handle
+ * @pdev_id: datapath pdev id
+ * @vdev_id: vdev id
  * @netbuf: netbuf
  * @status: status of rx packet
  * @type: packet type
@@ -1486,46 +1610,39 @@ static void tx_packetdump_cb(ol_txrx_soc_handle soc,
  *
  */
 static void rx_packetdump_cb(ol_txrx_soc_handle soc,
-			     struct cdp_vdev *vdev, qdf_nbuf_t netbuf,
+			     uint8_t pdev_id, uint8_t vdev_id,
+			     qdf_nbuf_t netbuf,
 			     uint8_t status, uint8_t type)
 {
 	bool temp;
 
-	if (!soc || !vdev)
+	if (!soc)
 		return;
 
-	temp = check_txrx_packetdump_count();
+	temp = check_txrx_packetdump_count(pdev_id);
 	if (temp)
 		return;
 
-	send_packetdump(soc, vdev, netbuf, status, type);
+	send_packetdump(soc, vdev_id, netbuf, status, type);
 }
 
-
-/**
- * wlan_register_txrx_packetdump() - tx/rx packet dump
- * registration
- *
- * This function is used to register tx/rx packet dump callbacks
- * with ol, pe and htt layers
- *
- * Return: None
- *
- */
-void wlan_register_txrx_packetdump(void)
+void wlan_register_txrx_packetdump(uint8_t pdev_id)
 {
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 
 	if (!soc)
 		return;
 
-	cdp_register_packetdump_cb(soc, tx_packetdump_cb, rx_packetdump_cb);
+	cdp_register_packetdump_cb(soc, pdev_id,
+				   tx_packetdump_cb, rx_packetdump_cb);
 	wma_register_packetdump_callback(tx_packetdump_cb,
 			rx_packetdump_cb);
 	send_packetdump_monitor(START_MONITOR);
 
 	gtx_count = 0;
 	grx_count = 0;
+
+	csr_packetdump_timer_start();
 }
 #endif /* REMOVE_PKT_LOG */
 #endif /* FEATURE_PKTLOG */

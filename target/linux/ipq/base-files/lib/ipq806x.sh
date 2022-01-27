@@ -104,6 +104,15 @@ ipq806x_board_detect() {
 	*"AP-CP01-C2")
 		name="ap-cp01-c2"
 		;;
+	*"AP-CP01-C3")
+		name="ap-cp01-c3"
+		;;
+	*"AP-CP01-C4")
+		name="ap-cp01-c4"
+		;;
+	*"AP-CP01-C5")
+		name="ap-cp01-c5"
+		;;
 	*"AP-CP02-C1")
 		name="ap-cp02-c1"
 		;;
@@ -131,11 +140,11 @@ ipq806x_board_detect() {
 	*"AP-HK01-C5")
 		name="ap-hk01-c5"
 		;;
+	*"AP-HK01-C6")
+		name="ap-hk01-c6"
+		;;
 	*"AP-HK02")
 		name="ap-hk02"
-		;;
-	*"AP-HK05")
-		name="ap-hk05"
 		;;
 	*"AP-HK06")
 		name="ap-hk06"
@@ -149,8 +158,20 @@ ipq806x_board_detect() {
 	*"AP-HK09")
 		name="ap-hk09"
 		;;
-	*"AP-HK10")
-		name="ap-hk10"
+	*"AP-HK10-C1")
+		name="ap-hk10-c1"
+		;;
+	*"AP-HK10-C2")
+		name="ap-hk10-c2"
+		;;
+	*"AP-HK11-C1")
+		name="ap-hk11-c1"
+		;;
+	*"AP-HK12")
+		name="ap-hk12"
+		;;
+	*"AP-HK14")
+		name="ap-hk14"
 		;;
 	*"AP-AC01")
 		name="ap-ac01"
@@ -175,6 +196,72 @@ ipq806x_board_detect() {
 		;;
 	*"DB.HK02")
 		name="db-hk02"
+		;;
+	*"MP-EMU")
+		name="mp-emu"
+		;;
+	*"AP-MP02.1")
+		name="ap-mp02.1"
+		;;
+	*"AP-MP03.1")
+		name="ap-mp03.1"
+		;;
+	*"AP-MP03.1-C2")
+		name="ap-mp03.1-c2"
+		;;
+	*"AP-MP03.1-C3")
+		name="ap-mp03.1-c3"
+		;;
+	*"AP-MP03.3")
+		name="ap-mp03.3"
+		;;
+	*"AP-MP03.3-C2")
+		name="ap-mp03.3-c2"
+		;;
+	*"AP-MP03.3-C3")
+		name="ap-mp03.3-c3"
+		;;
+	*"AP-MP03.3-C4")
+		name="ap-mp03.3-c4"
+		;;
+	*"AP-MP03.3-C5")
+		name="ap-mp03.3-c5"
+		;;
+	*"AP-MP03.4-C1")
+		name="ap-mp03.4-c1"
+		;;
+	*"AP-MP03.4-C2")
+		name="ap-mp03.4-c2"
+		;;
+	*"AP-MP03.5-C1")
+		name="ap-mp03.5-c1"
+		;;
+	*"AP-MP03.5-C2")
+		name="ap-mp03.5-c2"
+		;;
+	*"AP-MP03.6-C1")
+		name="ap-mp03.6-c1"
+		;;
+	*"AP-MP03.6-C2")
+		name="ap-mp03.6-c2"
+		;;
+	*"DB-MP02.1")
+		name="db-mp02.1"
+		;;
+	*"DB-MP03.1")
+		name="db-mp03.1"
+		;;
+	*"DB-MP03.1-C2")
+		name="db-mp03.1-c2"
+		;;
+	*"DB-MP03.3")
+		name="db-mp03.3"
+		;;
+	*"DB-MP03.3-C2")
+		name="db-mp03.3-c2"
+		;;
+	*"TB-MP04")
+		name="tb-mp04"
 		;;
 	esac
 

@@ -1,7 +1,7 @@
 /*
  * aq_phy.c: AQ105 Phy driver
 
- * Copyright (c) 2015, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, 2017, 2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -134,7 +134,7 @@ static ssize_t aq_phy_read_stats(struct file *fp, char __user *ubuf,
 
 	/* Check if PHY is out of reset and FW has loaded successfully */
 	reg_addr = MII_ADDR_C45 | MDIO_MMD_PMAPMD << 16 |
-			AQ_PHY_PMA_STANDARD_CTRL_1_REG;
+		AQ_PHY_PMA_STANDARD_CTRL_1_REG;
 
 	reg_value = phy_read(priv->phydev, reg_addr);
 	if (reg_value & AQ_PHY_PMA_STANDARD_CTRL_1_MASK) {
@@ -151,48 +151,48 @@ static ssize_t aq_phy_read_stats(struct file *fp, char __user *ubuf,
 	st = &priv->stats;
 
 	size_wr = scnprintf(lbuf, size_al, "Link Status: %u\n",
-						priv->phydev->link);
+			priv->phydev->link);
 
 	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
 			"Link Speed: %u\n", priv->phydev->speed);
 
 	aq_phy_read_stats_regs(priv->phydev, &st->line_tx_good);
 	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-		"Line Side TX Good: %u\n", st->line_tx_good.regval);
+			"Line Side TX Good: %u\n", st->line_tx_good.regval);
 
 	aq_phy_read_stats_regs(priv->phydev, &st->line_tx_bad);
 	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-		"Line Side TX Bad: %u\n", st->line_tx_bad.regval);
+			"Line Side TX Bad: %u\n", st->line_tx_bad.regval);
 
 	aq_phy_read_stats_regs(priv->phydev, &st->line_rx_good);
 	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-		"Line Side RX Good: %u\n", st->line_rx_good.regval);
+			"Line Side RX Good: %u\n", st->line_rx_good.regval);
 
 	aq_phy_read_stats_regs(priv->phydev, &st->line_rx_bad);
 	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-		"Line Side RX Bad: %u\n", st->line_rx_bad.regval);
+			"Line Side RX Bad: %u\n", st->line_rx_bad.regval);
 
 	if ((priv->phydev->speed == SPEED_1000) ||
-		(priv->phydev->speed == SPEED_100)) {
+			(priv->phydev->speed == SPEED_100)) {
 		aq_phy_read_stats_regs(priv->phydev, &st->sys_tx_good);
 		size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-			"System Side TX Good: %u\n", st->sys_tx_good.regval);
+				"System Side TX Good: %u\n", st->sys_tx_good.regval);
 
 		aq_phy_read_stats_regs(priv->phydev, &st->sys_tx_bad);
 		size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-			"System Side TX Bad: %u\n", st->sys_tx_bad.regval);
+				"System Side TX Bad: %u\n", st->sys_tx_bad.regval);
 
 		aq_phy_read_stats_regs(priv->phydev, &st->sys_rx_good);
 		size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-			"System Side RX Good: %u\n", st->sys_rx_good.regval);
+				"System Side RX Good: %u\n", st->sys_rx_good.regval);
 
 		aq_phy_read_stats_regs(priv->phydev, &st->sys_rx_bad);
 		size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-			"System Side RX Bad: %u\n", st->sys_rx_bad.regval);
+				"System Side RX Bad: %u\n", st->sys_rx_bad.regval);
 	}
 
 	bytes_read = simple_read_from_buffer(ubuf, sz, ppos,
-						lbuf, strlen(lbuf));
+			lbuf, strlen(lbuf));
 	kfree(lbuf);
 	return bytes_read;
 }
@@ -515,10 +515,36 @@ aq_phy_read_status(struct phy_device *phydev)
 	return 0;
 }
 
-/* Function for configuration of auto-negotiation */
-static int
-aq_phy_config_aneg(struct phy_device *phydev)
+/*
+ * Function to check if auto-negotiation is successful.
+ */
+static int aq_phy_aneg_done(struct phy_device *phydev)
 {
+	int reg_value;
+
+	reg_value = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_STAT1);
+	if (reg_value < 0) {
+		return reg_value;
+	}
+
+	return (reg_value & BMSR_ANEGCOMPLETE);
+}
+
+/*
+ * Function for configuration of auto-negotiation
+ */
+static int aq_phy_config_aneg(struct phy_device *phydev)
+{
+	int reg_value, ret;
+
+	reg_value = phy_read_mmd(phydev, MDIO_MMD_AN, MII_BMCR);
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_AN, MII_BMCR,
+			reg_value | AQ_PHY_AUTONEG_ENABLE |
+			AQ_PHY_AUTONEG_RESTART);
+	if (ret < 0)
+		return ret;
+
 	return 0;
 }
 
@@ -546,6 +572,7 @@ aq_phy_config_init(struct phy_device *phydev)
 				ADVERTISED_100baseT_Full |
 				ADVERTISED_1000baseT_Full |
 				ADVERTISED_2500baseX_Full;
+
 	return 0;
 }
 
@@ -593,6 +620,7 @@ static struct phy_driver aq_phy_driver = {
 	.soft_reset	= &aq_phy_soft_reset,
 	.config_init	= &aq_phy_config_init,
 	.config_aneg	= &aq_phy_config_aneg,
+	.aneg_done      = &aq_phy_aneg_done,
 	.read_status	= &aq_phy_read_status,
 	.match_phy_device = aq_phy_match_phy_device,
 	.driver		= { .owner = THIS_MODULE },

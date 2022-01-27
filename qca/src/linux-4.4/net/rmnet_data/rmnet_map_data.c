@@ -1,5 +1,4 @@
-/*
- * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2016, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -62,7 +61,7 @@ struct agg_work {
 /******************************************************************************/
 
 /**
- * rmnet_map_add_map_header() - Adds MAP header to front of skb->data
+ * rmnet_data_map_add_map_header() - Adds MAP header to front of skb->data
  * @skb:        Socket buffer ("packet") to modify
  * @hdrlen:     Number of bytes of header data which should not be included in
  *              MAP length field
@@ -79,8 +78,8 @@ struct agg_work {
  *
  * todo: Parameterize skb alignment
  */
-struct rmnet_map_header_s *rmnet_map_add_map_header(struct sk_buff *skb,
-						    int hdrlen, int pad)
+struct rmnet_map_header_s *rmnet_data_map_add_map_header(struct sk_buff *skb,
+							 int hdrlen, int pad)
 {
 	uint32_t padding, map_datalen;
 	uint8_t *padbytes;
@@ -119,7 +118,7 @@ done:
 }
 
 /**
- * rmnet_map_deaggregate() - Deaggregates a single packet
+ * rmnet_data_map_deaggregate() - Deaggregates a single packet
  * @skb:        Source socket buffer containing multiple MAP frames
  * @config:     Physical endpoint configuration of the ingress device
  *
@@ -132,8 +131,8 @@ done:
  *     - Pointer to new skb
  *     - 0 (null) if no more aggregated packets
  */
-struct sk_buff *rmnet_map_deaggregate(struct sk_buff *skb,
-				      struct rmnet_phys_ep_config *config)
+struct sk_buff *rmnet_data_map_deaggregate(struct sk_buff *skb,
+					   struct rmnet_phys_ep_config *config)
 {
 	struct sk_buff *skbn;
 	struct rmnet_map_header_s *maph;
@@ -568,7 +567,7 @@ static int rmnet_map_validate_ipv6_packet_checksum(unsigned char *map_payload,
 	}
 
 /**
- * rmnet_map_checksum_downlink_packet() - Validates checksum on
+ * rmnet_map_data_checksum_downlink_packet() - Validates checksum on
  * a downlink packet
  * @skb:	Pointer to the packet's skb.
  *
@@ -589,7 +588,7 @@ static int rmnet_map_validate_ipv6_packet_checksum(unsigned char *map_payload,
  *   - RMNET_MAP_CHECKSUM_ERR_UNKNOWN_IP_VERSION: Unrecognized IP header.
  *   - RMNET_MAP_CHECKSUM_VALIDATION_FAILED: In case the validation failed.
  */
-int rmnet_map_checksum_downlink_packet(struct sk_buff *skb)
+int rmnet_map_data_checksum_downlink_packet(struct sk_buff *skb)
 {
 	struct rmnet_map_dl_checksum_trailer_s *cksum_trailer;
 	unsigned int data_len;
@@ -703,7 +702,7 @@ static void rmnet_map_complement_ipv6_txporthdr_csum_field(void *ip6hdr)
  *   - RMNET_MAP_CHECKSUM_ERR_UNKNOWN_IP_VERSION: Unrecognized IP header.
  *   - RMNET_MAP_CHECKSUM_SW: Unsupported packet for UL checksum offload.
  */
-int rmnet_map_checksum_uplink_packet(struct sk_buff *skb,
+int rmnet_map_data_checksum_uplink_packet(struct sk_buff *skb,
 	struct net_device *orig_dev, uint32_t egress_data_format)
 {
 	unsigned char ip_version;

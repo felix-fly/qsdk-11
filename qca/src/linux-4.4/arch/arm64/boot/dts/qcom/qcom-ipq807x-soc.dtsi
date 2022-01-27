@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +20,6 @@
 #include <dt-bindings/clock/qca,apss-ipq807x.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
-#include "qcom-ipq807x-mhi.dtsi"
 #include "qcom-ipq807x-memory.dtsi"
 
 / {
@@ -104,7 +103,7 @@
 	};
 
 	pmu {
-		compatible = "arm,armv8-pmuv3";
+		compatible = "arm,cortex-a53-pmu";
 		interrupts = <GIC_PPI 7 (GIC_CPU_MASK_SIMPLE(4) |
 					 IRQ_TYPE_LEVEL_HIGH)>;
 	};
@@ -113,7 +112,7 @@
 		scm {
 			compatible = "qcom,scm-ipq807x";
 		};
-		qfprom {
+		qfprom_sec {
 			compatible = "qcom,qfprom-sec";
 		#if defined(__IPQ_MEM_PROFILE_256_MB__) || defined(__IPQ_MEM_PROFILE_512_MB__)
 			img-addr = <0x4A600000>;
@@ -131,6 +130,7 @@
 		compatible = "ipq807x-qseecom";
 		mem-start = <0x4a400000>;
 		mem-size = <0x200000>;
+		notify-align = <1>;
 	};
 #endif
 
@@ -433,6 +433,10 @@
 			compatible = "qcom,diag";
 			status = "ok";
 		};
+		qcom,test@0 {
+			compatible = "qcom,testmhi";
+			status = "disabled";
+		};
 
 		sdhc_2: sdhci@7864900 {
 			compatible = "qcom,sdhci-msm";
@@ -556,6 +560,8 @@
 
 		qcom_q6v5_wcss: qcom_q6v5_wcss@CD00000 {
 			compatible = "qcom,ipq8074-wcss-pil";
+			firmware = "IPQ8074/q6_fw.mdt";
+			m3_firmware = "IPQ8074/m3_fw.mdt";
 			reg = <0xCD00000 0x4040>,
 				<0x4ab000 0x20>;
 			reg-names = "qdsp6",
@@ -588,13 +594,13 @@
 			qcom,smem-state-names = "shutdown",
 						"stop";
 
-			memory-region = <&q6_region>;
+			memory-region = <&q6_region>, <&q6_etr_region>;
 
 			glink-edge {
 				interrupts = <GIC_SPI 321 IRQ_TYPE_EDGE_RISING>;
 				qcom,remote-pid = <1>;
 				mboxes = <&apcs_glb 8>;
-
+				global_timer = <0x4A5000>;
 				rpm_requests {
 					qcom,glink-channels = "IPCRTR";
 				};
@@ -761,7 +767,8 @@
 			compatible = "qcom,nss";
 			interrupts = <0 377 0x1>, <0 378 0x1>, <0 379 0x1>,
 				     <0 380 0x1>, <0 381 0x1>, <0 382 0x1>,
-				     <0 383 0x1>, <0 384 0x1>, <0 385 0x1>;
+				     <0 383 0x1>, <0 384 0x1>, <0 385 0x1>,
+				     <0 386 0x1>;
 			reg = <0x39000000 0x1000>, <0x38000000 0x30000>,
 			      <0x0b111000 0x1000>;
 			reg-names = "nphys", "vphys", "qgic-phys";
@@ -799,7 +806,7 @@
 				      "nss-nc-axi-clk";
 			qcom,id = <0>;
 			qcom,num-queue = <4>;
-			qcom,num-irq = <9>;
+			qcom,num-irq = <10>;
 			qcom,num-pri = <4>;
 			qcom,load-addr = <0x40000000>;
 			qcom,low-frequency = <748800000>;
@@ -826,6 +833,10 @@
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,vlan-enabled;
 			qcom,igs-enabled;
+			qcom,vxlan-enabled;
+			qcom,match-enabled;
+			qcom,mirror-enabled;
+			qcom,udp-st-enabled;
 			npu-supply = <&npu_vreg>;
 			mx-supply = <&ipq807x_s5_corner>;
 		};
@@ -835,7 +846,8 @@
 			compatible = "qcom,nss";
 			interrupts = <0 390 0x1>, <0 391 0x1>, <0 392 0x1>,
 				     <0 393 0x1>, <0 394 0x1>, <0 395 0x1>,
-				     <0 396 0x1>, <0 397 0x1>, <0 398 0x1>;
+				     <0 396 0x1>, <0 397 0x1>, <0 398 0x1>,
+				     <0 399 0x1>;
 			reg = <0x39400000 0x1000>, <0x38030000 0x30000>,
 				<0x0b111000 0x1000>;
 			reg-names = "nphys", "vphys", "qgic-phys";
@@ -873,16 +885,18 @@
 				      "nss-nc-axi-clk";
 			qcom,id = <1>;
 			qcom,num-queue = <4>;
-			qcom,num-irq = <9>;
+			qcom,num-irq = <10>;
 			qcom,num-pri = <4>;
 			qcom,load-addr = <0x40800000>;
 			qcom,capwap-enabled;
 			qcom,dtls-enabled;
+			qcom,tls-enabled;
 			qcom,crypto-enabled;
 			qcom,ipsec-enabled;
 			qcom,qvpn-enabled;
 			qcom,pvxlan-enabled;
 			qcom,clmap-enabled;
+			qcom,rmnet_rx-enabled;
 		};
 
 		nss_crypto: qcom,nss_crypto {
@@ -924,6 +938,7 @@
 				qcom,sha256-hash;
 				qcom,md5-hmac;
 				qcom,sha160-hmac;
+				qcom,sha224-hmac;
 				qcom,sha256-hmac;
 				qcom,sha384-hmac;
 				qcom,sha512-hmac;
@@ -1457,6 +1472,7 @@
 				interrupts = <0 140 0>;
 				usb-phy = <&qusb_phy_0>, <&ssphy_0>;
 				tx-fifo-resize;
+				snps,dis_ep_cache_eviction;
 				snps,usb3-u1u2-disable;
 				snps,nominal-elastic-buffer;
 				snps,is-utmi-l1-suspend;
@@ -1471,7 +1487,7 @@
 
 		};
 
-                qcom,usbbam@8B04000 {
+		qcom,usbbam@8B04000 {
 			compatible = "qcom,usb-bam-msm";
 			reg = <0x8B04000 0x17000>;
 			interrupt-parent = <&intc>;
@@ -1543,6 +1559,7 @@
 				interrupts = <0 99 0>;
 				usb-phy = <&qusb_phy_1>, <&ssphy_1>;
 				tx-fifo-resize;
+				snps,dis_ep_cache_eviction;
 				snps,usb3-u1u2-disable;
 				snps,nominal-elastic-buffer;
 				snps,is-utmi-l1-suspend;
@@ -1764,6 +1781,10 @@
 			qcom,msi-gicm-base = <0x1d0>;
 
 			status = "ok";
+
+			pcie1_rp: pcie1_rp {
+				reg = <0 0 0 0 0>;
+			};
 		};
 
 		ledc: ledc@191E000  {
@@ -1793,12 +1814,14 @@
 		#else
 			qcom,tgt-mem-mode = <0>;
 		#endif
-			qcom,bdf-addr = <0x4B0C0000 0x4B0C0000 0x4B0C0000>;
-			qcom,caldb-addr = <0x4BA00000 0x4BA00000 0x0>;
+			qcom,bdf-addr = <0x4B0C0000 0x4B0C0000 0x4B0C0000
+					 0x4B0C0000 0x4B0C0000>;
+			qcom,caldb-addr = <0x4BA00000 0x4BA00000 0x0 0x4BA00000
+					   0x4BA00000>;
+			qcom,caldb-size = <0x480000>;
 			interrupts = <0 320 1>, /* o_wcss_apps_intr[0] =  */
 				<0 319 1>,
 				<0 318 1>,
-				<0 317 1>,
 				<0 316 1>,
 				<0 315 1>,
 				<0 314 1>,
@@ -1855,7 +1878,6 @@
 			interrupt-names = "misc-pulse1",
 				"misc-latch",
 				"sw-exception",
-				"watchdog",
 				"ce0",
 				"ce1",
 				"ce2",
@@ -1919,12 +1941,14 @@
 			qcom,tgt-mem-mode = <0>;
 		#endif
 			qcom,rproc = <&qcom_q6v5_wcss>;
-			qcom,bdf-addr = <0x4B0C0000 0x4B0C0000 0x4B0C0000>;
-			qcom,caldb-addr = <0x4BA00000 0x4BA00000 0x0>;
+			qcom,bdf-addr = <0x4B0C0000 0x4B0C0000 0x4B0C0000
+					 0x4B0C0000 0x4B0C0000>;
+			qcom,caldb-addr = <0x4BA00000 0x4BA00000 0x0 0x4BA00000
+					   0x4BA00000>;
+			qcom,caldb-size = <0x480000>;
 			interrupts = <0 320 1>, /* o_wcss_apps_intr[0] =  */
 				<0 319 1>,
 				<0 318 1>,
-				<0 317 1>,
 				<0 316 1>,
 				<0 315 1>,
 				<0 314 1>,
@@ -1981,7 +2005,6 @@
 			interrupt-names = "misc-pulse1",
 				"misc-latch",
 				"sw-exception",
-				"watchdog",
 				"ce0",
 				"ce1",
 				"ce2",
@@ -2035,12 +2058,26 @@
 			qcom,coex-mode = <0x2>;
 			qcom,bt-active-time = <0x12>;
 			qcom,bt-priority-time = <0x0c>;
-			qcom,coex-algo = <0x1>;
+			qcom,coex-algo = <0x2>;
 			qcom,pta-priority = <0x80800505>;
 		};
+		wifi2: wifi2@f00000 {
+			compatible  = "qcom,cnss-qcn9000";
+			qcom,wlan-ramdump-dynamic = <0x400000>;
+			mhi,max-channels = <30>;
+			mhi,timeout = <10000>;
+			qrtr_node_id = <0x20>;
+			qca,auto-restart;
+			status = "disabled";
+		};
 		wifi3: wifi3@f00000 {
-			compatible  = "qcom,cnss-qca6290";
-			status = "ok";
+			compatible  = "qcom,cnss-qcn9000";
+			qcom,wlan-ramdump-dynamic = <0x400000>;
+			mhi,max-channels = <30>;
+			mhi,timeout = <10000>;
+			qrtr_node_id = <0x21>;
+			qca,auto-restart;
+			status = "disabled";
 		};
 
 		spmi_bus: qcom,spmi@200f000 {

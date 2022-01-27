@@ -28,6 +28,11 @@
 #define NF_CT_DSCPREMARK_EXT_RULE_VALID 0x1
 #define NF_CT_DSCPREMARK_EXT_RULE_NOT_VALID 0x0
 
+/* Which QoS features are set flags */
+#define NF_CT_DSCPREMARK_EXT_PRIO 0x1
+#define NF_CT_DSCPREMARK_EXT_DSCP 0x2
+#define NF_CT_DSCPREMARK_EXT_IGS_QOS 0x4
+
 /*
  * DSCP remark conntrack extension structure.
  */
@@ -39,6 +44,8 @@ struct nf_ct_dscpremark_ext {
 	__u8 flow_dscp;		/* IP DSCP value for original direction */
 	__u8 reply_dscp;	/* IP DSCP value for reply direction */
 	__u16 rule_flags;	/* Rule Validity flags */
+	__u16 flow_set_flags;	/* Original direction set flags */
+	__u16 return_set_flags;	/* Reply direction set flags */
 };
 
 /*

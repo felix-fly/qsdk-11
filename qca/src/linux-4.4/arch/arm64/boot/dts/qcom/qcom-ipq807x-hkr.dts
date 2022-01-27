@@ -628,6 +628,7 @@
 			qcom,shaping-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,vlan-enabled;
+			qcom,vxlan-enabled;
 		};
 
 		nss1: nss@40800000 {

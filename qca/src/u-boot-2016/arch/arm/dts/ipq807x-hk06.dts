@@ -15,8 +15,6 @@
 #include "ipq807x-soc.dtsi"
 #include <dt-bindings/qcom/gpio-ipq807x.h>
 / {
-	model ="QCA, IPQ807x-HK06";
-	compatible = "qca,ipq807x", "qca,ipq807x-hk06";
 	machid = <0x08010003>;
 	config_name = "config@hk06";
 

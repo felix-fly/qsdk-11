@@ -1,5 +1,4 @@
-/*
- * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -126,9 +125,10 @@ void rmnet_config_exit(void)
 static inline int _rmnet_is_physical_endpoint_associated(struct net_device *dev)
 {
 	rx_handler_func_t *rx_handler;
+
 	rx_handler = rcu_dereference(dev->rx_handler);
 
-	if (rx_handler == rmnet_rx_handler)
+	if (rx_handler == rmnet_data_rx_handler)
 		return 1;
 	else
 		return 0;
@@ -854,8 +854,7 @@ int rmnet_associate_network_device(struct net_device *dev)
 	conf->dev = dev;
 	spin_lock_init(&conf->agg_lock);
 	config->recycle = kfree_skb;
-
-	rc = netdev_rx_handler_register(dev, rmnet_rx_handler, config);
+	rc = netdev_rx_handler_register(dev, rmnet_data_rx_handler, config);
 
 	if (rc) {
 		LOGM("netdev_rx_handler_register returns %d", rc);
@@ -1178,6 +1177,7 @@ static void rmnet_force_unassociate_device(struct net_device *dev)
 		return;
 	}
 
+	LOGH("Kernel is trying to unregister %s", dev->name);
 	trace_rmnet_unregister_cb_clear_vnds(dev);
 	vnd_work = kmalloc(sizeof(*vnd_work), GFP_KERNEL);
 	if (!vnd_work) {
@@ -1262,7 +1262,6 @@ int rmnet_config_notify_cb(struct notifier_block *nb,
 	case NETDEV_UNREGISTER_FINAL:
 	case NETDEV_UNREGISTER:
 		trace_rmnet_unregister_cb_entry(dev);
-		LOGH("Kernel is trying to unregister %s", dev->name);
 		rmnet_force_unassociate_device(dev);
 		trace_rmnet_unregister_cb_exit(dev);
 		break;

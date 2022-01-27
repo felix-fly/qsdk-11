@@ -253,8 +253,13 @@ int crc_check(uint8_t *buf, uint16_t len)
 	crc ^= CRC_16_L_SEED;
 
 	/* Check the computed CRC against the original CRC bytes. */
+#if IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)
+	sent_crc[1] = buf[len-3];
+	sent_crc[0] = buf[len-2];
+#else
 	sent_crc[0] = buf[len-3];
 	sent_crc[1] = buf[len-2];
+#endif
 	if (crc != *((uint16_t *)sent_crc)) {
 		pr_debug("diag: In %s, crc mismatch. expected: %x, sent %x.\n",
 				__func__, crc, *((uint16_t *)sent_crc));

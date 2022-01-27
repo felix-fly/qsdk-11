@@ -114,6 +114,8 @@ struct device_list_opp {
  * @opp_list:	list of opps
  * @np:		struct device_node pointer for opp's DT node.
  * @shared_opp: OPP is shared between multiple devices.
+ * @supported_hw: Array of version number to support.
+ * @supported_hw_count: Number of elements in supported_hw array.
  *
  * This is an internal data structure maintaining the link to opps attached to
  * a device. This structure is not meant to be shared to users as it is
@@ -135,6 +137,9 @@ struct device_opp {
 	unsigned long clock_latency_ns_max;
 	bool shared_opp;
 	struct dev_pm_opp *suspend_opp;
+	unsigned int *supported_hw;
+	unsigned int supported_hw_count;
+
 };
 
 /* Routines internal to opp core */

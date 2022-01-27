@@ -40,7 +40,7 @@ define Package/charlietalk
    TITLE:=Qualcomm GobiNet Connection Manager
    SECTION:=utils
    CATEGORY:=Utilities
-   DEPENDS:=@TARGET_ipq806x||TARGET_ipq_ipq40xx +libpthread +libc +librt +libstdcpp +libuci +kmod-qca-wifi-unified-profile +kmod-gobinet
+   DEPENDS:=@TARGET_ipq806x||TARGET_ipq_ipq40xx +libpthread +libc +librt +libstdcpp +libuci +kmod-qca-wifi-unified-profile +kmod-qca-wifi-custc-profile +kmod-gobinet
    VARIANT:=charlietalk
 endef
 

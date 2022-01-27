@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -34,9 +34,9 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
+#include "ecm_front_end_types.h"
 #include "ecm_classifier.h"
 #include "ecm_db.h"
-#include "ecm_front_end_types.h"
 
 #include "ecm_notifier_pvt.h"
 #include "exports/ecm_notifier.h"
@@ -59,25 +59,25 @@ static bool ecm_notifier_ci_to_data(struct ecm_db_connection_instance *ci, struc
 
 	first_index = ecm_db_connection_interfaces_get_and_ref(ci, interfaces, ECM_DB_OBJ_DIR_FROM);
 	if (first_index == ECM_DB_IFACE_HEIRARCHY_MAX) {\
-		DEBUG_WARN("%p: Failed to get 'from' ifaces index\n", ci);
+		DEBUG_WARN("%px: Failed to get 'from' ifaces index\n", ci);
 		return false;
 	}
 	data->from_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(interfaces[first_index]));
 	if (!data->from_dev) {
-		DEBUG_WARN("%p: Could not locate 'from' interface\n", ci);
+		DEBUG_WARN("%px: Could not locate 'from' interface\n", ci);
 		return false;
 	}
 	ecm_db_connection_interfaces_deref(interfaces, first_index);
 
 	first_index = ecm_db_connection_interfaces_get_and_ref(ci, interfaces, ECM_DB_OBJ_DIR_TO);
 	if (first_index == ECM_DB_IFACE_HEIRARCHY_MAX) {
-		DEBUG_WARN("%p: Failed to get 'to' ifaces index\n", ci);
+		DEBUG_WARN("%px: Failed to get 'to' ifaces index\n", ci);
 		dev_put(data->from_dev);
 		return false;
 	}
 	data->to_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(interfaces[first_index]));
 	if (!data->to_dev) {
-		DEBUG_WARN("%p: Could not locate 'to' interface\n", ci);
+		DEBUG_WARN("%px: Could not locate 'to' interface\n", ci);
 		dev_put(data->from_dev);
 		return false;
 	}
@@ -106,7 +106,7 @@ static bool ecm_notifier_ci_to_data(struct ecm_db_connection_instance *ci, struc
 		/*
 		 * Shouldn't come here.
 		 */
-		DEBUG_ERROR("%p: Invalid protocol\n", ci);
+		DEBUG_ERROR("%px: Invalid protocol\n", ci);
 		dev_put(data->from_dev);
 		dev_put(data->to_dev);
 		return false;
@@ -124,7 +124,7 @@ void ecm_notifier_connection_added(void *arg, struct ecm_db_connection_instance 
 	struct ecm_notifier_connection_data data = {0};
 
 	if (!atomic_read(&ecm_notifier_count)) {
-		DEBUG_TRACE("%p: No notifier has registered for event\n", ci);
+		DEBUG_TRACE("%px: No notifier has registered for event\n", ci);
 		return;
 	}
 
@@ -132,7 +132,7 @@ void ecm_notifier_connection_added(void *arg, struct ecm_db_connection_instance 
 	 * Module has registered for events.
 	 */
 	if (!ecm_notifier_ci_to_data(ci, &data)) {
-		DEBUG_WARN("%p: Failed to get data from connection instance\n", ci);
+		DEBUG_WARN("%px: Failed to get data from connection instance\n", ci);
 		return;
 	}
 
@@ -151,7 +151,7 @@ void ecm_notifier_connection_removed(void *arg, struct ecm_db_connection_instanc
 	struct ecm_notifier_connection_data data = {0};
 
 	if (!atomic_read(&ecm_notifier_count)) {
-		DEBUG_TRACE("%p: No notifier has registered for event\n", ci);
+		DEBUG_TRACE("%px: No notifier has registered for event\n", ci);
 		return;
 	}
 
@@ -159,7 +159,7 @@ void ecm_notifier_connection_removed(void *arg, struct ecm_db_connection_instanc
 	 * Module has registered for events.
 	 */
 	if (!ecm_notifier_ci_to_data(ci, &data)) {
-		DEBUG_WARN("%p: Failed to get data from connection instance\n", ci);
+		DEBUG_WARN("%px: Failed to get data from connection instance\n", ci);
 		return;
 	}
 
@@ -218,7 +218,7 @@ enum ecm_notifier_connection_state ecm_notifier_connection_state_get(struct ecm_
         case 4:
                 ECM_HIN4_ADDR_TO_IP_ADDR(host1_addr, conn->src.in.s_addr);
                 ECM_HIN4_ADDR_TO_IP_ADDR(host2_addr, conn->dest.in.s_addr);
-		DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_DOT_FMT ":%d, "
+		DEBUG_TRACE("%px: lookup src: " ECM_IP_ADDR_DOT_FMT ":%d, "
 				"dest: " ECM_IP_ADDR_DOT_FMT ":%d, "
 				"protocol %d\n",
 				conn,
@@ -232,7 +232,7 @@ enum ecm_notifier_connection_state ecm_notifier_connection_state_get(struct ecm_
         case 6:
                 ECM_HIN6_ADDR_TO_IP_ADDR(host1_addr, conn->src.in6);
                 ECM_HIN6_ADDR_TO_IP_ADDR(host2_addr, conn->dest.in6);
-		DEBUG_TRACE("%p: lookup src: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
+		DEBUG_TRACE("%px: lookup src: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
 				"dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, "
 				"protocol %d\n",
 				conn,
@@ -249,13 +249,13 @@ enum ecm_notifier_connection_state ecm_notifier_connection_state_get(struct ecm_
 
 	ci = ecm_db_connection_find_and_ref(host1_addr, host2_addr, protocol, host1_port, host2_port);
 	if (!ci) {
-		DEBUG_TRACE("%p: database connection not found\n", conn);
+		DEBUG_TRACE("%px: database connection not found\n", conn);
 		return ECM_NOTIFIER_CONNECTION_STATE_INVALID;
 	}
 
 	feci = ecm_db_connection_front_end_get_and_ref(ci);
 	if (!feci) {
-		DEBUG_TRACE("%p: failed to find front end connection instance\n", ci);
+		DEBUG_TRACE("%px: failed to find front end connection instance\n", ci);
 		ecm_db_connection_deref(ci);
 		return ECM_NOTIFIER_CONNECTION_STATE_INVALID;
 	}
@@ -278,7 +278,7 @@ enum ecm_notifier_connection_state ecm_notifier_connection_state_get(struct ecm_
 		return ECM_NOTIFIER_CONNECTION_STATE_DECEL;
 
 	default:
-		DEBUG_TRACE("%p: Marking other state as failed\n", conn);
+		DEBUG_TRACE("%px: Marking other state as failed\n", conn);
 		break;
 	}
 

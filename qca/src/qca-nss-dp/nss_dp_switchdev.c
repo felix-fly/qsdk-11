@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -16,8 +16,11 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <net/switchdev.h>
 #include <linux/if_bridge.h>
+#include <net/switchdev.h>
+
 #include "nss_dp_dev.h"
 #include "fal/fal_stp.h"
 #include "fal/fal_ctrlpkt.h"
@@ -25,29 +28,6 @@
 #define NSS_DP_SWITCH_ID		0
 #define NSS_DP_SW_ETHTYPE_PID		0 /* PPE ethtype profile ID for slow protocols */
 #define ETH_P_NONE			0
-
-/*
- * nss_dp_attr_get()
- *	Get port information to update switchdev attribute for NSS data plane.
- */
-static int nss_dp_attr_get(struct net_device *dev, struct switchdev_attr *attr)
-{
-	struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(dev);
-
-	switch (attr->id) {
-	case SWITCHDEV_ATTR_ID_PORT_PARENT_ID:
-		attr->u.ppid.id_len = 1;
-		attr->u.ppid.id[0] = NSS_DP_SWITCH_ID;
-		break;
-	case SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS:
-		attr->u.brport_flags = dp_priv->brport_flags;
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
-}
 
 /*
  * nss_dp_set_slow_proto_filter()
@@ -194,6 +174,31 @@ static int nss_dp_stp_state_set(struct nss_dp_dev *dp_priv, u8 state)
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
+/*
+ * nss_dp_attr_get()
+ *	Get port information to update switchdev attribute for NSS data plane.
+ */
+static int nss_dp_attr_get(struct net_device *dev, struct switchdev_attr *attr)
+{
+	struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(dev);
+
+	switch (attr->id) {
+	case SWITCHDEV_ATTR_ID_PORT_PARENT_ID:
+		attr->u.ppid.id_len = 1;
+		attr->u.ppid.id[0] = NSS_DP_SWITCH_ID;
+		break;
+
+	case SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS:
+		attr->u.brport_flags = dp_priv->brport_flags;
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
 /*
  * nss_dp_attr_set()
  *	Get switchdev attribute and set to the device of NSS data plane.
@@ -203,6 +208,10 @@ static int nss_dp_attr_set(struct net_device *dev,
 				struct switchdev_trans *trans)
 {
 	struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(dev);
+	struct net_device *upper_dev;
+	struct vlan_dev_priv *vlan;
+	struct list_head *iter;
+	uint32_t stp_state = attr->u.stp_state;
 
 	if (switchdev_trans_ph_prepare(trans))
 		return 0;
@@ -213,7 +222,33 @@ static int nss_dp_attr_set(struct net_device *dev,
 		netdev_dbg(dev, "set brport_flags %lu\n", attr->u.brport_flags);
 		return 0;
 	case SWITCHDEV_ATTR_ID_PORT_STP_STATE:
-		return nss_dp_stp_state_set(dp_priv, attr->u.stp_state);
+		/*
+		 * The stp state is not changed to FAL_STP_DISABLED if
+		 * the net_device (dev) has any vlan configured. Otherwise
+		 * traffic on other vlan(s) will not work.
+		 *
+		 * Note: STP for VLANs is not supported by PPE.
+		 */
+		if ((stp_state == BR_STATE_DISABLED) ||
+			(stp_state == BR_STATE_BLOCKING)) {
+			rcu_read_lock();
+			netdev_for_each_upper_dev_rcu(dev, upper_dev, iter) {
+				if (!is_vlan_dev(upper_dev))
+					continue;
+
+				vlan = vlan_dev_priv(upper_dev);
+				if (vlan->real_dev == dev) {
+					rcu_read_unlock();
+					netdev_dbg(dev, "Do not update stp state to: %u since vlan id: %d is configured on netdevice: %s\n",
+							stp_state, vlan->vlan_id, vlan->real_dev->name);
+					return 0;
+				}
+			}
+
+			rcu_read_unlock();
+		}
+
+		return nss_dp_stp_state_set(dp_priv, stp_state);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -234,8 +269,99 @@ static const struct switchdev_ops nss_dp_switchdev_ops = {
  */
 void nss_dp_switchdev_setup(struct net_device *dev)
 {
-#ifdef CONFIG_NET_SWITCHDEV
 	dev->switchdev_ops = &nss_dp_switchdev_ops;
-#endif
 	switchdev_port_fwd_mark_set(dev, NULL, false);
 }
+#else
+
+/*
+ * nss_dp_port_attr_set()
+ *	Sets attributes
+ */
+static int nss_dp_port_attr_set(struct net_device *dev,
+				const struct switchdev_attr *attr,
+				struct switchdev_trans *trans)
+{
+	struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(dev);
+
+	if (switchdev_trans_ph_prepare(trans))
+		return 0;
+
+	switch (attr->id) {
+	case SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS:
+		dp_priv->brport_flags = attr->u.brport_flags;
+		netdev_dbg(dev, "set brport_flags %lu\n", attr->u.brport_flags);
+		return 0;
+	case SWITCHDEV_ATTR_ID_PORT_STP_STATE:
+		return nss_dp_stp_state_set(dp_priv, attr->u.stp_state);
+	default:
+		return -EOPNOTSUPP;
+	}
+
+}
+
+/*
+ * nss_dp_switchdev_port_attr_set_event()
+ *	Attribute set event
+ */
+static int nss_dp_switchdev_port_attr_set_event(struct net_device *netdev,
+		struct switchdev_notifier_port_attr_info *port_attr_info)
+{
+	int err;
+
+	err = nss_dp_port_attr_set(netdev, port_attr_info->attr,
+				   port_attr_info->trans);
+
+	port_attr_info->handled = true;
+	return notifier_from_errno(err);
+}
+
+/*
+ * nss_dp_switchdev_event()
+ *	Switch dev event on netdevice
+ */
+static int nss_dp_switchdev_event(struct notifier_block *unused,
+				  unsigned long event, void *ptr)
+{
+	struct net_device *dev = switchdev_notifier_info_to_dev(ptr);
+
+	/*
+	 * Handle switchdev event only for physical devices
+	 */
+	if (!nss_dp_is_phy_dev(dev)) {
+		return NOTIFY_DONE;
+	}
+
+	if (event == SWITCHDEV_PORT_ATTR_SET)
+		nss_dp_switchdev_port_attr_set_event(dev, ptr);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block nss_dp_switchdev_notifier = {
+	.notifier_call = nss_dp_switchdev_event,
+};
+
+static bool switch_init_done;
+
+/*
+ * nss_dp_switchdev_setup()
+ *	Setup switch dev
+ */
+void nss_dp_switchdev_setup(struct net_device *dev)
+{
+	int err;
+
+	if (switch_init_done) {
+		return;
+	}
+
+	err = register_switchdev_blocking_notifier(&nss_dp_switchdev_notifier);
+	if (err) {
+		netdev_dbg(dev, "%px:Failed to register switchdev notifier\n", dev);
+	}
+
+	switch_init_done = true;
+
+}
+#endif

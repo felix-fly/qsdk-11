@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -24,11 +24,20 @@
 #include "wlan_ftm_svc_i.h"
 #include <wlan_lmac_if_def.h>
 #include <wlan_ftm_ucfg_api.h>
+#include "target_if.h"
 
 static inline struct wlan_lmac_if_ftm_tx_ops *
 wlan_psoc_get_ftm_txops(struct wlan_objmgr_psoc *psoc)
 {
-	return &((psoc->soc_cb.tx_ops.ftm_tx_ops));
+	struct wlan_lmac_if_tx_ops *tx_ops;
+
+	tx_ops = wlan_psoc_get_lmac_if_txops(psoc);
+	if (!tx_ops) {
+		ftm_err("tx_ops is NULL");
+		return NULL;
+	}
+
+	return &tx_ops->ftm_tx_ops;
 }
 
 static QDF_STATUS
@@ -50,6 +59,22 @@ wlan_ftm_pdev_obj_create_notification(struct wlan_objmgr_pdev *pdev,
 {
 	QDF_STATUS status;
 	struct wifi_ftm_pdev_priv_obj *ftm_pdev_obj;
+	uint32_t device_mode;
+	struct wlan_objmgr_psoc *psoc;
+	struct target_psoc_info *target_psoc_info;
+
+	psoc = wlan_pdev_get_psoc(pdev);
+	if (!psoc)
+		return QDF_STATUS_E_FAULT;
+
+	target_psoc_info = wlan_psoc_get_tgt_if_handle(psoc);
+	if (!target_psoc_info)
+		return QDF_STATUS_E_FAULT;
+
+	device_mode = target_psoc_get_device_mode(target_psoc_info);
+
+	if (device_mode != QDF_GLOBAL_FTM_MODE)
+		return QDF_STATUS_SUCCESS;
 
 	ftm_pdev_obj = qdf_mem_malloc(sizeof(*ftm_pdev_obj));
 
@@ -97,7 +122,24 @@ wlan_ftm_pdev_obj_destroy_notification(struct wlan_objmgr_pdev *pdev,
 					void *arg_list)
 {
 	QDF_STATUS status;
-	struct wifi_ftm_pdev_priv_obj *ftm_pdev_obj =
+	struct wifi_ftm_pdev_priv_obj *ftm_pdev_obj;
+	struct wlan_objmgr_psoc *psoc;
+	struct target_psoc_info *target_psoc_info;
+	uint32_t device_mode;
+
+	psoc = wlan_pdev_get_psoc(pdev);
+	if (!psoc)
+		return QDF_STATUS_E_FAULT;
+
+	target_psoc_info = wlan_psoc_get_tgt_if_handle(psoc);
+	if (!target_psoc_info)
+		return QDF_STATUS_E_FAULT;
+
+	device_mode = target_psoc_get_device_mode(target_psoc_info);
+	if (device_mode != QDF_GLOBAL_FTM_MODE)
+		return QDF_STATUS_SUCCESS;
+
+	ftm_pdev_obj =
 		wlan_objmgr_pdev_get_comp_private_obj(pdev, WLAN_UMAC_COMP_FTM);
 
 	if (!ftm_pdev_obj) {
@@ -122,6 +164,10 @@ wlan_ftm_testmode_attach(struct wlan_objmgr_psoc *psoc)
 	struct wlan_lmac_if_ftm_tx_ops *ftm_tx_ops;
 
 	ftm_tx_ops = wlan_psoc_get_ftm_txops(psoc);
+	if (!ftm_tx_ops) {
+		ftm_err("ftm_tx_ops is NULL");
+		return QDF_STATUS_E_FAULT;
+	}
 
 	if (ftm_tx_ops->ftm_attach)
 		return ftm_tx_ops->ftm_attach(psoc);
@@ -135,6 +181,10 @@ wlan_ftm_testmode_detach(struct wlan_objmgr_psoc *psoc)
 	struct wlan_lmac_if_ftm_tx_ops *ftm_tx_ops;
 
 	ftm_tx_ops = wlan_psoc_get_ftm_txops(psoc);
+	if (!ftm_tx_ops) {
+		ftm_err("ftm_tx_ops is NULL");
+		return QDF_STATUS_E_FAULT;
+	}
 
 	if (ftm_tx_ops->ftm_detach)
 		return ftm_tx_ops->ftm_detach(psoc);
@@ -154,6 +204,10 @@ wlan_ftm_cmd_send(struct wlan_objmgr_pdev *pdev, uint8_t *buf,
 		return QDF_STATUS_E_NOENT;
 
 	ftm_tx_ops = wlan_psoc_get_ftm_txops(psoc);
+	if (!ftm_tx_ops) {
+		ftm_err("ftm_tx_ops is NULL");
+		return QDF_STATUS_E_FAULT;
+	}
 
 	if (ftm_tx_ops->ftm_cmd_send)
 		return ftm_tx_ops->ftm_cmd_send(pdev, buf, len, pdev_id);

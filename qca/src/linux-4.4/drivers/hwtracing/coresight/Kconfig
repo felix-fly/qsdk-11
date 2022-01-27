@@ -179,4 +179,11 @@ config CORESIGHT_SOURCE_DUMMY
 	  used for CoreSight sources that are owned and configured by some other
 	  subsystem and use Linux drivers to configure rest of trace path.
 
+config CORESIGHT_STREAM
+	tristate "Coresight network stream driver"
+	depends on CORESIGHT_LINK_AND_SINK_TMC && NET
+	select NET_UDP_TUNNEL
+	help
+	  This enables support for the Coresight network stream driver.
+
 endif

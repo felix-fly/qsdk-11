@@ -466,7 +466,7 @@ static unsigned int write_mbr_in_blocks(unsigned size, unsigned char *mbrImage)
 	dfirstsec = 0;
 	dprintf(SPEW, "first EBR to be written at sector 0x%X\n", dfirstsec);
 	lastAddress = mbrImage + size;
-	while (ebrImage < lastAddress) {
+	while ((ebrImage + BLOCK_SIZE) < lastAddress) {
 		dprintf(SPEW, "writing to 0x%X\n",
 			(ebrSectorOffset + dfirstsec) * BLOCK_SIZE);
 		ret =
@@ -851,8 +851,8 @@ unsigned int write_partition(unsigned size, unsigned char *partition)
 static void
 mbr_fill_name(struct partition_entry *partition_ent, unsigned int type)
 {
+	memset(partition_ent->name, 0, MAX_GPT_NAME_SIZE);
 	switch (type) {
-		memset(partition_ent->name, 0, MAX_GPT_NAME_SIZE);
 	case MBR_MODEM_TYPE:
 	case MBR_MODEM_TYPE2:
 		/* if already assigned last name available then return */

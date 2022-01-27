@@ -62,7 +62,6 @@ struct nand_flash_dev nand_flash_ids[] = {
 	{"TH58NYG3S0H 8G 1.8V 8-bit",
 		{ .id = {0x98, 0xa3, 0x91, 0x26} },
 		  SZ_4K, SZ_1K, SZ_256K, 0, 4, 256, NAND_ECC_INFO(8, SZ_512) },
-
 	LEGACY_ID_NAND("NAND 4MiB 5V 8-bit",   0x6B, 4, SZ_8K, SP_OPTIONS),
 	LEGACY_ID_NAND("NAND 4MiB 3,3V 8-bit", 0xE3, 4, SZ_8K, SP_OPTIONS),
 	LEGACY_ID_NAND("NAND 4MiB 3,3V 8-bit", 0xE5, 4, SZ_8K, SP_OPTIONS),
@@ -194,6 +193,7 @@ struct nand_manufacturers nand_manuf_ids[] = {
 	{NAND_MFR_GIGA, "GigaDevice"},
 	{NAND_MFR_ATO, "ATO"},
 	{NAND_MFR_WINBOND, "Winbond"},
+	{NAND_MFR_FIDELIX, "Fidelix"},
 	{0x0, "Unknown"}
 };
 

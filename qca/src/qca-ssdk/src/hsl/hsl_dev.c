@@ -60,6 +60,9 @@
 #include "sw_api_us.h"
 #endif
 #include "ssdk_plat.h"
+#ifdef MP
+#include "hsl_phy.h"
+#endif
 /*qca808x_start*/
 static hsl_dev_t dev_table[SW_MAX_NR_DEV];
 static ssdk_init_cfg *dev_ssdk_cfg[SW_MAX_NR_DEV] = { 0 };
@@ -314,6 +317,15 @@ hsl_ssdk_cfg(a_uint32_t dev_id, ssdk_cfg_t *ssdk_cfg)
 
         case CHIP_HPPE:
             aos_mem_copy(ssdk_cfg->chip_type, "hppe", sizeof("hppe"));
+            break;
+
+        case CHIP_SCOMPHY:
+#ifdef MP
+            if(dev_ssdk_cfg[dev_id]->chip_revision == MP_GEPHY)
+            {
+                aos_mem_copy(ssdk_cfg->chip_type, "mp", sizeof("mp"));
+            }
+#endif
             break;
 
         case CHIP_UNSPECIFIED:

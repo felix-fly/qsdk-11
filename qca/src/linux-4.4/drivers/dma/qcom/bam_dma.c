@@ -664,14 +664,15 @@ static struct dma_async_tx_descriptor *bam_prep_slave_sg(struct dma_chan *chan,
 
 			if (remainder > BAM_FIFO_SIZE) {
 				desc->size = cpu_to_le16(BAM_FIFO_SIZE);
+				async_desc->length += BAM_FIFO_SIZE;
 				remainder -= BAM_FIFO_SIZE;
 				curr_offset += BAM_FIFO_SIZE;
 			} else {
 				desc->size = cpu_to_le16(remainder);
+				async_desc->length += remainder;
 				remainder = 0;
 			}
 
-			async_desc->length += desc->size;
 			desc++;
 		} while (remainder > 0);
 	}
@@ -751,14 +752,15 @@ static struct dma_async_tx_descriptor *bam_prep_dma_custom_mapping(
 
 			if (remainder > BAM_FIFO_SIZE) {
 				desc->size = cpu_to_le16(BAM_FIFO_SIZE);
+				async_desc->length += BAM_FIFO_SIZE;
 				remainder -= BAM_FIFO_SIZE;
 				curr_offset += BAM_FIFO_SIZE;
 			} else {
 				desc->size = cpu_to_le16(remainder);
+				async_desc->length += remainder;
 				remainder = 0;
 			}
 
-			async_desc->length += desc->size;
 			desc++;
 		} while (remainder > 0);
 	}

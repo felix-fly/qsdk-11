@@ -7,6 +7,7 @@
 #include <linux/mhi.h>
 #include <net/sock.h>
 #include <linux/of.h>
+#include <linux/signal.h>
 
 #include "qrtr.h"
 
@@ -74,7 +75,8 @@ static int qcom_mhi_qrtr_send(struct qrtr_endpoint *ep, struct sk_buff *skb)
 {
 	struct qrtr_mhi_dev *qdev = container_of(ep, struct qrtr_mhi_dev, ep);
 	struct qrtr_mhi_pkt *pkt;
-	int rc;
+	int rc, i = 0, nsig = _NSIG_WORDS;
+	sigset_t *set;
 
 	rc = skb_linearize(skb);
 	if (rc) {
@@ -113,6 +115,15 @@ static int qcom_mhi_qrtr_send(struct qrtr_endpoint *ep, struct sk_buff *skb)
 		rc = 0;
 	else if (rc == 0)
 		rc = -ETIMEDOUT;
+	else
+		if (signal_pending_state(TASK_INTERRUPTIBLE, current)) {
+			pr_info("%s signal pending (%s:%d)\n", __func__, current->comm, current->pid);
+			set = &current->pending.signal;
+			while (i < nsig) {
+				pr_info("sig[%d] = %lu\n", i, set->sig[i]);
+				i++;
+			}
+		}
 
 	kref_put(&pkt->refcount, qrtr_mhi_pkt_release);
 	return rc;

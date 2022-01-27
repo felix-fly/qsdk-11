@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -19,45 +19,43 @@
  *	NSS Netlink IPv6 Handler
  */
 
+#include <linux/completion.h>
+#include <linux/etherdevice.h>
+#include <linux/if.h>
+#include <linux/if_addr.h>
+#include <linux/if_vlan.h>
+#include <linux/in.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/types.h>
-#include <linux/version.h>
-#include <linux/if.h>
 #include <linux/netlink.h>
 #include <linux/rcupdate.h>
-#include <linux/etherdevice.h>
-#include <linux/if_addr.h>
+#include <linux/semaphore.h>
+#include <linux/types.h>
+#include <linux/version.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
-#include <linux/if_vlan.h>
-#include <linux/completion.h>
-#include <linux/semaphore.h>
 #include <net/addrconf.h>
-#include <linux/in.h>
-
-#include <net/genetlink.h>
-#include <net/route.h>
-#include <net/ip6_route.h>
 #include <net/arp.h>
-#include <net/neighbour.h>
 #include <net/genetlink.h>
+#include <net/ip6_route.h>
+#include <net/neighbour.h>
 #include <net/net_namespace.h>
+#include <net/route.h>
 #include <net/sock.h>
 
 #include <nss_api_if.h>
 #include <nss_cmn.h>
 #include <nss_ipsec.h>
-#include "nss_nlipsec.h"
 #include <nss_ipsec_cmn.h>
 #include <nss_nl_if.h>
-#include "nss_nl.h"
-#include "nss_nlipv6.h"
-#include "nss_nlcmn_if.h"
-#include "nss_nlipv6_if.h"
 #include "nss_ipsecmgr.h"
+#include "nss_nl.h"
+#include "nss_nlcmn_if.h"
+#include "nss_nlgre_redir_cmd.h"
+#include "nss_nlipsec.h"
 #include "nss_nlipsec_if.h"
-#include "nss_nlgre_redir.h"
+#include "nss_nlipv6.h"
+#include "nss_nlipv6_if.h"
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
 #define DST_NEIGH_LOOKUP(dst, ip_addr) dst_neigh_lookup(dst, ip_addr)
@@ -78,26 +76,13 @@ struct nss_nlipv6_ctx {
 
 static int nss_nlipv6_ops_create_rule(struct sk_buff *skb, struct genl_info *info);
 static int nss_nlipv6_ops_destroy_rule(struct sk_buff *skb, struct genl_info *info);
-
-/*
- * IPV6 family definition
- */
-static struct genl_family nss_nlipv6_family = {
-	.id = GENL_ID_GENERATE,				/* Auto generate ID */
-	.name = NSS_NLIPV6_FAMILY,			/* family name string */
-	.hdrsize = sizeof(struct nss_nlipv6_rule),	/* NSS NETLINK IPV6 rule */
-	.version = NSS_NL_VER,				/* Set it to NSS_NLIPV6 version */
-	.maxattr = NSS_IPV6_MAX_MSG_TYPES,		/* maximum commands supported */
-	.netnsok = true,
-	.pre_doit = NULL,
-	.post_doit = NULL,
-};
+static int nss_nlipv6_process_notify(struct notifier_block *nb, unsigned long val, void *data);
 
 /*
  * multicast group for sending message status & events
  */
 static struct genl_multicast_group nss_nlipv6_mcgrp[] = {
-	{.name = NSS_NLIPV6_FAMILY},
+	{.name = NSS_NLIPV6_MCAST_GRP},
 };
 
 /*
@@ -106,6 +91,33 @@ static struct genl_multicast_group nss_nlipv6_mcgrp[] = {
 static struct genl_ops nss_nlipv6_ops[] = {
 	{.cmd = NSS_IPV6_TX_CREATE_RULE_MSG, .doit = nss_nlipv6_ops_create_rule,},	/* rule create */
 	{.cmd = NSS_IPV6_TX_DESTROY_RULE_MSG, .doit = nss_nlipv6_ops_destroy_rule,},	/* rule destroy */
+};
+
+/*
+ * IPV6 family definition
+ */
+static struct genl_family nss_nlipv6_family = {
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 9, 0))
+	.id = GENL_ID_GENERATE,				/* Auto generate ID */
+#endif
+	.name = NSS_NLIPV6_FAMILY,			/* family name string */
+	.hdrsize = sizeof(struct nss_nlipv6_rule),	/* NSS NETLINK IPV6 rule */
+	.version = NSS_NL_VER,				/* Set it to NSS_NLIPV6 version */
+	.maxattr = NSS_IPV6_MAX_MSG_TYPES,		/* maximum commands supported */
+	.netnsok = true,
+	.pre_doit = NULL,
+	.post_doit = NULL,
+	.ops = nss_nlipv6_ops,
+	.n_ops = ARRAY_SIZE(nss_nlipv6_ops),
+	.mcgrps = nss_nlipv6_mcgrp,
+	.n_mcgrps = ARRAY_SIZE(nss_nlipv6_mcgrp)
+};
+
+/*
+ * statistics call back handler for ipv6 from NSS
+ */
+static struct notifier_block nss_ipv6_stats_notifier_nb = {
+	.notifier_call = nss_nlipv6_process_notify,
 };
 
 #define NSS_NLIPV6_OPS_SZ ARRAY_SIZE(nss_nlipv6_ops)
@@ -125,7 +137,11 @@ static struct neighbour *nss_nlipv6_get_neigh(uint32_t dst_addr[4])
 
 	IPV6_ADDR_TO_IN6_ADDR(daddr, dst_addr);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0))
 	rt = rt6_lookup(&init_net, &daddr, NULL, 0, 0);
+#else
+	rt = rt6_lookup(&init_net, &daddr, NULL, 0, NULL, 0);
+#endif
 	if (!rt) {
 		return NULL;
 	}
@@ -142,6 +158,7 @@ static struct neighbour *nss_nlipv6_get_neigh(uint32_t dst_addr[4])
 
 		return neigh;
 	}
+	dst_release(dst);
 
 	return NULL;
 }
@@ -220,7 +237,7 @@ static int nss_nlipv6_get_macaddr(uint32_t ip_addr[4], uint8_t mac_addr[])
 		goto fail;
 	}
 
-	memcpy(mac_addr, neigh->ha, (size_t)neigh->dev->addr_len);
+	ether_addr_copy(mac_addr, neigh->ha);
 	neigh_release(neigh);
 	return 0;
 fail:
@@ -302,7 +319,7 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 	}
 
 	if ((flow_iftype >= NSS_NL_IFTYPE_MAX) || (return_iftype >= NSS_NL_IFTYPE_MAX)) {
-		nss_nl_error("%p: Invalid interface type (flow:%d, return:%d)\n", msg, flow_iftype, return_iftype);
+		nss_nl_error("%px: Invalid interface type (flow:%d, return:%d)\n", msg, flow_iftype, return_iftype);
 		return -EINVAL;
 	}
 
@@ -327,7 +344,7 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		conn->flow_interface_num = nss_nlipsec_get_ifnum(flow_dev, tuple->protocol,
 								tuple->return_ident, tuple->flow_ident);
 		if (conn->flow_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get flow interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get flow interface number (dev:%s, type:%d)\n",
 					flow_dev, flow_dev->name, flow_iftype);
 			return -EINVAL;
 		}
@@ -337,20 +354,20 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		break;
 
 	case NSS_NL_IFTYPE_TUNNEL_GRE:
-		conn->flow_interface_num = nss_nlgre_redir_get_ifnum(flow_dev, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_OUTER);
+		conn->flow_interface_num = nss_nlgre_redir_cmd_get_ifnum(flow_dev, tuple->protocol);
 		if (conn->flow_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get flow interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get flow interface number (dev:%s, type:%d)\n",
 			flow_dev, flow_dev->name, flow_iftype);
 			return -EINVAL;
 		}
 
-		conn->flow_mtu = NSS_NLIPV6_MAX_MTU;
+		conn->flow_mtu = nss_nlgre_redir_cmd_get_mtu(flow_dev, NSS_GRE_REDIR_IP_HDR_TYPE_IPV6, conn->flow_interface_num);
 		break;
 
 	case NSS_NL_IFTYPE_VLAN:
 		conn->flow_interface_num = nss_cmn_get_interface_number_by_dev(vlan_dev_real_dev(flow_dev));
 		if (conn->flow_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get flow interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get flow interface number (dev:%s, type:%d)\n",
 					flow_dev, flow_dev->name, flow_iftype);
 			return -EINVAL;
 		}
@@ -361,7 +378,7 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 	case NSS_NL_IFTYPE_PHYSICAL:
 		conn->flow_interface_num = nss_cmn_get_interface_number_by_dev(flow_dev);
 		if (conn->flow_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get flow interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get flow interface number (dev:%s, type:%d)\n",
 					flow_dev, flow_dev->name, flow_iftype);
 			return -EINVAL;
 		}
@@ -370,11 +387,11 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		break;
 
 	default:
-		nss_nl_error("%p: Unsupported flow interface type (%d)\n", msg, flow_iftype);
+		nss_nl_error("%px: Unsupported flow interface type (%d)\n", msg, flow_iftype);
 		return -EINVAL;
 	}
 
-	nss_nl_info("%p: dev=%s flow_ifnum:0x%x flow_mtu=%d\n", msg, flow_dev->name,
+	nss_nl_info("%px: dev=%s flow_ifnum:0x%x flow_mtu=%d\n", msg, flow_dev->name,
 			conn->flow_interface_num, conn->flow_mtu);
 
 	/*
@@ -385,7 +402,7 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		conn->return_interface_num = nss_nlipsec_get_ifnum(return_dev, tuple->protocol,
 									tuple->return_ident, tuple->flow_ident);
 		if (conn->return_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get return interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get return interface number (dev:%s, type:%d)\n",
 					return_dev, return_dev->name, return_iftype);
 			return -EINVAL;
 		}
@@ -395,21 +412,20 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		break;
 
 	case NSS_NL_IFTYPE_TUNNEL_GRE:
-		conn->return_interface_num = nss_nlgre_redir_get_ifnum(return_dev,
-		NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_WIFI_OFFL_INNER);
+		conn->return_interface_num = nss_nlgre_redir_cmd_get_ifnum(return_dev, tuple->protocol);
 		if (conn->return_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get return interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get return interface number (dev:%s, type:%d)\n",
 			return_dev, return_dev->name, return_iftype);
 			return -EINVAL;
 		}
 
-		conn->return_mtu = NSS_NLIPV6_MAX_MTU;
+		conn->return_mtu = nss_nlgre_redir_cmd_get_mtu(return_dev, NSS_GRE_REDIR_IP_HDR_TYPE_IPV6, conn->return_interface_num);
 		break;
 
 	case NSS_NL_IFTYPE_VLAN:
 		conn->return_interface_num = nss_cmn_get_interface_number_by_dev(vlan_dev_real_dev(return_dev));
 		if (conn->return_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get return interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get return interface number (dev:%s, type:%d)\n",
 					return_dev, return_dev->name, return_iftype);
 			return -EINVAL;
 		}
@@ -420,7 +436,7 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 	case NSS_NL_IFTYPE_PHYSICAL:
 		conn->return_interface_num = nss_cmn_get_interface_number_by_dev(return_dev);
 		if (conn->return_interface_num < 0 ) {
-			nss_nl_error("%p: Failed to get return interface number (dev:%s, type:%d)\n",
+			nss_nl_error("%px: Failed to get return interface number (dev:%s, type:%d)\n",
 					return_dev, return_dev->name, return_iftype);
 			return -EINVAL;
 		}
@@ -429,11 +445,11 @@ static int nss_nlipv6_verify_conn_rule(struct nss_ipv6_rule_create_msg *msg, str
 		break;
 
 	default:
-		nss_nl_error("%p: Unsupported return interface type (%d)\n", msg, flow_iftype);
+		nss_nl_error("%px: Unsupported return interface type (%d)\n", msg, flow_iftype);
 		return -EINVAL;
 	}
 
-	nss_nl_info("%p: dev=%s return_ifnum:0x%x return_mtu=%d\n", msg, return_dev->name,
+	nss_nl_info("%px: dev=%s return_ifnum:0x%x return_mtu=%d\n", msg, return_dev->name,
 			conn->return_interface_num, conn->return_mtu);
 
 	nexthop->flow_nexthop = conn->flow_interface_num;
@@ -608,42 +624,48 @@ static int nss_nlipv6_verify_vlan_rule(struct nss_ipv6_rule_create_msg *msg, str
 }
 
 /*
- * nss_nlipv6_process_notify()
- * 	process notification messages from NSS
+ * nss_nlipv6_verify_identifier()
+ *	verify and override identifier rule entries
  */
-static void nss_nlipv6_process_notify(void *app_data, struct nss_ipv6_msg *nim)
+static int nss_nlipv6_verify_identifier(struct nss_ipv6_rule_create_msg *msg)
+{
+	struct nss_ipv6_identifier_rule *identifier = &msg->identifier;
+	const size_t rule_sz = sizeof(struct nss_ipv6_identifier_rule);
+	uint16_t valid;
+
+	/*
+	 * if identifier is not valid, set identifier rule to 0
+	 */
+	valid = msg->valid_flags & NSS_IPV6_RULE_CREATE_IDENTIFIER_VALID;
+	if (!valid) {
+		memset(identifier, 0, rule_sz);
+	}
+
+	return 0;
+}
+
+/*
+ * nss_nlipv6_process_notify()
+ *	process notification messages from NSS
+ */
+static int nss_nlipv6_process_notify(struct notifier_block *nb, unsigned long val, void *data)
 {
 	struct nss_nlipv6_rule *nl_rule;
-	struct nss_ipv6_msg *nl_nim;
 	struct sk_buff *skb;
+	struct nss_ipv6_stats_notification *nss_stats;
 
-	skb = nss_nl_new_msg(&nss_nlipv6_family, nim->cm.type);
+	skb = nss_nl_new_msg(&nss_nlipv6_family, NSS_NLCMN_SUBSYS_IPV6);
 	if (!skb) {
 		nss_nl_error("unable to allocate NSS_NLIPV6 event\n");
-		return;
+		return NOTIFY_DONE;
 	}
 
 	nl_rule = nss_nl_get_data(skb);
-	nl_nim = &nl_rule->nim;
-
-	/*
-	 * initialize the NETLINK common header
-	 */
-	nss_nlipv6_rule_init(nl_rule, nim->cm.type);
-
-	/*
-	 * clear NSS common message items that are not useful to uspace
-	 */
-	nim->cm.interface = 0;
-	nim->cm.cb = (nss_ptr_t)NULL;
-	nim->cm.app_data = (nss_ptr_t)NULL;
-
-	/*
-	 * copy the contents of the sync message into the NETLINK message
-	 */
-	memcpy(nl_nim, nim, sizeof(struct nss_ipv6_msg));
-
+	nss_stats = (struct nss_ipv6_stats_notification *)data;
+	memcpy(&nl_rule->stats, nss_stats, sizeof(struct nss_ipv6_stats_notification));
 	nss_nl_mcast_event(&nss_nlipv6_family, skb);
+
+	return NOTIFY_DONE;
 }
 
 /*
@@ -795,6 +817,15 @@ static int nss_nlipv6_ops_create_rule(struct sk_buff *skb, struct genl_info *inf
 	}
 
 	/*
+	 * check identifier
+	 */
+	error = nss_nlipv6_verify_identifier(&nim->msg.rule_create);
+	if (error < 0) {
+		nss_nl_error("%d:invalid identifier rule information passed\n", pid);
+		goto done;
+	}
+
+	/*
 	 * copy the NL message for response
 	 */
 	resp = nss_nl_copy_msg(skb);
@@ -823,12 +854,14 @@ static int nss_nlipv6_ops_create_rule(struct sk_buff *skb, struct genl_info *inf
 	/*
 	 * Push Rule to NSS
 	 */
-	tx_status = nss_ipv6_tx(gbl_ctx.nss, nim);
+	tx_status = nss_ipv6_tx_sync(gbl_ctx.nss, nim);
+
+        /* TODO: Handle the case where firmware has received the response
+	 * and there is a failure in firmware.
+	 */
 	if (tx_status != NSS_TX_SUCCESS) {
-		nlmsg_free(resp);
 		nss_nl_error("%d:unable to send IPV6 rule create, status(%d)\n", pid, tx_status);
 		error = -EBUSY;
-		goto done;
 	}
 
 done:
@@ -904,9 +937,12 @@ static int nss_nlipv6_ops_destroy_rule(struct sk_buff *skb, struct genl_info *in
 	/*
 	 * Push rule to NSS
 	 */
-	tx_status = nss_ipv6_tx(gbl_ctx.nss, nim);
+	tx_status = nss_ipv6_tx_sync(gbl_ctx.nss, nim);
+
+        /* TODO: Handle the case where firmware has received the response
+	 * and there is a failure in firmware.
+	 */
 	if (tx_status != NSS_TX_SUCCESS) {
-		nlmsg_free(resp);
 		nss_nl_error("%d:unable to send IPV6 rule delete, status(%d)\n", pid, tx_status);
 		return -EBUSY;
 	}
@@ -921,24 +957,33 @@ done:
  */
 bool nss_nlipv6_init(void)
 {
-	int error;
+	int error, ret;
 
 	nss_nl_info_always("Init NSS netlink IPV6 handler\n");
 
 	/*
 	 * register NETLINK ops with the family
 	 */
-	error = genl_register_family_with_ops_groups(&nss_nlipv6_family, nss_nlipv6_ops, nss_nlipv6_mcgrp);
+	error = genl_register_family(&nss_nlipv6_family);
 	if (error != 0) {
 		nss_nl_info_always("Error: unable to register IPV6 family\n");
 		return false;
 	}
 
 	/*
+	 * To get NSS context
+	 */
+	gbl_ctx.nss = nss_ipv6_get_mgr();
+	if (!gbl_ctx.nss) {
+		nss_nl_info_always("Error: retreiving the NSS Context \n");
+		goto unreg_family;
+	}
+
+	/*
 	 * register device call back handler for ipv6 from NSS
 	 */
-	gbl_ctx.nss = nss_ipv6_notify_register(nss_nlipv6_process_notify, &gbl_ctx);
-	if (!gbl_ctx.nss) {
+	ret = nss_ipv6_stats_register_notifier(&nss_ipv6_stats_notifier_nb);
+	if (ret) {
 		nss_nl_info_always("Error: retreiving the NSS Context \n");
 		goto unreg_family;
 	}
@@ -965,6 +1010,11 @@ bool nss_nlipv6_exit(void)
 	nss_nl_info_always("Exit NSS netlink IPV6 handler\n");
 
 	/*
+	 * Unregister the device callback handler for ipv6
+	 */
+	nss_ipv6_stats_unregister_notifier(&nss_ipv6_stats_notifier_nb);
+
+	/*
 	 * unregister the ops family
 	 */
 	error = genl_unregister_family(&nss_nlipv6_family);
@@ -972,11 +1022,6 @@ bool nss_nlipv6_exit(void)
 		nss_nl_info_always("unable to unregister IPV6 NETLINK family\n");
 		return false;
 	}
-
-	/*
-	 * Unregister the device callback handler for ipv6
-	 */
-	nss_ipv6_notify_unregister();
 
 	gbl_ctx.nss = NULL;
 

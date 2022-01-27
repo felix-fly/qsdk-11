@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -43,6 +43,10 @@
 #include "cdp_txrx_extd_struct.h"
 #endif
 
+#ifdef WLAN_MAX_CLIENTS_ALLOWED
+#define OL_TXRX_NUM_LOCAL_PEER_IDS (WLAN_MAX_CLIENTS_ALLOWED + 1 + 1 + 1)
+#endif
+
 #ifndef OL_TXRX_NUM_LOCAL_PEER_IDS
 /*
  * Each AP will occupy one ID, so it will occupy two IDs for AP-AP mode.
@@ -56,6 +60,7 @@
 #define CDP_BA_64_BIT_MAP_SIZE_DWORDS 2
 #define CDP_RSSI_CHAIN_LEN 8
 
+#define OL_TXRX_INVALID_PDEV_ID 0xff
 #define OL_TXRX_INVALID_LOCAL_PEER_ID 0xffff
 #define CDP_INVALID_VDEV_ID 0xff
 /* Options for Dump Statistics */
@@ -78,6 +83,8 @@
 #define CDP_BUNDLE_STATS           23
 #define CDP_CREDIT_STATS           24
 #define CDP_DISCONNECT_STATS       25
+#define CDP_DP_RX_FISA_STATS	   26
+#define CDP_DP_SWLM_STATS	   27
 
 #define WME_AC_TO_TID(_ac) (       \
 		((_ac) == WME_AC_VO) ? 6 : \
@@ -153,6 +160,36 @@
 #define FILTER_DATA_DATA		0x0001
 #define FILTER_DATA_NULL		0x0008
 
+/*
+ * Multiply rate by 2 to avoid float point
+ * and get rate in units of 500kbps
+ */
+#define CDP_11B_RATE_0MCS (11 * 2)
+#define CDP_11B_RATE_1MCS (5.5 * 2)
+#define CDP_11B_RATE_2MCS (2 * 2)
+#define CDP_11B_RATE_3MCS (1 * 2)
+#define CDP_11B_RATE_4MCS (11 * 2)
+#define CDP_11B_RATE_5MCS (5.5 * 2)
+#define CDP_11B_RATE_6MCS (2 * 2)
+
+#define CDP_11A_RATE_0MCS (48 * 2)
+#define CDP_11A_RATE_1MCS (24 * 2)
+#define CDP_11A_RATE_2MCS (12 * 2)
+#define CDP_11A_RATE_3MCS (6 * 2)
+#define CDP_11A_RATE_4MCS (54 * 2)
+#define CDP_11A_RATE_5MCS (36 * 2)
+#define CDP_11A_RATE_6MCS (18 * 2)
+#define CDP_11A_RATE_7MCS (9 * 2)
+
+#define CDP_LEGACY_MCS0  0
+#define CDP_LEGACY_MCS1  1
+#define CDP_LEGACY_MCS2  2
+#define CDP_LEGACY_MCS3  3
+#define CDP_LEGACY_MCS4  4
+#define CDP_LEGACY_MCS5  5
+#define CDP_LEGACY_MCS6  6
+#define CDP_LEGACY_MCS7  7
+
 QDF_DECLARE_EWMA(tx_lag, 1024, 8)
 struct cdp_stats_cookie;
 
@@ -163,6 +200,32 @@ enum cdp_cfg_param_type {
 	CDP_CFG_MAX_PEER_ID,
 	CDP_CFG_CCE_DISABLE,
 	CDP_CFG_NUM_PARAMS
+};
+
+/*
+ * PPDU TYPE from FW -
+ * @CDP_PPDU_STATS_PPDU_TYPE_SU: single user type
+ * @CDP_PPDU_STATS_PPDU_TYPE_MU_MIMO: multi user mu-mimo
+ * @CDP_PPDU_STATS_PPDU_TYPE_MU_OFDMA: multi user ofdma
+ * @CDP_PPDU_STATS_PPDU_TYPE_MU_MIMO_OFDMA: multi user mu-mimo ofdma
+ * @CDP_PPDU_STATS_PPDU_TYPE_UL_TRIG: ul trigger ppdu
+ * @CDP_PPDU_STATS_PPDU_TYPE_BURST_BCN: burst beacon
+ * @CDP_PPDU_STATS_PPDU_TYPE_UL_BSR_RESP: bsr respond
+ * @CDP_PPDU_STATS_PPDU_TYPE_UL_BSR_TRIG: bsr trigger
+ * @CDP_PPDU_STATS_PPDU_TYPE_UL_RESP: ul response
+ * @CDP_PPDU_STATS_PPDU_TYPE_UNKNOWN
+ */
+enum CDP_PPDU_STATS_PPDU_TYPE {
+	CDP_PPDU_STATS_PPDU_TYPE_SU = 0,
+	CDP_PPDU_STATS_PPDU_TYPE_MU_MIMO = 1,
+	CDP_PPDU_STATS_PPDU_TYPE_MU_OFDMA = 2,
+	CDP_PPDU_STATS_PPDU_TYPE_MU_MIMO_OFDMA = 4,
+	CDP_PPDU_STATS_PPDU_TYPE_UL_TRIG = 5,
+	CDP_PPDU_STATS_PPDU_TYPE_BURST_BCN = 6,
+	CDP_PPDU_STATS_PPDU_TYPE_UL_BSR_RESP = 7,
+	CDP_PPDU_STATS_PPDU_TYPE_UL_BSR_TRIG = 8,
+	CDP_PPDU_STATS_PPDU_TYPE_UL_RESP = 9,
+	CDP_PPDU_STATS_PPDU_TYPE_UNKNOWN = 0x1F,
 };
 
 /*
@@ -211,6 +274,7 @@ enum htt_cmn_dbg_stats_type {
  * @TXRX_PDEV_CFG_PARAMS: Print pdev cfg params info
  * @TXRX_NAPI_STATS: Print NAPI scheduling statistics
  * @TXRX_SOC_INTERRUPT_STATS: Print soc interrupt stats
+ * @TXRX_HAL_REG_WRITE_STATS: Hal Reg Write stats
  */
 enum cdp_host_txrx_stats {
 	TXRX_HOST_STATS_INVALID  = -1,
@@ -227,6 +291,9 @@ enum cdp_host_txrx_stats {
 	TXRX_PDEV_CFG_PARAMS  = 10,
 	TXRX_NAPI_STATS       = 11,
 	TXRX_SOC_INTERRUPT_STATS = 12,
+	TXRX_SOC_FSE_STATS = 13,
+	TXRX_HAL_REG_WRITE_STATS = 14,
+	TXRX_SOC_REO_HW_DESC_DUMP = 15,
 	TXRX_HOST_STATS_MAX,
 };
 
@@ -336,7 +403,6 @@ enum cdp_txrx_ast_entry_type {
 	CDP_TXRX_AST_TYPE_STATIC, /* static ast entry for connected peer */
 	CDP_TXRX_AST_TYPE_SELF, /* static ast entry for self peer (STA mode) */
 	CDP_TXRX_AST_TYPE_WDS,	/* WDS peer ast entry type*/
-	CDP_TXRX_AST_TYPE_MEC,	/* Multicast echo ast entry type */
 	CDP_TXRX_AST_TYPE_WDS_HM, /* HM WDS entry */
 	CDP_TXRX_AST_TYPE_STA_BSS,	 /* BSS entry(STA mode) */
 	CDP_TXRX_AST_TYPE_DA,	/* AST entry based on Destination address */
@@ -419,6 +485,91 @@ struct cdp_rx_mic_err_info {
 	uint16_t vdev_id;
 };
 
+#ifdef WLAN_SUPPORT_SCS
+/* SCS Procedure data structures
+ */
+#define IEEE80211_SCS_MAX_SIZE        10
+#define IEEE80211_IPV4_LEN 4
+#define IEEE80211_IPV6_LEN 16
+
+struct cdp_tclas_tuple_ipv4 {
+	u_int8_t  version;
+	uint8_t  src_ip[IEEE80211_IPV4_LEN];
+	uint8_t  dst_ip[IEEE80211_IPV4_LEN];
+	u_int16_t src_port;
+	u_int16_t dst_port;
+	u_int8_t  dscp;
+	u_int8_t  protocol;
+	u_int8_t  reserved;
+} __packed;
+
+struct cdp_tclas_tuple_ipv6 {
+	u_int8_t version;
+	u_int8_t  src_ip[IEEE80211_IPV6_LEN];
+	u_int8_t  dst_ip[IEEE80211_IPV6_LEN];
+	u_int16_t src_port;
+	u_int16_t dst_port;
+	u_int8_t  type4_dscp;
+	u_int8_t  next_header;
+	u_int8_t  flow_label[3];
+} __packed;
+
+struct cdp_tclas_tuple_ipsec {
+	u_int8_t protocol_number;
+	u_int8_t protocol_instance;
+	u_int8_t filter_len;
+	u_int8_t *filter_mask;
+	u_int8_t *filter_val;
+} __packed;
+
+struct cdp_tclas_tuple {
+	uint8_t type;
+	uint8_t mask;
+	union {
+		union {
+			struct cdp_tclas_tuple_ipv4 v4;
+			struct cdp_tclas_tuple_ipv6 v6;
+		} type4;
+		struct cdp_tclas_tuple_ipsec ips;
+	} tclas;
+} __packed;
+
+/**
+ * struct cdp_scs_params - SCS parameters
+ * obtained from handshake
+ * @scsid  - SCS ID
+ * @access_priority - User Access Priority
+ * containing tid value.
+ * @tclas_elements - Number of TCLAS elements
+ * @tclas - TCLAS tuple parameters
+ * @tclas_processing - TCLAS processing value
+ */
+struct cdp_scs_params {
+	uint8_t scsid;
+	uint8_t access_priority;
+	uint8_t tclas_elements;
+	struct cdp_tclas_tuple tclas[IEEE80211_SCS_MAX_SIZE];
+	uint8_t tclas_process;
+};
+#endif
+
+#ifdef WLAN_SUPPORT_MSCS
+/**
+ * struct cdp_mscs_params - MSCS parameters obtained
+ * from handshake
+ * @user_pri_bitmap - User priority bitmap
+ * @user_pri_limit - User priority limit
+ * @classifier_type - TCLAS Classifier type
+ * @classifier_mask - TCLAS Classifier mask
+ */
+struct cdp_mscs_params {
+	uint8_t user_pri_bitmap;
+	uint8_t user_pri_limit;
+	uint8_t classifier_type;
+	uint8_t classifier_mask;
+};
+#endif
+
 /**
  * struct cdp_sec_type - security type information
  */
@@ -458,6 +609,9 @@ struct cdp_tx_exception_metadata {
 	enum cdp_sec_type sec_type;
 	uint8_t is_tx_sniffer;
 	uint16_t ppdu_cookie;
+#ifdef QCA_SUPPORT_WDS_EXTENDED
+	uint8_t is_wds_extended;
+#endif
 };
 
 typedef struct cdp_soc_t *ol_txrx_soc_handle;
@@ -542,6 +696,11 @@ struct ol_txrx_nbuf_classify {
 struct ol_osif_vdev_t;
 typedef struct ol_osif_vdev_t *ol_osif_vdev_handle;
 
+#ifdef QCA_SUPPORT_WDS_EXTENDED
+struct ol_osif_peer_t;
+typedef struct ol_osif_peer_t *ol_osif_peer_handle;
+#endif
+
 /**
  * wlan_op_mode - Virtual device operation mode
  * @wlan_op_mode_unknown: Unknown mode
@@ -559,6 +718,23 @@ enum wlan_op_mode {
 	wlan_op_mode_monitor,
 	wlan_op_mode_ocb,
 	wlan_op_mode_ndi,
+};
+
+/**
+ * enum wlan_op_subtype - Virtual device subtype
+ * @wlan_op_subtype_none: Subtype not applicable
+ * @wlan_op_subtype_p2p_device: P2P device
+ * @wlan_op_subtye_p2p_cli: P2P Client
+ * @wlan_op_subtype_p2p_go: P2P GO
+ *
+ * This enum lists the subtypes of a particular virtual
+ * device.
+ */
+enum wlan_op_subtype {
+	wlan_op_subtype_none,
+	wlan_op_subtype_p2p_device,
+	wlan_op_subtype_p2p_cli,
+	wlan_op_subtype_p2p_go,
 };
 
 /**
@@ -602,19 +778,21 @@ typedef void
 
 /**
  * ol_txrx_tx_fp - top-level transmit function
- * @data_vdev - handle to the virtual device object
+ * @soc - dp soc handle
+ * @vdev_id - handle to the virtual device object
  * @msdu_list - list of network buffers
  */
-typedef qdf_nbuf_t (*ol_txrx_tx_fp)(struct cdp_vdev *data_vdev,
+typedef qdf_nbuf_t (*ol_txrx_tx_fp)(struct cdp_soc_t *soc, uint8_t vdev_id,
 				    qdf_nbuf_t msdu_list);
 
 /**
  * ol_txrx_tx_exc_fp - top-level transmit function on exception path
- * @data_vdev - handle to the virtual device object
+ * @soc - dp soc handle
+ * @vdev_id - handle to the virtual device object
  * @msdu_list - list of network buffers
  * @tx_exc_metadata - structure that holds parameters to exception path
  */
-typedef qdf_nbuf_t (*ol_txrx_tx_exc_fp)(struct cdp_vdev *data_vdev,
+typedef qdf_nbuf_t (*ol_txrx_tx_exc_fp)(struct cdp_soc_t *soc, uint8_t vdev_id,
 					qdf_nbuf_t msdu_list,
 					struct cdp_tx_exception_metadata
 						*tx_exc_metadata);
@@ -624,9 +802,10 @@ typedef qdf_nbuf_t (*ol_txrx_tx_exc_fp)(struct cdp_vdev *data_vdev,
  * for tx completion
  * @skb: skb data
  * @osif_dev: the virtual device's OS shim object
+ * @flag: flag
  */
 typedef void (*ol_txrx_completion_fp)(qdf_nbuf_t skb,
-				      void *osif_dev);
+				      void *osif_dev, uint16_t flag);
 /**
  * ol_txrx_tx_flow_control_fp - tx flow control notification
  * function from txrx to OS shim
@@ -652,6 +831,19 @@ typedef bool (*ol_txrx_tx_flow_control_is_pause_fp)(void *osif_dev);
  * @msdu_list - list of network buffers
  */
 typedef QDF_STATUS(*ol_txrx_rx_fp)(void *osif_dev, qdf_nbuf_t msdu_list);
+
+typedef QDF_STATUS(*ol_txrx_fisa_rx_fp)(void *soc,
+					void *dp_vdev,
+					qdf_nbuf_t msdu_list);
+
+typedef QDF_STATUS(*ol_txrx_fisa_flush_fp)(void *soc, int ring_num);
+/**
+ * ol_txrx_rx_flush_fp - receive function to hand batches of data
+ * frames from txrx to OS shim
+ * @osif_dev: handle to the OSIF virtual device object
+ * @vdev_id: vdev_if of the packets to be flushed
+ */
+typedef QDF_STATUS(*ol_txrx_rx_flush_fp)(void *osif_dev, uint8_t vdev_id);
 
 /**
  * ol_txrx_rx_gro_flush_ind - function to send GRO flush indication to stack
@@ -690,12 +882,12 @@ typedef QDF_STATUS(*ol_txrx_get_key_fp)(void *osif_dev, uint8_t *key_buf, uint8_
  * @osif_dev  - the virtual device's OS shim object
  * @list_head - poniter to head of receive packet queue to decap
  * @list_tail - poniter to tail of receive packet queue to decap
- * @peer      - Peer handler
+ * @peer_mac  - mac address of peer handler
  */
 typedef QDF_STATUS(*ol_txrx_rsim_rx_decap_fp)(void *osif_dev,
 						qdf_nbuf_t *list_head,
 						qdf_nbuf_t *list_tail,
-						struct cdp_peer *peer);
+						uint8_t *peer_mac);
 
 /* ol_txrx_rx_fp - external tx free function to read per packet stats and
  *                            free tx buffer externally
@@ -740,10 +932,11 @@ typedef void (*ol_txrx_stats_callback)(void *ctxt,
  * ol_txrx_pktdump_cb - callback for packet dump feature
  */
 typedef void (*ol_txrx_pktdump_cb)(ol_txrx_soc_handle soc,
-				struct cdp_vdev *vdev,
-				qdf_nbuf_t netbuf,
-				uint8_t status,
-				uint8_t type);
+				   uint8_t pdev_id,
+				   uint8_t vdev_id,
+				   qdf_nbuf_t netbuf,
+				   uint8_t status,
+				   uint8_t type);
 
 /**
  * ol_txrx_ops - (pointers to) the functions used for tx and rx
@@ -814,11 +1007,14 @@ struct ol_txrx_ops {
 	struct {
 		ol_txrx_rx_fp           rx;
 		ol_txrx_rx_fp           rx_stack;
+		ol_txrx_rx_flush_fp     rx_flush;
 		ol_txrx_rx_gro_flush_ind_fp           rx_gro_flush;
 		ol_txrx_rx_check_wai_fp wai_check;
 		ol_txrx_rx_mon_fp       mon;
 		ol_txrx_stats_rx_fp           stats_rx;
 		ol_txrx_rsim_rx_decap_fp rsim_rx_decap;
+		ol_txrx_fisa_rx_fp	osif_fisa_rx;
+		ol_txrx_fisa_flush_fp   osif_fisa_flush;
 	} rx;
 	/* proxy arp function pointer - specified by OS shim, stored by txrx */
 	ol_txrx_proxy_arp_fp      proxy_arp;
@@ -873,6 +1069,21 @@ struct cdp_soc_t {
 };
 
 /*
+ * cdp_peer_param_type: different types of parameters
+ *			to set values in peer
+ * @CDP_CONFIG_NAWDS: Enable nawds mode
+ * @CDP_CONFIG_NAC: Enable nac
+ * @CDP_CONFIG_ISOLATION : Enable isolation
+ * @CDP_CONFIG_IN_TWT : In TWT session or not
+ */
+enum cdp_peer_param_type {
+	CDP_CONFIG_NAWDS,
+	CDP_CONFIG_NAC,
+	CDP_CONFIG_ISOLATION,
+	CDP_CONFIG_IN_TWT,
+};
+
+/*
  * cdp_pdev_param_type: different types of parameters
  *			to set values in pdev
  * @CDP_CONFIG_DEBUG_SNIFFER: Enable debug sniffer feature
@@ -886,6 +1097,24 @@ struct cdp_soc_t {
  * @CDP_INGRESS_STATS: Accumulate ingress statistics
  * @CDP_OSIF_DROP: Accumulate drops in OSIF layer
  * @CDP_CONFIG_ENH_RX_CAPTURE: Enable enhanced RX capture
+ * @CDP_CONFIG_ENH_TX_CAPTURE: Enable enhanced TX capture
+ * @CDP_CONFIG_HMMC_TID_OVERRIDE: Enable hmmc tid override
+ * @CDP_CONFIG_HMMC_TID_VALUE: set hmmc tid value
+ * @CDP_CONFIG_TX_CAPTURE: set tx capture
+ * @CDP_CHAN_NOISE_FLOOR: set channel noise floor
+ * @CDP_CONFIG_VOW: set/get vow config
+ * @CDP_TIDQ_OVERRIDE: set/get tid queue override
+ * @CDP_TIDMAP_PRTY: set/get tid map prty
+ * @CDP_TX_PENDING: get tx pending
+ * @CDP_FILTER_NEIGH_PEERS: filter neighbour peers
+ * @CDP_FILTER_UCAST_DATA: filter unicast data
+ * @CDP_FILTER_MCAST_DATA: filter multicast data
+ * @CDP_FILTER_NO_DATA: filter no data
+ * @CDP_MONITOR_CHANNEL: monitor channel
+ * @CDP_MONITOR_FREQUENCY: monitor frequency
+ * @CDP_CONFIG_BSS_COLOR: configure bss color
+ * @CDP_SET_ATF_STATS_ENABLE: set ATF stats flag
+ * @CDP_CONFIG_SPECIAL_VAP: Configure Special vap
  */
 enum cdp_pdev_param_type {
 	CDP_CONFIG_DEBUG_SNIFFER,
@@ -899,8 +1128,166 @@ enum cdp_pdev_param_type {
 	CDP_INGRESS_STATS,
 	CDP_OSIF_DROP,
 	CDP_CONFIG_ENH_RX_CAPTURE,
+	CDP_CONFIG_ENH_TX_CAPTURE,
+	CDP_CONFIG_HMMC_TID_OVERRIDE,
+	CDP_CONFIG_HMMC_TID_VALUE,
 	CDP_CONFIG_TX_CAPTURE,
+	CDP_CHAN_NOISE_FLOOR,
+	CDP_CONFIG_VOW,
+	CDP_TIDQ_OVERRIDE,
+	CDP_TIDMAP_PRTY,
+	CDP_TX_PENDING,
+	CDP_FILTER_NEIGH_PEERS,
+	CDP_FILTER_UCAST_DATA,
+	CDP_FILTER_MCAST_DATA,
+	CDP_FILTER_NO_DATA,
+	CDP_MONITOR_CHANNEL,
+	CDP_MONITOR_FREQUENCY,
+	CDP_CONFIG_BSS_COLOR,
+	CDP_SET_ATF_STATS_ENABLE,
+	CDP_CONFIG_SPECIAL_VAP,
 };
+
+/*
+ * cdp_config_param_type: union of different types of parameters
+ *			to set values into dp handles.
+ *
+ * @cdp_peer_param_nawds: Enable nawds mode
+ * @cdp_peer_param_isolation: Enable isolation
+ * @cdp_peer_param_in_twt: in TWT session or not
+ * @cdp_peer_param_nac: Enable nac
+ *
+ * @cdp_vdev_param_nawds: set nawds enable/disable
+ * @cdp_vdev_param_mcast_en: enable/disable multicast enhancement
+ * @cdp_vdev_param_wds: wds sta
+ * @cdp_vdev_param_mec: MEC enable flags
+ * @cdp_vdev_param_proxysta: proxy sta
+ * @cdp_vdev_param_tdls_flags: tdls link flags
+ * @cdp_vdev_param_ap_brdg_en: set ap_bridging enable/disable
+ * @cdp_vdev_param_cipher_en: set cipher type based on security
+ * @cdp_vdev_param_qwrap_isolation: qwrap isolation mode
+ * @cdp_vdev_param_tx_encap: tx encap type
+ * @cdp_vdev_param_rx_decap: rx decap type
+ * @cdp_vdev_param_mesh_rx_filter: set mesh rx filter
+ * @cdp_vdev_param_tidmap_prty: set tid vdev prty
+ * @cdp_vdev_param_tidmap_tbl_id: set tidmap table id
+ * @cdp_vdev_param_mesh_mode: set mesh mode
+ * @cdp_vdev_param_safe_mode: set safe mode
+ * @cdp_vdev_param_drop_unenc: set drop unencrypted flag
+ * @cdp_vdev_param_hlos_tid_override: set hlos tid override
+ * @cdp_vdev_param_peer_authorize: set peer authorize
+ * @cdp_vdev_param_peer_tid_latency_enable: set peer tid latency enable flag
+ * @cdp_vdev_param_mesh_tid: config tatency tid on vdev
+ *
+ * @cdp_pdev_param_dbg_snf: Enable debug sniffer feature
+ * @cdp_pdev_param_bpr_enable: Enable bcast probe feature
+ * @cdp_pdev_param_primary_radio: Configure radio as primary
+ * @cdp_pdev_param_en_perpkt_txstats: Enable per packet statistics
+ * @cdp_pdev_param_igmpmld_override: Override IGMP/MLD
+ * @cdp_pdev_param_igmpmld_tid: TID value when igmmld_override is set
+ * @cdp_pdev_param_arp_dbg_conf: Enable ARP debug
+ * @cdp_pdev_param_cptr_latcy: Capture time latency
+ * @cdp_pdev_param_ingrs_stats: Accumulate ingress statistics
+ * @cdp_pdev_param_osif_drop: Accumulate drops in OSIF layer
+ * @cdp_pdev_param_en_rx_cap: Enable enhanced RX capture
+ * @cdp_pdev_param_en_tx_cap: Enable enhanced TX capture
+ * @cdp_pdev_param_hmmc_tid_ovrd: Enable hmmc tid override
+ * @cdp_pdev_param_hmmc_tid: set hmmc tid value
+ * @cdp_pdev_param_tx_capture: set tx capture
+ * @cdp_pdev_param_chn_noise_flr: set channel noise floor
+ * @cdp_pdev_param_cfg_vow: set/get vow config
+ * @cdp_pdev_param_tidq_override: set/get tid queue override
+ * @cdp_pdev_param_mon_freq: set monitor frequency
+ * @cdp_pdev_param_bss_color: configure bss color
+ * @cdp_pdev_param_tidmap_prty: set/get tid map prty
+ * @cdp_pdev_param_tx_pending: get tx pending
+ * @cdp_pdev_param_fltr_neigh_peers: filter neighbour peers
+ * @cdp_pdev_param_fltr_ucast: filter unicast data
+ * @cdp_pdev_param_fltr_mcast: filter multicast data
+ * @cdp_pdev_param_fltr_none: filter no data
+ * @cdp_pdev_param_monitor_chan: monitor channel
+ * @cdp_pdev_param_atf_stats_enable: ATF stats enable
+ * @cdp_pdev_param_config_special_vap: Configure Special vap
+ *
+ * @cdp_psoc_param_en_rate_stats: set rate stats enable/disable
+ * @cdp_psoc_param_en_nss_cfg: set nss cfg
+ *
+ * @cdp_enable_tx_checksum: Flag to specify if HW Tx checksum enabled
+ */
+typedef union cdp_config_param_t {
+	/* peer params */
+	bool cdp_peer_param_nawds;
+	bool cdp_peer_param_isolation;
+	uint8_t cdp_peer_param_nac;
+	bool cdp_peer_param_in_twt;
+
+	/* vdev params */
+	bool cdp_vdev_param_wds;
+	bool cdp_vdev_param_mec;
+	bool cdp_vdev_param_nawds;
+	bool cdp_vdev_param_proxysta;
+	bool cdp_vdev_param_tdls_flags;
+	bool cdp_vdev_param_ap_brdg_en;
+	bool cdp_vdev_param_qwrap_isolation;
+	bool cdp_vdev_param_update_multipass;
+	uint8_t cdp_vdev_param_da_war;
+	uint8_t cdp_vdev_param_mcast_en;
+	uint8_t cdp_vdev_param_igmp_mcast_en;
+	uint8_t cdp_vdev_param_tidmap_prty;
+	uint8_t cdp_vdev_param_tidmap_tbl_id;
+	uint32_t cdp_vdev_param_aging_tmr;
+	uint32_t cdp_vdev_param_cipher_en;
+	uint32_t cdp_vdev_param_tx_encap;
+	uint32_t cdp_vdev_param_rx_decap;
+	uint32_t cdp_vdev_param_mesh_rx_filter;
+	uint32_t cdp_vdev_param_mesh_mode;
+	uint32_t cdp_vdev_param_safe_mode;
+	uint32_t cdp_vdev_param_drop_unenc;
+	uint8_t cdp_vdev_param_hlos_tid_override;
+	bool cdp_vdev_param_wds_ext;
+	uint8_t cdp_vdev_param_peer_authorize;
+	uint8_t cdp_vdev_param_peer_tid_latency_enable;
+	uint8_t cdp_vdev_param_mesh_tid;
+
+	/* pdev params */
+	bool cdp_pdev_param_cptr_latcy;
+	bool cdp_pdev_param_hmmc_tid_ovrd;
+	bool cdp_pdev_param_fltr_neigh_peers;
+	bool cdp_pdev_param_cfg_vow;
+	bool cdp_pdev_param_fltr_mcast;
+	bool cdp_pdev_param_fltr_none;
+	bool cdp_pdev_param_fltr_ucast;
+	uint8_t cdp_pdev_param_primary_radio;
+	uint8_t cdp_pdev_param_en_rx_cap;
+	uint8_t cdp_pdev_param_en_tx_cap;
+	uint8_t cdp_pdev_param_tx_capture;
+	uint8_t cdp_pdev_param_hmmc_tid;
+	uint8_t cdp_pdev_param_tidmap_prty;
+	uint8_t cdp_pdev_param_igmpmld_override;
+	uint8_t cdp_pdev_param_igmpmld_tid;
+	uint8_t cdp_pdev_param_arp_dbg_conf;
+	uint8_t cdp_pdev_param_tidq_override;
+	uint8_t cdp_pdev_param_bss_color;
+	uint16_t cdp_pdev_param_chn_noise_flr;
+	qdf_freq_t cdp_pdev_param_mon_freq;
+	int cdp_pdev_param_dbg_snf;
+	int cdp_pdev_param_bpr_enable;
+	int cdp_pdev_param_monitor_chan;
+	uint32_t cdp_pdev_param_ingrs_stats;
+	uint32_t cdp_pdev_param_osif_drop;
+	uint32_t cdp_pdev_param_en_perpkt_txstats;
+	uint32_t cdp_pdev_param_tx_pending;
+	bool cdp_pdev_param_atf_stats_enable;
+	bool cdp_pdev_param_config_special_vap;
+
+	/* psoc params */
+	bool cdp_psoc_param_en_rate_stats;
+	int cdp_psoc_param_en_nss_cfg;
+	int cdp_psoc_param_preferred_hw_mode;
+	bool cdp_psoc_param_pext_stats;
+
+	bool cdp_enable_tx_checksum;
+} cdp_config_param_type;
 
 /**
  * cdp_rx_enh_capture_mode - Rx enhanced capture modes
@@ -915,6 +1302,16 @@ enum cdp_rx_enh_capture_mode {
 };
 
 /**
+ * cdp_rx_enh_capture_peer - Rx enhanced capture peer filtering
+ * @CDP_RX_ENH_CAPTURE_PEER_DISABLED: Disable Rx ENH capture peer filtering
+ * @CDP_RX_ENH_CAPTURE_PEER_ENABLED: Enable Rx ENH capture peer filtering
+ */
+enum cdp_rx_enh_capture_peer {
+	CDP_RX_ENH_CAPTURE_PEER_DISABLED = 0,
+	CDP_RX_ENH_CAPTURE_PEER_ENABLED,
+};
+
+/**
  * cdp_tx_enh_capture_mode - Tx enhanced capture modes
  * @CDP_TX_ENH_CAPTURE_DISABLED: Disable Tx enhance capture for all peers
  * @CDP_TX_ENH_CAPTURE_ENABLE_ALL_PEERS: Enable tx capture for all peers
@@ -924,6 +1321,7 @@ enum cdp_tx_enh_capture_mode {
 	CDP_TX_ENH_CAPTURE_DISABLED = 0,
 	CDP_TX_ENH_CAPTURE_ENABLE_ALL_PEERS,
 	CDP_TX_ENH_CAPTURE_ENDIS_PER_PEER,
+	CDP_TX_ENH_CAPTURE_MAX,
 };
 
 /*
@@ -951,6 +1349,20 @@ enum cdp_pdev_bpr_param {
  * @CDP_ENABLE_AP_BRIDGE: set ap_bridging enable/disable
  * @CDP_ENABLE_CIPHER : set cipher type based on security
  * @CDP_ENABLE_QWRAP_ISOLATION: qwrap isolation mode
+ * @CDP_TX_ENCAP_TYPE: tx encap type
+ * @CDP_RX_DECAP_TYPE: rx decap type
+ * @CDP_MESH_RX_FILTER: set mesh rx filter
+ * @CDP_TID_VDEV_PRTY: set tid vdev prty
+ * @CDP_TIDMAP_TBL_ID: set tidmap table id
+ * @CDP_MESH_MODE: set mesh mode
+ * @CDP_SAFEMODE: set safe mode
+ * @CDP_DROP_UNENC: set drop unencrypted flag
+ * @CDP_ENABLE_IGMP_MCAST_EN: enable/disable igmp multicast enhancement
+ * @CDP_ENABLE_HLOS_TID_OVERRIDE: set hlos tid override flag
+ * @CDP_CFG_WDS_EXT: enable/disable wds ext feature
+ * @CDP_ENABLE_PEER_AUTHORIZE: enable peer authorize flag
+ * @CDP_ENABLE_PEER_TID_LATENCY: set peer tid latency enable flag
+ * @CDP_SET_VAP_MESH_TID : Set latency tid in vap
  */
 enum cdp_vdev_param_type {
 	CDP_ENABLE_NAWDS,
@@ -964,7 +1376,43 @@ enum cdp_vdev_param_type {
 	CDP_ENABLE_AP_BRIDGE,
 	CDP_ENABLE_CIPHER,
 	CDP_ENABLE_QWRAP_ISOLATION,
-	CDP_UPDATE_MULTIPASS
+	CDP_UPDATE_MULTIPASS,
+	CDP_TX_ENCAP_TYPE,
+	CDP_RX_DECAP_TYPE,
+	CDP_MESH_RX_FILTER,
+	CDP_TID_VDEV_PRTY,
+	CDP_TIDMAP_TBL_ID,
+#ifdef MESH_MODE_SUPPORT
+	CDP_MESH_MODE,
+#endif
+	CDP_SAFEMODE,
+	CDP_DROP_UNENC,
+	CDP_ENABLE_CSUM,
+	CDP_ENABLE_IGMP_MCAST_EN,
+	CDP_ENABLE_HLOS_TID_OVERRIDE,
+#ifdef QCA_SUPPORT_WDS_EXTENDED
+	CDP_CFG_WDS_EXT,
+#endif /* QCA_SUPPORT_WDS_EXTENDED */
+	CDP_ENABLE_PEER_AUTHORIZE,
+#ifdef WLAN_SUPPORT_MESH_LATENCY
+	CDP_ENABLE_PEER_TID_LATENCY,
+	CDP_SET_VAP_MESH_TID,
+#endif
+};
+
+/*
+ * cdp_psoc_param_type: different types of parameters
+ *			to set values in psoc
+ * @CDP_ENABLE_RATE_STATS: set rate stats enable/disable
+ * @CDP_SET_NSS_CFG: set nss cfg
+ * @CDP_SET_PREFERRED_HW_MODE: set preferred hw mode
+ * @CDP_CFG_PEER_EXT_STATS: Peer extended stats mode.
+ */
+enum cdp_psoc_param_type {
+	CDP_ENABLE_RATE_STATS,
+	CDP_SET_NSS_CFG,
+	CDP_SET_PREFERRED_HW_MODE,
+	CDP_CFG_PEER_EXT_STATS,
 };
 
 #define TXRX_FW_STATS_TXSTATS                     1
@@ -1204,6 +1652,8 @@ struct cdp_tx_sojourn_stats {
  * @is_mcast: MCAST or UCAST
  * @user_pos: user position
  * @mu_group_id: mu group id
+ * @ppdu_start_timestamp: 64 bits ppdu start timestamp
+ * @ppdu_end_timestamp: 64 bits ppdu end timestamp
  */
 struct cdp_delayed_tx_completion_ppdu_user {
 	uint32_t frame_ctrl:16,
@@ -1227,6 +1677,8 @@ struct cdp_delayed_tx_completion_ppdu_user {
 	bool is_mcast;
 	uint32_t user_pos;
 	uint32_t mu_group_id;
+	uint64_t ppdu_start_timestamp;
+	uint64_t ppdu_end_timestamp;
 };
 
 /**
@@ -1234,6 +1686,7 @@ struct cdp_delayed_tx_completion_ppdu_user {
  * @completion_status: completion status - OK/Filter/Abort/Timeout
  * @tid: TID number
  * @peer_id: Peer ID
+ * @ba_size: Block-Ack size
  * @frame_ctrl: frame control field in 802.11 header
  * @qos_ctrl: QoS control field in 802.11 header
  * @mpdu_tried: number of mpdus tried
@@ -1261,8 +1714,13 @@ struct cdp_delayed_tx_completion_ppdu_user {
  * @dcm: dcm
  * @ldpc: ldpc
  * @delayed_ba: delayed ba bit
+ * @ack_ba_tlv: ack ba recv tlv bit
  * @ppdu_type: SU/MU_MIMO/MU_OFDMA/MU_MIMO_OFDMA/UL_TRIG/BURST_BCN/UL_BSR_RESP/
+ * @pream_punct: Preamble Punctured PPDU
  * UL_BSR_TRIG/UNKNOWN
+ * @is_seq_num_valid:
+ *       1 - stats tlv has valid sequence number
+ *       0 - payload has valid sequence number
  * @ba_seq_no: Block Ack sequence number
  * @ba_bitmap: Block Ack bitmap
  * @start_seqa: Sequence number of first MPDU
@@ -1279,16 +1737,29 @@ struct cdp_delayed_tx_completion_ppdu_user {
  * @ppdu_cookie: 16-bit ppdu_cookie
  * @sa_is_training: smart antenna training packets indication
  * @rssi_chain: rssi chain per bandwidth
+ * @usr_ack_rssi: overall per user ack rssi
  * @sa_tx_antenna: antenna in which packet is transmitted
  * @sa_max_rates: smart antenna tx feedback info max rates
  * @sa_goodput: smart antenna tx feedback info goodput
  * @current_rate_per: Moving average per
+ * @last_enq_seq: last equeue sequence number
+ * @is_bss_peer: is bss peer check
+ * @mpdu_q: queue of mpdu in a ppdu
+ * @mpdus: MPDU list based on enqueue sequence bitmap
+ * @pending_retries: pending MPDUs (retries)
+ * @tlv_bitmap: per user tlv bitmap
+ * @skip: tx capture skip flag
+ * @mon_procd: to indicate user processed in ppdu of the sched cmd
+ * @debug_copied: flag to indicate bar frame copied
+ * @peer_last_delayed_ba: flag to indicate peer last delayed ba
+ * @phy_tx_time_us: Phy TX duration for the User
  */
 struct cdp_tx_completion_ppdu_user {
 	uint32_t completion_status:8,
 		 tid:8,
 		 peer_id:16;
 	uint8_t mac_addr[6];
+	uint16_t ba_size;
 	uint32_t frame_ctrl:16,
 		 qos_ctrl:16;
 	uint32_t mpdu_tried_ucast:16,
@@ -1299,7 +1770,9 @@ struct cdp_tx_completion_ppdu_user {
 		 short_retries:4,
 		 tx_ratecode:16,
 		 is_ampdu:1,
-		 ppdu_type:5;
+		 ppdu_type:5,
+		 pream_punct:1,
+		 is_seq_num_valid:1;
 	uint32_t success_bytes;
 	uint32_t retry_bytes;
 	uint32_t failed_bytes;
@@ -1318,7 +1791,8 @@ struct cdp_tx_completion_ppdu_user {
 		 gi:4,
 		 dcm:1,
 		 ldpc:1,
-		 delayed_ba:1;
+		 delayed_ba:1,
+		 ack_ba_tlv:1;
 	uint32_t ba_seq_no;
 	uint32_t ba_bitmap[CDP_BA_256_BIT_MAP_SIZE_DWORDS];
 	uint32_t start_seq;
@@ -1335,10 +1809,10 @@ struct cdp_tx_completion_ppdu_user {
 	/*ack rssi for separate chains*/
 	uint32_t ack_rssi[CDP_RSSI_CHAIN_LEN];
 	bool ack_rssi_valid;
+	uint32_t usr_ack_rssi;
 	uint32_t user_pos;
 	uint32_t mu_group_id;
 	uint32_t rix;
-	struct cdp_stats_cookie *cookie;
 	uint8_t is_ppdu_cookie_valid;
 	uint16_t ppdu_cookie;
 	uint8_t sa_is_training;
@@ -1366,6 +1840,20 @@ struct cdp_tx_completion_ppdu_user {
 	 * of no use. It is just for Host computation.
 	 */
 	uint32_t current_rate_per;
+	uint32_t last_enq_seq;
+
+	uint8_t is_bss_peer;
+
+	qdf_nbuf_queue_t mpdu_q;
+	qdf_nbuf_t *mpdus;
+	uint32_t pending_retries;
+	uint32_t tlv_bitmap;
+	bool skip;
+	bool mon_procd;
+	bool debug_copied;
+	bool peer_last_delayed_ba;
+
+	uint16_t phy_tx_time_us;
 };
 
 /**
@@ -1391,6 +1879,10 @@ struct cdp_tx_completion_ppdu_user {
  * @mcs: MCS index
  * @preamble: preamble
  * @gi: guard interval 800/400/1600/3200 ns
+ * @resp_type: response type
+ * @mprot_type: medium protection type
+ * @rts_success: rts success
+ * @rts failure: rts failure
  * @channel: frequency
  * @channel_num: channel number
  * @ack_rssi: ack rssi
@@ -1403,6 +1895,10 @@ struct cdp_tx_completion_ppdu_user {
  * @ba_start_seq: Block Ack sequence number
  * @ba_bitmap: Block Ack bitmap
  * @ppdu_cookie: 16-bit ppdu_cookie
+ * @long_retries: long retries
+ * @short_retries: short retries
+ * @completion_status: completion status - OK/Filter/Abort/Timeout
+ * @usr_idx: user index
  */
 struct cdp_tx_indication_mpdu_info {
 	uint32_t ppdu_id;
@@ -1428,23 +1924,45 @@ struct cdp_tx_indication_mpdu_info {
 	uint32_t tx_rate;
 	uint8_t mac_address[QDF_MAC_ADDR_SIZE];
 	uint8_t bss_mac_address[QDF_MAC_ADDR_SIZE];
-	uint32_t ppdu_start_timestamp;
-	uint32_t ppdu_end_timestamp;
+	uint64_t ppdu_start_timestamp;
+	uint64_t ppdu_end_timestamp;
 	uint32_t ba_start_seq;
 	uint32_t ba_bitmap[CDP_BA_256_BIT_MAP_SIZE_DWORDS];
 	uint16_t ppdu_cookie;
+	uint16_t long_retries:4,
+		 short_retries:4,
+		 completion_status:8;
+	uint16_t resp_type:4,
+		 mprot_type:3,
+		 rts_success:1,
+		 rts_failure:1;
+	uint8_t usr_idx;
 };
 
 /**
  * struct cdp_tx_indication_info - Tx capture information
- * @frame_payload: 802.11 payload is present already
  * @mpdu_info: Tx MPDU completion information
  * @mpdu_nbuf: reconstructed mpdu packet
+ * @ppdu_desc: tx completion ppdu
  */
 struct cdp_tx_indication_info {
-	uint8_t frame_payload;
 	struct cdp_tx_indication_mpdu_info mpdu_info;
 	qdf_nbuf_t mpdu_nbuf;
+	struct cdp_tx_completion_ppdu *ppdu_desc;
+};
+
+/**
+ * struct cdp_tx_mgmt_comp_info - Tx mgmt comp info
+ * @ppdu_id: ppdu_id
+ * @is_sgen_pkt: payload recevied from wmi or htt path
+ * @retries_count: retries count
+ * @tx_tsf: 64 bit timestamp
+ */
+struct cdp_tx_mgmt_comp_info {
+	uint32_t ppdu_id;
+	bool is_sgen_pkt;
+	uint16_t retries_count;
+	uint64_t tx_tsf;
 };
 
 /**
@@ -1455,19 +1973,42 @@ struct cdp_tx_indication_info {
  * @vdev_id: VAP Id
  * @bar_num_users: BA response user count, based on completion common TLV
  * @num_users: Number of users
+ * @max_users: Number of users from USR_INFO TLV
+ * @drop_reason: drop reason from flush status
+ * @is_flush: is_flush is set based on flush tlv
+ * @flow_type: tx flow type from flush status
+ * @queue_type: queue type from flush status
  * @num_mpdu: Number of MPDUs in PPDU
  * @num_msdu: Number of MSDUs in PPDU
  * @frame_type: frame SU or MU
+ * @htt_frame_type: frame type from htt
  * @frame_ctrl: frame control of 80211 header
  * @channel: Channel informartion
+ * @resp_type: response type
+ * @mprot_type: medium protection type
+ * @rts_success: rts success
+ * @rts failure: rts failure
+ * @phymode: phy mode
  * @ack_rssi: RSSI value of last ack packet (units=dB above noise floor)
  * @tx_duration: PPDU airtime
  * @ppdu_start_timestamp: TSF at PPDU start
  * @ppdu_end_timestamp: TSF at PPDU end
  * @ack_timestamp: TSF at the reception of ACK
  * @delayed_ba: Delayed ba flag
+ * @beam_change: beam change bit in ppdu for he-information
+ * @bss_color: 6 bit value for full bss color
+ * @doppler: value for doppler (will be 0 most of the times)
+ * @spatial_reuse: value for spatial reuse used in radiotap HE header
+ * @usr_nss_sum: Sum of user nss
+ * @usr_ru_tones_sum: Sum of user ru_tones
+ * @bar_ppdu_id: BAR ppdu_id
+ * @bar_tx_duration: BAR tx duration
+ * @bar_ppdu_start_timestamp: BAR start timestamp
+ * @bar_ppdu_end_timestamp: BAR end timestamp
+ * @tlv_bitmap: tlv_bitmap for the PPDU
+ * @sched_cmdid: schedule command id
+ * @phy_ppdu_tx_time_us: Phy per PPDU TX duration
  * @user: per-User stats (array of per-user structures)
- * @mpdu_q: queue of mpdu in a ppdu
  */
 struct cdp_tx_completion_ppdu {
 	uint32_t ppdu_id;
@@ -1475,21 +2016,43 @@ struct cdp_tx_completion_ppdu {
 	uint16_t vdev_id;
 	uint16_t bar_num_users;
 	uint32_t num_users;
+	uint8_t  max_users;
 	uint8_t last_usr_index;
+	uint32_t drop_reason;
+	uint32_t is_flush:1,
+		 flow_type:8,
+		 queue_type:8;
 	uint32_t num_mpdu:9,
 		 num_msdu:16;
 	uint16_t frame_type;
+	uint16_t htt_frame_type;
 	uint16_t frame_ctrl;
 	uint16_t channel;
+	uint16_t resp_type:4,
+		 mprot_type:3,
+		 rts_success:1,
+		 rts_failure:1;
 	uint16_t phy_mode;
 	uint32_t ack_rssi;
 	uint32_t tx_duration;
-	uint32_t ppdu_start_timestamp;
-	uint32_t ppdu_end_timestamp;
-	uint32_t ack_timestamp;
+	uint64_t ppdu_start_timestamp;
+	uint64_t ppdu_end_timestamp;
+	uint64_t ack_timestamp;
 	bool delayed_ba;
-	struct cdp_tx_completion_ppdu_user user[CDP_MU_MAX_USERS];
-	qdf_nbuf_queue_t mpdu_q;
+	uint8_t beam_change;
+	uint8_t bss_color;
+	uint8_t doppler;
+	uint8_t spatial_reuse;
+	uint8_t usr_nss_sum;
+	uint32_t usr_ru_tones_sum;
+	uint32_t bar_ppdu_id;
+	uint32_t bar_tx_duration;
+	uint64_t bar_ppdu_start_timestamp;
+	uint64_t bar_ppdu_end_timestamp;
+	uint32_t tlv_bitmap;
+	uint16_t sched_cmdid;
+	uint16_t phy_ppdu_tx_time_us;
+	struct cdp_tx_completion_ppdu_user user[];
 };
 
 /**
@@ -1578,12 +2141,13 @@ struct cdp_tx_completion_msdu {
  * @peer_id: Peer ID
  * @vdev_id: VAP ID
  * @is_ampdu: mpdu aggregate or non-aggregate?
- * @ofdma_info_valid: RU info valid
+ * @mu_ul_info_valid: MU UL info valid
  * @ofdma_ru_start_index: RU index number(0-73)
  * @ofdma_ru_width: size of RU in units of 1(26tone)RU
  * @nss: NSS 1,2, ...8
  * @mcs: MCS index
  * @user_index: user ID in multi-user case
+ * @is_bss_peer - is bss peer check
  * @ast_index: ast index in multi-user case
  * @tid: TID number
  * @num_msdu: Number of MSDUs in PPDU
@@ -1592,49 +2156,57 @@ struct cdp_tx_completion_msdu {
  * @other_msdu_count: Number of MSDUs other than UDP and TCP MSDUs in PPDU
  * @frame_control: frame control field
  * @frame_control_info_valid: frame_control valid
+ * @qos_control: qos control field
+ * @qos_control_info_valid: qos_control valid
  * @data_sequence_control_info_valid: data_sequence_control_info valid
  * @first_data_seq_ctrl: Sequence control field of first data frame
  * @preamble: preamble
  * @ht_flag: ht flag
  * @vht_flag: vht flag
  * @he_re: he_re (range extension)
+ * @mac_addr: Peer MAC Address
  * @mpdu_cnt_fcs_ok: Number of MPDUs in PPDU with fcs ok
  * @mpdu_cnt_fcs_err: Number of MPDUs in PPDU with fcs err
  * @mpdu_fcs_ok_bitmap - MPDU with fcs ok bitmap
- * @retried - number of retries
- * @mac_addr: Peer MAC Address
+ * @retries - number of retries
+ * @rx_ratekpbs - rx rate in kbps
  */
 struct cdp_rx_stats_ppdu_user {
 	uint16_t peer_id;
 	uint8_t vdev_id;
 	bool is_ampdu;
-	uint32_t ofdma_info_valid:1,
+	uint32_t mu_ul_info_valid:1,
 		 ofdma_ru_start_index:7,
 		 ofdma_ru_width:7,
 		 nss:4,
 		 mcs:4;
 	/* user id */
 	uint8_t  user_index;
+	uint8_t is_bss_peer;
 	uint32_t ast_index;
 	uint32_t tid;
+	uint32_t num_msdu;
 	uint16_t  tcp_msdu_count;
 	uint16_t  udp_msdu_count;
 	uint16_t  other_msdu_count;
 	uint16_t frame_control;
 	uint8_t  frame_control_info_valid;
+	uint16_t qos_control;
+	uint8_t  qos_control_info_valid;
 	uint8_t data_sequence_control_info_valid;
 	uint16_t first_data_seq_ctrl;
 	uint32_t preamble_type;
 	uint16_t ht_flags;
 	uint16_t vht_flags;
 	uint16_t he_flags;
+	uint8_t  mac_addr[QDF_MAC_ADDR_SIZE];
 	uint32_t mpdu_cnt_fcs_ok;
 	uint32_t mpdu_cnt_fcs_err;
 	uint32_t mpdu_fcs_ok_bitmap[QDF_MON_STATUS_MPDU_FCS_BMAP_NWORDS];
 	uint32_t mpdu_ok_byte_count;
 	uint32_t mpdu_err_byte_count;
 	uint32_t retries;
-	uint8_t  mac_addr[QDF_MAC_ADDR_SIZE];
+	uint32_t rx_ratekbps;
 };
 
 /**
@@ -1734,7 +2306,6 @@ struct cdp_rx_indication_ppdu {
 	uint8_t fcs_error_mpdus;
 	uint16_t frame_ctrl;
 	int8_t rssi_chain[SS_COUNT][MAX_BW];
-	struct cdp_stats_cookie *cookie;
 	struct cdp_rx_su_evm_info evm_info;
 	uint32_t rx_antenna;
 	uint8_t num_users;
@@ -1742,6 +2313,9 @@ struct cdp_rx_indication_ppdu {
 	uint32_t nf;
 	uint8_t  per_chain_rssi[MAX_CHAIN];
 	uint8_t is_mcast_bcast;
+#if defined(WLAN_CFR_ENABLE) && defined(WLAN_ENH_CFR_ENABLE)
+	struct cdp_rx_ppdu_cfr_info cfr_info;
+#endif
 };
 
 /**
@@ -1773,7 +2347,11 @@ struct cdp_rx_indication_msdu {
  * @lro_enable: Enable/Disable LRO
  * @gro_enable: Enable/Disable GRO
  * @flow_steering_enable: Enable/Disable Rx Hash based flow steering
- * @tcp_Udp_ChecksumOffload: Enable/Disable tcp-Udp checksum Offload
+ * @p2p_tcp_udp_checksumoffload: Enable/Disable TCP/UDP Checksum Offload for P2P
+ * @nan_tcp_udp_checksumoffload: Enable/Disable TCP/UDP Checksum Offload for NAN
+ * @tcp_udp_checksumoffload: Enable/Disable TCP/UDP Checksum Offload
+ * @legacy_mode_checksumoffload_disable: Disable TCP/UDP Checksum Offload for
+ *					 legacy modes.
  * @napi_enable: Enable/Disable Napi
  * @ipa_enable: Flag indicating if IPA is enabled or not
  * @tx_flow_stop_queue_threshold: Value to Pause tx queues
@@ -1788,7 +2366,10 @@ struct cdp_config_params {
 	unsigned int lro_enable:1;
 	unsigned int gro_enable:1;
 	unsigned int flow_steering_enable:1;
+	unsigned int p2p_tcp_udp_checksumoffload:1;
+	unsigned int nan_tcp_udp_checksumoffload:1;
 	unsigned int tcp_udp_checksumoffload:1;
+	unsigned int legacy_mode_checksumoffload_disable:1;
 	unsigned int napi_enable:1;
 	unsigned int ipa_enable:1;
 	/* Set when QCA_LL_TX_FLOW_CONTROL_V2 is enabled */
@@ -1843,14 +2424,37 @@ struct cdp_monitor_filter {
 };
 
 /**
- * cdp_dp_cfg - dp ini config enum
+ * enum cdp_dp_cfg - CDP ENUMs to get to DP configation
+ * @cfg_dp_enable_data_stall: context passed to be used by consumer
+ * @cfg_dp_enable_p2p_ip_tcp_udp_checksum_offload: get P2P checksum config
+ * @cfg_dp_enable_nan_ip_tcp_udp_checksum_offload: get NAN TX checksum config
+ * @cfg_dp_enable_ip_tcp_udp_checksum_offload: get TX checksum config for others
+ * @cfg_dp_tso_enable: get TSO enable config
+ * @cfg_dp_lro_enable: get LRO enable config
+ * @cfg_dp_gro_enable: get GRP enable config
+ * @cfg_dp_tx_flow_start_queue_offset: get DP TX flow start queue offset
+ * @cfg_dp_tx_flow_stop_queue_threshold: get DP TX flow stop queue threshold
+ * @cfg_dp_ipa_uc_tx_buf_size: get IPA TX buf size config
+ * @cfg_dp_ipa_uc_tx_partition_base: get IPA UC TX partition base config
+ * @cfg_dp_ipa_uc_rx_ind_ring_count: get IPA rx indication ring count config
+ * @cfg_dp_enable_flow_steering: get flow steerint enable config
+ * @cfg_dp_reorder_offload_supported: get reorder offload support config
+ * @cfg_dp_ce_classify_enable: get CE classify enable config
+ * @cfg_dp_disable_intra_bss_fwd: get intra bss fwd config
+ * @cfg_dp_pktlog_buffer_size: get packet log buffer size config
+ * @cfg_dp_wow_check_rx_pending: get wow rx pending frame check config
  */
 enum cdp_dp_cfg {
 	cfg_dp_enable_data_stall,
+	cfg_dp_enable_p2p_ip_tcp_udp_checksum_offload,
+	cfg_dp_enable_nan_ip_tcp_udp_checksum_offload,
 	cfg_dp_enable_ip_tcp_udp_checksum_offload,
+	/* Disable checksum offload for legacy modes */
+	cfg_dp_disable_legacy_mode_csum_offload,
 	cfg_dp_tso_enable,
 	cfg_dp_lro_enable,
 	cfg_dp_gro_enable,
+	cfg_dp_sg_enable,
 	cfg_dp_tx_flow_start_queue_offset,
 	cfg_dp_tx_flow_stop_queue_threshold,
 	cfg_dp_ipa_uc_tx_buf_size,
@@ -1860,22 +2464,34 @@ enum cdp_dp_cfg {
 	cfg_dp_reorder_offload_supported,
 	cfg_dp_ce_classify_enable,
 	cfg_dp_disable_intra_bss_fwd,
+	cfg_dp_pktlog_buffer_size,
+	cfg_dp_wow_check_rx_pending,
 };
 
 /**
  * struct cdp_peer_cookie - cookie used when creating peer
- * @peer_id: peer id
- * @mac_addr: MAC address of peer
- * @cookie: cookie to be used by consumer
  * @ctx: context passed to be used by consumer
+ * @mac_addr: MAC address of peer
+ * @peer_id: peer id
+ * @pdev_id: pdev_id
+ * @cookie: cookie to be used by consumer
  */
 struct cdp_peer_cookie {
-	uint8_t peer_id;
-	uint8_t mac_addr[QDF_MAC_ADDR_SIZE];
-	uint8_t cookie;
 	struct cdp_stats_cookie *ctx;
+	uint8_t mac_addr[QDF_MAC_ADDR_SIZE];
+	uint8_t peer_id;
+	uint8_t pdev_id;
+	uint8_t cookie;
 };
 
+#ifdef WLAN_SUPPORT_RX_FISA
+struct cdp_flow_stats {
+	uint32_t aggr_count;
+	uint32_t curr_aggr_count;
+	uint32_t flush_count;
+	uint32_t bytes_aggregated;
+};
+#else
 /**
  * cdp_flow_stats - Per-Flow (5-tuple) statistics
  * @msdu_count: number of rx msdus matching this flow
@@ -1886,6 +2502,7 @@ struct cdp_peer_cookie {
 struct cdp_flow_stats {
 	uint32_t msdu_count;
 };
+#endif
 
 /**
  * cdp_flow_fst_operation - RX FST operations allowed
@@ -1920,6 +2537,10 @@ enum cdp_flow_protocol_type {
  * @l4_protocol: protocol type in flow (TCP/UDP)
  */
 struct cdp_rx_flow_tuple_info {
+#ifdef WLAN_SUPPORT_RX_FISA
+	uint8_t tuple_populated;
+	uint8_t is_exception;
+#endif
 	uint32_t dest_ip_127_96;
 	uint32_t dest_ip_95_64;
 	uint32_t dest_ip_63_32;

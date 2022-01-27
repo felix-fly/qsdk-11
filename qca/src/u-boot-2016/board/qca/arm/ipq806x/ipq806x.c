@@ -75,7 +75,10 @@ struct dumpinfo_t dumpinfo_n[] = {
 	{ "WLAN_FW.BIN",  0x41400000, 0x000FFF80, 0 },
 	{ "WLAN_FW_900B.BIN", 0x44000000, 0x00600000, 0 },
 	{ "EBICS0.BIN",   0x40000000, 0x20000000, 0 },
-	{ "EBI1CS1.BIN",  0x60000000, 0x20000000, 0 }
+	{ "EBI1CS1.BIN",  0x60000000, 0x20000000, 0 },
+	{ "EBICS2.BIN",  0x60000000, 0x20000000, 0, 0, 0, 0, 1 },
+	{ "EBICS1.BIN",  CONFIG_UBOOT_END_ADDR, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS0.BIN",  0x40000000, CONFIG_QCA_UBOOT_OFFSET, 0, 0, 0, 0, 1 }
 };
 int dump_entries_n = ARRAY_SIZE(dumpinfo_n);
 
@@ -105,7 +108,10 @@ struct dumpinfo_t dumpinfo_s[] = {
 	{ "WLAN_FW.BIN",  0x41400000, 0x000FFF80, 0 },
 	{ "WLAN_FW_900B.BIN", 0x44000000, 0x00600000, 0 },
 	{ "EBICS0.BIN",   0x40000000, 0x20000000, 0 },
-	{ "EBI1CS1.BIN",  0x60000000, 0x20000000, 0 }
+	{ "EBI1CS1.BIN",  0x60000000, 0x20000000, 0 },
+	{ "EBICS2.BIN",  0x60000000, 0x20000000, 0, 0, 0, 0, 1 },
+	{ "EBICS1.BIN",  CONFIG_UBOOT_END_ADDR, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS0.BIN",  0x40000000, CONFIG_QCA_UBOOT_OFFSET, 0, 0, 0, 0, 1 }
 };
 int dump_entries_s = ARRAY_SIZE(dumpinfo_s);
 

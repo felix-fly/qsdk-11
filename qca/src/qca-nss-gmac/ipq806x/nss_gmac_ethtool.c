@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, 2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -146,6 +146,7 @@ static const struct nss_gmac_ethtool_stats gmac_gstrings_host_stats[] = {
 static const char *gmac_strings_priv_flags[] = {
 	"linkpoll",
 	"tstamp",
+	"ignore_rx_csum_err",
 };
 
 #define NSS_GMAC_STATS_LEN	ARRAY_SIZE(gmac_gstrings_stats)
@@ -173,7 +174,6 @@ static int32_t nss_gmac_get_strset_count(struct net_device *netdev,
 		return -EOPNOTSUPP;
 	}
 }
-
 
 /**
  * @brief Get strings that describe requested objects
@@ -247,7 +247,6 @@ static void nss_gmac_get_ethtool_stats(struct net_device *netdev,
 	spin_unlock_bh(&gmacdev->stats_lock);
 }
 
-
 /**
  * @brief Return driver information.
  *	  Note: Fields are 32 bytes in length.
@@ -262,7 +261,6 @@ static void nss_gmac_get_drvinfo(struct net_device *dev,
 	strlcpy(info->bus_info, "NSS", ETHTOOL_BUSINFO_LEN);
 	info->n_priv_flags = __NSS_GMAC_PRIV_FLAG_MAX;
 }
-
 
 /**
  * @brief Return pause parameters.
@@ -367,8 +365,6 @@ static int nss_gmac_nway_reset(struct net_device *netdev)
 
 	return 0;
 }
-
-
 
 /**
  * @brief Get Wake On Lan settings
@@ -555,6 +551,22 @@ static int32_t nss_gmac_set_priv_flags(struct net_device *netdev, u32 flags)
 		}
 	}
 
+	/*
+	 * Set ignore rx csum flag
+	 */
+	if (changed & NSS_GMAC_PRIV_FLAG(IGNORE_RX_CSUM_ERR)) {
+
+		if (flags & NSS_GMAC_PRIV_FLAG(IGNORE_RX_CSUM_ERR)) {
+			nss_gmac_rx_tcpip_chksum_drop_disable(gmacdev);
+			gmacdev->drv_flags |= NSS_GMAC_PRIV_FLAG(IGNORE_RX_CSUM_ERR);
+			netdev_dbg(netdev, "%s: Enabled 'ignore Rx csum error' flag", __func__);
+		} else {
+			nss_gmac_rx_tcpip_chksum_drop_enable(gmacdev);
+			gmacdev->drv_flags &= ~NSS_GMAC_PRIV_FLAG(IGNORE_RX_CSUM_ERR);
+			netdev_dbg(netdev, "%s: Disabled 'ignore Rx csum error' flag", __func__);
+		}
+	}
+
 	return 0;
 }
 
@@ -597,4 +609,3 @@ void nss_gmac_ethtool_register(struct net_device *netdev)
 {
 	netdev->ethtool_ops = &nss_gmac_ethtool_ops;
 }
-

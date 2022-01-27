@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2015, 2018-2019, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2015, 2018-2021 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -13,6 +13,8 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  **************************************************************************
  */
+
+extern int ecm_classifier_accel_delay_pkts;	/* Default slow path packets allowed before the acceleration */
 
 struct ecm_classifier_instance;
 
@@ -31,8 +33,17 @@ enum ecm_classifier_types {
 #ifdef ECM_CLASSIFIER_DSCP_ENABLE
 	ECM_CLASSIFIER_TYPE_DSCP,		/* Provides DSCP and DSCP remarking support */
 #endif
+#ifdef ECM_CLASSIFIER_MSCS_ENABLE
+	ECM_CLASSIFIER_TYPE_MSCS,		/* Mirrored Stream Classification Signalling(MSCS) classifier */
+#endif
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+	ECM_CLASSIFIER_TYPE_EMESH,		/* E-Mesh classifier */
+#endif
 #ifdef ECM_CLASSIFIER_NL_ENABLE
 	ECM_CLASSIFIER_TYPE_NL,			/* Provides netlink interface */
+#endif
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	ECM_CLASSIFIER_TYPE_OVS,		/* OVS classifier */
 #endif
 #ifdef ECM_CLASSIFIER_PCC_ENABLE
 	ECM_CLASSIFIER_TYPE_PCC,		/* Parental control subsystem support classifier */
@@ -83,6 +94,22 @@ typedef enum ecm_classifier_acceleration_modes ecm_classifier_acceleration_mode_
 #define ECM_CLASSIFIER_PROCESS_ACTION_IGS_QOS_TAG 0x00000040	/* Contains flow & return ingress qos tags */
 #endif
 
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+#define ECM_CLASSIFIER_PROCESS_ACTION_OVS_VLAN_TAG 0x00000080	/* Contains OVS VLAN tags */
+#define ECM_CLASSIFIER_PROCESS_ACTION_OVS_VLAN_QINQ_TAG 0x00000100	/* Contains OVS QinQ VLAN tags */
+#define ECM_CLASSIFIER_PROCESS_ACTION_OVS_MCAST_DENY_ACCEL 0x00000200		/* Multicast OVS flow */
+#endif
+
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+#define ECM_CLASSIFIER_PROCESS_ACTION_EMESH_SP_FLOW 0x00000400	/* Mark the E-MESH Service Prioritization flow */
+#endif
+
+#define ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP_NO_TOUCH 0x00000400	/* Do not update CI time */
+
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+#define ECM_CLASSIFIER_PROCESS_ACTION_MIRROR_ENABLED 0x00000800	/* Contains mirror dynamic interface number */
+#endif
+
 /*
  * struct ecm_classifier_process_response
  *	Response structure returned by a process call
@@ -99,11 +126,25 @@ struct ecm_classifier_process_response {
 	bool drop;					/* Drop packet at hand */
 	uint32_t flow_qos_tag;				/* QoS tag to use for the packet */
 	uint32_t return_qos_tag;			/* QoS tag to use for the packet */
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+#ifdef ECM_CLASSIFIER_DSCP_IGS
 	uint16_t igs_flow_qos_tag;			/* Ingress QoS tag to use for the packet */
 	uint16_t igs_return_qos_tag;			/* Ingress QoS tag to use for the return packet */
-#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+#endif
 	uint8_t flow_dscp;				/* DSCP mark for flow */
 	uint8_t return_dscp;				/* DSCP mark for return */
+#endif
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	uint32_t ingress_vlan_tag[2];			/* Ingress VLAN tags */
+	uint32_t egress_vlan_tag[2];			/* Egress VLAN tags */
+#ifdef ECM_MULTICAST_ENABLE
+	int32_t egress_netdev_index[ECM_DB_MULTICAST_IF_MAX];	 /* Multicast egress net device interface index */
+	uint32_t egress_mc_vlan_tag[ECM_DB_MULTICAST_IF_MAX][2]; /* Multicast egress VLAN tags */
+#endif
+#endif
+#ifdef ECM_CLASSIFIER_PCC_ENABLE
+	int flow_mirror_ifindex;			/* Flow mirror device index value */
+	int return_mirror_ifindex;			/* Return mirror device index value */
 #endif
 	ecm_classifier_acceleration_mode_t accel_mode;	/* Acceleration needed for this connection */
 	ecm_db_timer_group_t timer_group;		/* Timer group the connection should be in */
@@ -115,8 +156,10 @@ struct ecm_classifier_process_response {
  * in this data structure to update the classifiers.
  */
 struct ecm_classifier_rule_sync {
-	uint32_t flow_tx_packet_count;
-	uint32_t return_tx_packet_count;
+	uint32_t tx_packet_count[ECM_CONN_DIR_MAX];
+	uint32_t tx_byte_count[ECM_CONN_DIR_MAX];
+	uint32_t rx_packet_count[ECM_CONN_DIR_MAX];
+	uint32_t rx_byte_count[ECM_CONN_DIR_MAX];
 	uint32_t reason;
 };
 
@@ -127,7 +170,9 @@ struct ecm_classifier_rule_sync {
  * the underlying accelaration engine.
  */
 struct ecm_classifier_rule_create {
-
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+	struct sk_buff *skb;
+#endif
 };
 
 /*
@@ -252,7 +297,70 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 		}
 	}
 
-#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_OVS_VLAN_TAG) {
+#ifdef ECM_MULTICAST_ENABLE
+		int i;
+#endif
+		/*
+		 * TODO: Clean up the function later to print classifier
+		 * specific data in each classifier’s state_get function.
+		 */
+		if (pr->ingress_vlan_tag[0] != ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+			if ((result = ecm_state_write(sfi, "ingress_vlan_tag[0]", "0x%x", pr->ingress_vlan_tag[0]))) {
+				return result;
+			}
+		}
+
+		if (pr->ingress_vlan_tag[1] != ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+			if ((result = ecm_state_write(sfi, "ingress_vlan_tag[1]", "0x%x", pr->ingress_vlan_tag[1]))) {
+				return result;
+			}
+		}
+
+		if (pr->egress_vlan_tag[0] != ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+			if ((result = ecm_state_write(sfi, "egress_vlan_tag[0]", "0x%x", pr->egress_vlan_tag[0]))) {
+				return result;
+			}
+		}
+
+		if (pr->egress_vlan_tag[1] != ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+			if ((result = ecm_state_write(sfi, "egress_vlan_tag[1]", "0x%x", pr->egress_vlan_tag[1]))) {
+				return result;
+			}
+		}
+
+#ifdef ECM_MULTICAST_ENABLE
+		for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
+			struct net_device *dev;
+
+			if (pr->egress_mc_vlan_tag[i][0] == ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+				continue;
+			}
+
+			dev = dev_get_by_index(&init_net, pr->egress_netdev_index[i]);
+			if (dev) {
+				if ((result = ecm_state_write(sfi, "port_egress", "%s", dev->name))) {
+					dev_put(dev);
+					return result;
+				}
+				dev_put(dev);
+			}
+
+			if ((result = ecm_state_write(sfi, "port_egress_vlan_tag[0]", "0x%x", pr->egress_mc_vlan_tag[i][0]))) {
+				return result;
+			}
+
+			if (pr->egress_mc_vlan_tag[i][1] != ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED) {
+				if ((result = ecm_state_write(sfi, "port_egress_vlan_tag[1]", "0x%x", pr->egress_mc_vlan_tag[i][1]))) {
+					return result;
+				}
+			}
+		}
+#endif
+	}
+#endif
+
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG) {
 		if ((result = ecm_state_write(sfi, "flow_qos_tag", "%u", pr->flow_qos_tag))) {
 			return result;
@@ -261,7 +369,8 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 			return result;
 		}
 	}
-
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+#ifdef ECM_CLASSIFIER_DSCP_IGS
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_IGS_QOS_TAG) {
 		if ((result = ecm_state_write(sfi, "igs_flow_qos_tag", "%u", pr->igs_flow_qos_tag))) {
 			return result;
@@ -270,7 +379,7 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 			return result;
 		}
 	}
-
+#endif
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_DSCP) {
 		if ((result = ecm_state_write(sfi, "flow_dscp", "%u", pr->flow_dscp))) {
 			return result;
@@ -280,6 +389,7 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 		}
 	}
 #endif
+
 	if (pr->process_actions & ECM_CLASSIFIER_PROCESS_ACTION_TIMER_GROUP) {
 		if ((result = ecm_state_write(sfi, "timer_group", "%d", pr->timer_group))) {
 			return result;
@@ -292,4 +402,3 @@ static inline int ecm_classifier_process_response_state_get(struct ecm_state_fil
 
 extern struct ecm_classifier_instance *ecm_classifier_assign_classifier(struct ecm_db_connection_instance *ci, ecm_classifier_type_t type);
 extern bool ecm_classifier_reclassify(struct ecm_db_connection_instance *ci, int assignment_count, struct ecm_classifier_instance *assignments[]);
-

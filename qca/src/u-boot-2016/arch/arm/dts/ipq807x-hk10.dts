@@ -15,8 +15,6 @@
 #include "ipq807x-soc.dtsi"
 #include <dt-bindings/qcom/gpio-ipq807x.h>
 / {
-	model ="QCA, IPQ807x-HK10";
-	compatible = "qca,ipq807x", "qca,ipq807x-hk10";
 	machid = <0x0801000E>;
 	config_name = "config@hk10";
 
@@ -24,13 +22,17 @@
 		console = "/serial@78B3000";
 		uart2 = "/serial@78B0000";
 		pci0 = "/pci@20000000";
+		pci1 = "/pci@10000000";
+		i2c0 = "/i2c@78b6000";
 	};
 	ess-switch {
 		switch_mac_mode = <0x0>;
-		switch_mac_mode1 = <0x6>;
-		switch_mac_mode2 = <0x6>;
-		napa_gpio = <25 44>;
-		napa_gpio_cnt = <2>;
+		switch_mac_mode1 = <0x2>;
+		switch_mac_mode2 = <0x7>;
+		aquantia_port = <4>;
+		aquantia_gpio = <44>;
+		sfp_port = <5>;
+		sfp_gpio = <59>;
 		port_phyinfo {
 			port@0 {
 				phy_address = <0>;
@@ -49,12 +51,12 @@
 				phy_type = <1>;
 			};
 			port@4 {
-				phy_address = <24>;
-				phy_type = <2>;
+				phy_address = <7>;
+				phy_type = <3>;
 			};
 			port@5 {
-				phy_address = <28>;
-				phy_type = <2>;
+				phy_address = <30>;
+				phy_type = <5>;
 			};
 		};
 	};

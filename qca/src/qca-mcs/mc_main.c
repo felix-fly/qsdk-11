@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015, 2017, 2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -20,29 +20,41 @@
 #include "mc_netlink.h"
 #include "mc_snooping.h"
 #include "mc_forward.h"
+#include "mc_ovs.h"
 
+/* mc_init
+ *	module init
+ */
 static int __init mc_init(void)
 {
 	if (mc_netlink_init())
-		goto err0;
+		goto out;
 
 	if (mc_netfilter_init())
-		goto err1;
+		goto netlink_clean;
 
 	mc_snooping_init();
-
+#ifdef MC_SUPPORT_OVS
+	mc_ovs_init();
+#endif
 	printk("QCA multicast snooping installed successfully\n");
 	return 0;
 
-err1:
+netlink_clean:
 	mc_netlink_exit();
-err0:
+out:
 	printk("QCA multicast snooping failed to install\n");
 	return -1;
 }
 
+/* mc_exit
+ *	module exit
+ */
 static void __exit mc_exit(void)
 {
+#ifdef MC_SUPPORT_OVS
+	mc_ovs_exit();
+#endif
 	mc_netlink_exit();
 	mc_netfilter_exit();
 	mc_snooping_exit();

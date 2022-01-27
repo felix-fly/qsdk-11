@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -380,6 +380,13 @@ UCFG_VDEV_CP_STATS_SET_FUNCS(peer_delete_req);
 UCFG_VDEV_CP_STATS_SET_FUNCS(peer_delete_resp);
 UCFG_VDEV_CP_STATS_SET_FUNCS(peer_delete_all_req);
 UCFG_VDEV_CP_STATS_SET_FUNCS(peer_delete_all_resp);
+UCFG_VDEV_CP_STATS_SET_FUNCS(prob_req_drops);
+UCFG_VDEV_CP_STATS_SET_FUNCS(oob_probe_req_count);
+UCFG_VDEV_CP_STATS_SET_FUNCS(wc_probe_req_drops);
+UCFG_VDEV_CP_STATS_SET_FUNCS(fils_frames_sent);
+UCFG_VDEV_CP_STATS_SET_FUNCS(fils_frames_sent_fail);
+UCFG_VDEV_CP_STATS_SET_FUNCS(tx_offload_prb_resp_succ_cnt);
+UCFG_VDEV_CP_STATS_SET_FUNCS(tx_offload_prb_resp_fail_cnt);
 
 #define UCFG_VDEV_CP_STATS_GET_FUNCS(field) \
 	static inline uint64_t \
@@ -398,6 +405,10 @@ UCFG_VDEV_CP_STATS_SET_FUNCS(peer_delete_all_resp);
 UCFG_VDEV_CP_STATS_GET_FUNCS(rx_wrongbss);
 UCFG_VDEV_CP_STATS_GET_FUNCS(rx_wrongdir);
 UCFG_VDEV_CP_STATS_GET_FUNCS(rx_ssid_mismatch);
+UCFG_VDEV_CP_STATS_GET_FUNCS(peer_delete_req);
+UCFG_VDEV_CP_STATS_GET_FUNCS(peer_delete_resp);
+UCFG_VDEV_CP_STATS_GET_FUNCS(peer_delete_all_req);
+UCFG_VDEV_CP_STATS_GET_FUNCS(peer_delete_all_resp);
 
 #define UCFG_VDEV_UCAST_CP_STATS_SET_FUNCS(field) \
 	static inline void \
@@ -620,10 +631,20 @@ UCFG_PEER_CP_STATS_SET_FUNCS(is_tx_nobuf);
 #ifdef ATH_SUPPORT_IQUE
 UCFG_PEER_CP_STATS_SET_FUNCS(tx_dropblock);
 #endif
+UCFG_PEER_CP_STATS_SET_FUNCS(rx_decryptcrc);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_event_type);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_flow_id);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_bcast);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_trig);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_announ);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_dialog_id);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_wake_dura_us);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_wake_intvl_us);
+UCFG_PEER_CP_STATS_SET_FUNCS(twt_sp_offset_us);
 
 static inline
-void ucfg_peer_cp_stats_rx_mgmt_rssi_update(struct wlan_objmgr_peer *peer,
-					    int8_t rssi)
+void ucfg_peer_cp_stats_rx_mgmt_snr_update(struct wlan_objmgr_peer *peer,
+					   int8_t snr)
 {
 	struct peer_cp_stats *peer_cs;
 	struct peer_ic_cp_stats *peer_cps;
@@ -637,11 +658,11 @@ void ucfg_peer_cp_stats_rx_mgmt_rssi_update(struct wlan_objmgr_peer *peer,
 
 	peer_cps = peer_cs->peer_stats;
 	if (peer_cps)
-		peer_cps->cs_rx_mgmt_rssi = rssi;
+		peer_cps->cs_rx_mgmt_snr = snr;
 }
 
 static inline
-int8_t ucfg_peer_cp_stats_rx_mgmt_rssi_get(struct wlan_objmgr_peer *peer)
+int8_t ucfg_peer_cp_stats_rx_mgmt_snr_get(struct wlan_objmgr_peer *peer)
 {
 	struct peer_cp_stats *peer_cs;
 	struct peer_ic_cp_stats *peer_cps;
@@ -656,7 +677,7 @@ int8_t ucfg_peer_cp_stats_rx_mgmt_rssi_get(struct wlan_objmgr_peer *peer)
 
 	peer_cps = peer_cs->peer_stats;
 	if (peer_cps)
-		val = peer_cps->cs_rx_mgmt_rssi;
+		val = peer_cps->cs_rx_mgmt_snr;
 
 	return val;
 }
@@ -680,6 +701,7 @@ UCFG_PEER_CP_STATS_GET_FUNCS(rx_mgmt_rate);
 #ifdef ATH_SUPPORT_IQUE
 UCFG_PEER_CP_STATS_GET_FUNCS(tx_dropblock);
 #endif
+UCFG_PEER_CP_STATS_GET_FUNCS(rx_decryptcrc);
 
 /**
  * wlan_ucfg_get_peer_cp_stats() - ucfg API to get peer cp stats

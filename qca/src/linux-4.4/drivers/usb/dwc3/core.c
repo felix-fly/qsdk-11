@@ -258,6 +258,22 @@ static void dwc3_ref_clk_period(struct dwc3 *dwc, u32 ref_clk_per)
 }
 
 /**
+ * dwc3_30m_sb_sel_adjustment - 30MHZ side band sel adjustment
+ *
+ * @dwc: Pointer to our controller context structure
+ * @ref_clk_per: 30MHz side band sel value
+ */
+static void dwc3_30m_sb_sel_adjustment(struct dwc3 *dwc, int sb_30m_sel)
+{
+	u32 reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GFLADJ);
+	reg &= ~DWC3_GFLADJ_30MHZ_SDBND_SEL_MASK;
+	reg |=  (sb_30m_sel << 7);
+	dwc3_writel(dwc->regs, DWC3_GFLADJ, reg);
+}
+
+/**
  * dwc3_free_one_event_buffer - Frees one event buffer
  * @dwc: Pointer to our controller context structure
  * @evt: Pointer to event buffer to be freed
@@ -748,15 +764,13 @@ static int dwc3_core_init(struct dwc3 *dwc)
 	ret = dwc3_setup_scratch_buffers(dwc);
 	if (ret)
 		goto err2;
-	/*
-	 * Enable ENABLEEPCACHEEVICT for 3.00a dwc3 host,
-	 * fixed in 3.20a controller
-	 */
-	if (dwc->revision == DWC3_REVISION_300A) {
+
+	if (dwc->disable_ep_cache_eviction_quirk) {
 		reg = dwc3_readl(dwc->regs, DWC3_GUCTL2);
 		reg |= DWC3_GCTL2_ENABLEEPCACHEEVICT;
 		dwc3_writel(dwc->regs, DWC3_GUCTL2, reg);
 	}
+
 	return 0;
 
 err2:
@@ -937,7 +951,7 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	void __iomem		*regs;
 	void			*mem;
-
+	u32			sb_30m_sel = 0;
 	mem = devm_kzalloc(dev, sizeof(*dwc) + DWC3_ALIGN_MASK, GFP_KERNEL);
 	if (!mem)
 		return -ENOMEM;
@@ -1065,6 +1079,10 @@ static int dwc3_probe(struct platform_device *pdev)
 				 &ref_clk_per);
 	dwc->emulation = of_property_read_bool(dev->of_node,
 					"qcom,emulation");
+	dwc->disable_ep_cache_eviction_quirk = device_property_read_bool(dev,
+				"snps,dis_ep_cache_eviction");
+	device_property_read_u32(dev, "snps,quirk-30m-sb-sel",
+				&sb_30m_sel);
 
 	if (pdata) {
 		dwc->maximum_speed = pdata->maximum_speed;
@@ -1172,6 +1190,10 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	/* Adjust Frame Length */
 	dwc3_frame_length_adjustment(dwc, fladj);
+
+	/* Adjust 30m side band sel */
+	if (device_property_present(dev, "snps,quirk-30m-sb-sel"))
+		dwc3_30m_sb_sel_adjustment(dwc, sb_30m_sel);
 
 	/* Adjust Reference Clock Settings */
 	dwc3_ref_clk_adjustment(dwc, ref_clk_adj);

@@ -119,7 +119,7 @@ if [ -n "${DTB}" ]; then
 	CONFIG_ID=($DTB)
 	for dtb in $DTB
 	do
-		CONFIG_ID=$([ ${#CONFIG_ID[@]} == 1 ] && echo ${#CONFIG_ID[@]} || basename ${dtb%%.gz} .dtb | sed -e 's/\([^-]*-\)\{2\}//g');
+		CONFIG_ID=$([ ${#CONFIG_ID[@]} == 1 ] && echo ${#CONFIG_ID[@]} || basename ${dtb%%.gz} .dtb | sed -e 's/^[^-]*-[^-]*-//g');
 		[ "${DTB_COMPRESS}" != "none" ] && Generate_Comp_FDT $dtb || Generate_FDT $dtb
 		Generate_Config
 

@@ -25,6 +25,7 @@
 #include "hyfi_osdep.h"
 #include "hyfi_bridge.h"
 #include "hyfi_hatbl.h"
+#include "hyfi_filters.h"
 
 static void mc_retag(void *iph, __be16 etype, __be32 dscp)
 {
@@ -42,6 +43,9 @@ static void mc_retag(void *iph, __be16 etype, __be32 dscp)
 
 static int mc_encap_check_source(int pro, void *srcs, int offset, void *iph)
 {
+    if(offset > HYFI_MC_IP6_SIZE)
+        return -1;
+
     if (pro == htons(ETH_P_IP)) {
         return (*((__be32 *)srcs + offset) == ((struct iphdr *)iph)->saddr);
     }
@@ -111,7 +115,11 @@ static void mc_encap_hook(struct net_bridge *br,
         if (forward)
             hyfi_br_forward(pdst, skb);
         else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+            br_forward(pdst, skb, false, true);
+#else
             br_deliver(pdst, skb);
+#endif
     }
 out: 
     if (skb && !pdst)
@@ -199,7 +207,11 @@ static void mc_flood_hook(__be32 ifindex, struct sk_buff *skb, int forward)
         hyfi_br_forward(br_port, skb);
     }
     else {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+        br_forward(br_port, skb, false, true);
+#else
         br_deliver(br_port, skb);
+#endif
     }
 out:
     dev_put(dev);
@@ -360,6 +372,35 @@ static int mc_convert(struct mc_struct *mc, struct sk_buff *skb, int forward)
             break;
 #endif
         default:
+            if (hyfi_is_ieee1905_pkt(skb)) {
+                struct net_bridge_fdb_entry *hsrc;
+                struct sk_buff *skb2;
+                unsigned char *dest_addr, *src_addr;
+                struct hyfi_net_bridge *hyfi_br;
+                const struct net_bridge *br;
+
+                src_addr = eth_hdr(skb)->h_source;
+                dest_addr = eth_hdr(skb)->h_dest;
+                br = netdev_priv(BR_INPUT_SKB_CB(skb)->brdev);
+                hyfi_br = hyfi_bridge_get(br);
+
+                if (unlikely(!br || !hyfi_br || !hyfi_br->dev || br->dev != hyfi_br->dev)) {
+                    goto out;
+                }
+
+                if ((hsrc = os_br_fdb_get((struct net_bridge *) br, eth_hdr(skb)->h_source)) && hsrc->is_local) {
+                    hyfi_ieee1905_frame_filter(skb, skb->dev);
+                    skb2 = skb_clone(skb, GFP_ATOMIC);
+                    if (skb2) {
+                        skb2->dev = hyfi_br->dev;
+                        netif_receive_skb(skb2);
+                        if (hyfi_ieee1905_msg_type(skb) == 0) {
+                            kfree_skb(skb);
+                            return 0;
+                        }
+                    }
+                }
+            }
             goto out;
     }
 
@@ -430,7 +471,7 @@ out:
     return -EINVAL;
 }
 
-static int mc_process(const struct net_bridge_port *src, struct sk_buff *skb)
+static int __mc_process(const struct net_bridge_port *src, struct sk_buff *skb)
 {
 	struct net_bridge *br;
     struct hyfi_net_bridge *hyfi_br;
@@ -465,6 +506,22 @@ static int mc_process(const struct net_bridge_port *src, struct sk_buff *skb)
     
     return mc_convert(mc, skb, 1);
 }
+
+/*
+ * mc_process
+ * callback of br_multicast_handle_hook from the linux kernel
+ */
+static int mc_process(const struct net_bridge_port *src, struct sk_buff *skb)
+{
+    int  ret;
+
+    rcu_read_lock();
+    ret = __mc_process(src, skb);
+    rcu_read_unlock();
+
+    return ret;
+}
+
 
 int mc_forward_init(void)
 {

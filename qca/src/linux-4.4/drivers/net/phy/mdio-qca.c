@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -18,7 +18,9 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of_address.h>
+#include <linux/clk.h>
 #include <linux/of_mdio.h>
+#include <linux/reset.h>
 #include <linux/phy.h>
 #include <linux/platform_device.h>
 #include <linux/of_gpio.h>
@@ -43,8 +45,15 @@
 
 #define QCA_MAX_PHY_RESET	3
 
+#define QCA_MDIO_CLK_RATE	100000000
+
+#define TCSR_LDO_ADDR		0x19475C4
+#define GCC_GEPHY_ADDR	0x1856004
+#define REG_SIZE		4
+
 struct qca_mdio_data {
 	struct mii_bus *mii_bus;
+	struct clk *mdio_clk;
 	void __iomem *membase;
 	int phy_irq[PHY_MAX_ADDR];
 };
@@ -197,15 +206,9 @@ phy_reset_out:
 
 static int qca_phy_reset(struct platform_device *pdev)
 {
-	struct device_node *mdio_node;
+	struct device_node *mdio_node = pdev->dev.of_node;
 	int phy_reset_gpio_number;
 	int ret, i;
-
-	mdio_node = of_find_node_by_name(NULL, "mdio");
-	if (!mdio_node) {
-		dev_err(&pdev->dev, "Could not find mdio node\n");
-		return -ENOENT;
-	}
 
 	for (i = 0; i < QCA_MAX_PHY_RESET; i++) {
 		ret = of_get_named_gpio(mdio_node, "phy-reset-gpio", i);
@@ -223,38 +226,78 @@ static int qca_phy_reset(struct platform_device *pdev)
 	return 0;
 }
 
+static void qca_tcsr_ldo_rdy_set(bool ready)
+{
+	void __iomem *tcsr_base = NULL;
+	u32 val;
+
+	tcsr_base = ioremap_nocache(TCSR_LDO_ADDR, REG_SIZE);
+	if (!tcsr_base)
+		return;
+
+	val = readl(tcsr_base);
+	if (ready)
+		val |= 1;
+	else
+		val &= ~1;
+	writel(val, tcsr_base);
+	usleep_range(100000, 110000);
+
+	iounmap(tcsr_base);
+}
+
 static int qca_mdio_probe(struct platform_device *pdev)
 {
 	struct qca_mdio_data *am;
 	struct resource *res;
 	int ret, i;
+	struct reset_control *rst = ERR_PTR(-EINVAL);
+
+	if (of_machine_is_compatible("qcom,ipq5018")) {
+		qca_tcsr_ldo_rdy_set(true);
+		rst = of_reset_control_get(pdev->dev.of_node, "gephy_mdc_rst");
+		if (!IS_ERR(rst)) {
+			reset_control_deassert(rst);
+			usleep_range(100000, 110000);
+		}
+	}
 
 	ret = qca_phy_reset(pdev);
 	if (ret)
-		dev_err(&pdev->dev, "Could not find qca8075 reset gpio\n");
+		dev_err(&pdev->dev, "Could not find reset gpio\n");
 
 	am = devm_kzalloc(&pdev->dev, sizeof(*am), GFP_KERNEL);
 	if (!am)
 		return -ENOMEM;
 
+	am->mdio_clk = devm_clk_get(&pdev->dev, "gcc_mdio_ahb_clk");
+	if (!IS_ERR(am->mdio_clk)) {
+		ret = clk_set_rate(am->mdio_clk, QCA_MDIO_CLK_RATE);
+		if (ret)
+			goto err_out;
+		ret = clk_prepare_enable(am->mdio_clk);
+		if (ret)
+			goto err_out;
+	}
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "no iomem resource found\n");
 		ret = -ENXIO;
-		goto err_free_mdio;
+		goto err_disable_clk;
 	}
 
 	am->membase = devm_ioremap_resource(&pdev->dev, res);
 	if (!am->membase) {
 		dev_err(&pdev->dev, "unable to ioremap registers\n");
 		ret = -ENOMEM;
-		goto err_free_mdio;
+		goto err_disable_clk;
 	}
 
 	am->mii_bus = mdiobus_alloc();
 	if (!am->mii_bus) {
 		ret = -ENOMEM;
-		goto err_iounmap;
+		goto err_disable_clk;
 	}
 
 	writel(CTRL_0_REG_DEFAULT_VALUE, am->membase + MDIO_CTRL_0_REG);
@@ -278,15 +321,25 @@ static int qca_mdio_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "qca-mdio driver was registered\n");
 
+	if (of_machine_is_compatible("qcom,ipq5018")) {
+		qca_tcsr_ldo_rdy_set(false);
+		if (!IS_ERR(rst))
+			reset_control_assert(rst);
+	}
+
 	return 0;
 
 err_free_bus:
 	mdiobus_free(am->mii_bus);
-err_iounmap:
-	iounmap(am->membase);
-err_free_mdio:
-	kfree(am);
-
+err_disable_clk:
+	if (!IS_ERR(am->mdio_clk))
+		clk_disable_unprepare(am->mdio_clk);
+err_out:
+	if (of_machine_is_compatible("qcom,ipq5018")) {
+		qca_tcsr_ldo_rdy_set(false);
+		if (!IS_ERR(rst))
+			reset_control_assert(rst);
+	}
 	return ret;
 }
 
@@ -295,10 +348,10 @@ static int qca_mdio_remove(struct platform_device *pdev)
 	struct qca_mdio_data *am = platform_get_drvdata(pdev);
 
 	if (am) {
+		if (!IS_ERR(am->mdio_clk))
+			clk_disable_unprepare(am->mdio_clk);
 		mdiobus_unregister(am->mii_bus);
 		mdiobus_free(am->mii_bus);
-		iounmap(am->membase);
-		kfree(am);
 		platform_set_drvdata(pdev, NULL);
 	}
 

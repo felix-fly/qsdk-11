@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2018, 2020 The Linux Foundation. All rights reserved.
  * Copyright (C) 2015 Linaro Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -14,6 +14,7 @@
 #define __QCOM_SCM_H
 
 #include <linux/scatterlist.h>
+#include <linux/device.h>
 
 #define QCOM_KERNEL_AUTH_CMD		0x15
 #define QCOM_SCM_PAS_AUTH_DEBUG_RESET_CMD	0x14
@@ -41,6 +42,9 @@ struct scm_cmd_buf_t {
 	uint32_t resp_size;
 };
 
+extern int qcom_scm_aes(struct scm_cmd_buf_t *scm_cmd_buf,
+				size_t buf_size, u32 cmd_id);
+
 extern int qcom_scm_tls_hardening(struct scm_cmd_buf_t *scm_cmd_buf,
 				 size_t buf_size, u32 cmd_id);
 
@@ -64,6 +68,7 @@ extern int qcom_scm_tcsr(u32 svc_id, u32 cmd_id,
 extern bool qcom_scm_is_available(void);
 
 extern bool qcom_scm_hdcp_available(void);
+extern bool qcom_scm_pdseg_memcpy_v2_available(void);
 
 extern bool qcom_scm_pas_supported(u32 peripheral);
 extern int qcom_scm_pas_init_image(u32 peripheral, const void *metadata,
@@ -72,6 +77,8 @@ extern int qcom_scm_pas_mem_setup(u32 peripheral, phys_addr_t addr,
 		phys_addr_t size);
 extern int qcom_scm_pas_auth_and_reset(u32 peripheral, u32 debug, u32 cmd);
 extern int qcom_scm_pas_shutdown(u32 peripheral);
+extern int qcom_scm_set_resettype(u32 reset_type);
+extern int qcom_scm_get_smmustate(void);
 
 #define SCM_SVC_UTIL		0x3
 #define SCM_CMD_SET_REGSAVE 	0x2
@@ -87,10 +94,28 @@ extern int qcom_scm_extwdt(u32 svc_id, u32 cmd_id, unsigned int regaddr,
 #define TZ_INFO_GET_DIAG_ID	0x2
 #define SCM_SVC_INFO		0x6
 #define HVC_INFO_GET_DIAG_ID	0x7
+#define QCOM_SCM_SVC_SMMUSTATE_CMD	0x19
 
 extern int qcom_scm_tz_log(u32 svc_id, u32 cmd_id, void *ker_buf, u32 buf_len);
 extern int qcom_scm_hvc_log(u32 svc_id, u32 cmd_id, void *ker_buf,
 								u32 buf_len);
+#define QTI_TZ_LOG_ENCR_ALLOWED_ID	\
+		TZ_SYSCALL_CREATE_SMC_ID(TZ_OWNER_QSEE_OS, TZ_SVC_APP_MGR, 0x0B)
+#define QTI_TZ_REQ_ENCR_LOG_BUFFER_ID 	\
+		TZ_SYSCALL_CREATE_SMC_ID(TZ_OWNER_QSEE_OS, TZ_SVC_APP_MGR, 0x0C)
+#define QTI_TZ_DIAG_LOG_ENCR_ID	0x0
+#define QTI_TZ_QSEE_LOG_ENCR_ID	0x1
+#define TZ_LOG_NO_UPDATE		-6
+
+extern int qti_scm_is_log_encrypt_supported(void);
+extern int qti_scm_tz_log_is_encrypted(void);
+extern int qti_scm_tz_log_encrypted(void *ker_buf, u32 buf_len, u32 log_id);
+extern int parse_encrypted_log( char *ker_buf, uint32_t buf_len,
+						char *copy_buf, uint32_t log_id);
+extern int print_text(char *intro_message, unsigned char *text_addr,
+			unsigned int size, char *buf, uint32_t buf_len);
+
+
 extern int qcom_scm_pshold(void);
 
 extern int qcom_config_sec_ice(void *buf, int size);
@@ -122,6 +147,7 @@ extern int qcom_scm_tzsched(const void *req, size_t req_size,
 #define TZ_SVC_APP_MGR			1     /* Application management */
 #define TZ_SVC_APP_ID_PLACEHOLDER	0     /* SVC bits will contain App ID */
 
+#define TZ_ARMv8_CMD_REMOVE_XPU			0x09
 #define TZ_ARMv8_CMD_NOTIFY_REGION_ID		0x05
 #define TZ_ARMv8_CMD_REGISTER_LOG_BUF		0x06
 #define TZ_ARMv8_CMD_LOAD_LIB			0x07
@@ -245,9 +271,16 @@ struct cp2_lock_req {
 	u32 lock;
 } __attribute__ ((__packed__));
 
+
 struct mem_prot_info {
 	phys_addr_t addr;
 	u64 size;
+};
+
+struct fuse_blow {
+	dma_addr_t address;
+	size_t size;
+	unsigned long *status;
 };
 
 #define MEM_PROT_ASSIGN_ID		0x16
@@ -256,7 +289,6 @@ struct mem_prot_info {
 #define V2_CHUNK_SIZE			SZ_1M
 #define FEATURE_ID_CP			12
 #define SCM_SVC_MP		0xC
-#define QCOM_SECURE_MEM_SIZE	(512*1024)
 #define BATCH_MAX_SIZE		SZ_2M
 #define BATCH_MAX_SECTIONS	32
 #define GET_FEAT_VERSION_CMD	3
@@ -276,12 +308,12 @@ extern int qcom_scm_mem_prot_assign(struct sg_table *table,
 				struct dest_vm_and_perm_info *dest_vm_copy,
 				size_t dest_vm_copy_size,
 				struct mem_prot_info *sg_table_copy,
-				size_t sg_table_copy_size,
 				u32 *resp, size_t resp_size);
 
 extern int qcom_scm_mem_protect_lock(struct cp2_lock_req *req, size_t req_size,
 				     u32 *resp, size_t resp_size);
 
+extern int qcom_scm_qseecom_remove_xpu(void);
 extern int qcom_scm_qseecom_notify(struct qsee_notify_app *req,
 				  size_t req_size,
 				  struct qseecom_command_scm_resp *resp,
@@ -321,4 +353,15 @@ extern int qcom_scm_lock_subsys_mem(u32 subsys_id, void *paddr, size_t size);
 
 extern int qcom_scm_unlock_subsys_mem(u32 subsys_id, void *paddr, size_t size,
 								uint8_t key);
+extern int qcom_scm_load_otp(u32 peripheral);
+extern bool qcom_scm_pil_cfg_available(void);
+extern int qcom_scm_pil_cfg(u32 peripheral, u32 args);
 #endif
+extern int qcom_scm_wcss_boot(u32 svc_id, u32 cmd_id, void *cmd_buf);
+extern int qcom_scm_tcsr_reg_write(u32 arg1, u32 arg2);
+extern int qcom_scm_pdseg_memcpy_v2(u32 peripheral, int phno, dma_addr_t dma,
+								int seg_cnt);
+extern int qcom_scm_pdseg_memcpy(u32 peripheral, int phno, dma_addr_t dma,
+								size_t size);
+extern int qcom_scm_int_radio_powerup(u32 peripheral);
+extern int qcom_scm_int_radio_powerdown(u32 peripheral);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -23,6 +23,7 @@
 
 #define TX_WMM_AC_NUM	4
 #define ENABLE_DP_HIST_STATS
+#define DP_MEMORY_OPT
 #define DP_RX_DISABLE_NDI_MDNS_FORWARDING
 
 #define OL_TXQ_PAUSE_REASON_FW                (1 << 0)
@@ -232,13 +233,11 @@ enum peer_debug_id_type {
 
 /**
  * struct ol_txrx_desc_type - txrx descriptor type
- * @sta_id: sta id
  * @is_qos_enabled: is station qos enabled
  * @is_wapi_supported: is station wapi supported
  * @peer_addr: peer mac address
  */
 struct ol_txrx_desc_type {
-	uint8_t sta_id;
 	uint8_t is_qos_enabled;
 	uint8_t is_wapi_supported;
 	struct qdf_mac_addr peer_addr;
@@ -286,6 +285,12 @@ struct txrx_pdev_cfg_param_t {
 	uint32_t uc_tx_partition_base;
 	/* IP, TCP and UDP checksum offload */
 	bool ip_tcp_udp_checksum_offload;
+	/* IP, TCP and UDP checksum offload for NAN Mode */
+	bool nan_ip_tcp_udp_checksum_offload;
+	/* IP, TCP and UDP checksum offload for P2P Mode*/
+	bool p2p_ip_tcp_udp_checksum_offload;
+	/* Checksum offload override flag for Legcay modes */
+	bool legacy_mode_csum_disable;
 	/* Rx processing in thread from TXRX */
 	bool enable_rxthread;
 	/* CE classification enabled through INI */
@@ -310,9 +315,16 @@ struct txrx_pdev_cfg_param_t {
 	bool gro_enable;
 	bool tso_enable;
 	bool lro_enable;
+	bool sg_enable;
 	bool enable_data_stall_detection;
 	bool enable_flow_steering;
 	bool disable_intra_bss_fwd;
+
+#ifdef WLAN_SUPPORT_TXRX_HL_BUNDLE
+	uint16_t bundle_timer_value;
+	uint16_t bundle_size;
+#endif
+	uint8_t pktlog_buffer_size;
 };
 
 #ifdef IPA_OFFLOAD
@@ -466,6 +478,24 @@ struct ol_rx_inv_peer_params {
 	uint8_t vdev_id;
 	uint8_t ra[QDF_MAC_ADDR_SIZE];
 	uint8_t ta[QDF_MAC_ADDR_SIZE];
+};
+
+/**
+ * cdp_txrx_ext_stats: dp extended stats
+ * tx_msdu_enqueue: tx msdu queued to hw
+ * tx_msdu_overflow: tx msdu overflow
+ * rx_mpdu_received: rx mpdu processed by hw
+ * rx_mpdu_delivered: rx mpdu received from hw
+ * rx_mpdu_error: rx mpdu error count
+ * rx_mpdu_missed: rx mpdu missed by hw
+ */
+struct cdp_txrx_ext_stats {
+	uint32_t tx_msdu_enqueue;
+	uint32_t tx_msdu_overflow;
+	uint32_t rx_mpdu_received;
+	uint32_t rx_mpdu_delivered;
+	uint32_t rx_mpdu_error;
+	uint32_t rx_mpdu_missed;
 };
 
 #endif /* __CDP_TXRX_MOB_DEF_H */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011,2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011,2017-2020 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -44,20 +44,22 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 	struct target_if_spectral_ops *p_sops = NULL;
 	uint32_t *binptr_32 = NULL;
 	uint16_t *binptr_16 = NULL;
+	uint16_t pwr_16;
 	int idx = 0;
 	struct spectral_samp_data *samp_data;
 	static int samp_msg_index;
 	size_t pwr_count = 0;
 	size_t pwr_count_sec80 = 0;
+	size_t pwr_count_5mhz = 0;
 	enum spectral_msg_type msg_type;
 	QDF_STATUS ret;
+	struct spectral_fft_bin_len_adj_swar *swar = &spectral->len_adj_swar;
 
 	ret = target_if_get_spectral_msg_type(params->smode, &msg_type);
 	if (QDF_IS_STATUS_ERROR(ret))
 		return;
 
-	if ((params->smode == SPECTRAL_SCAN_MODE_AGILE) ||
-	    is_primaryseg_rx_inprog(spectral)) {
+	if (is_primaryseg_rx_inprog(spectral, params->smode)) {
 		spec_samp_msg  = (struct spectral_samp_msg *)
 		      spectral->nl_cb.get_sbuff(spectral->pdev_obj,
 						msg_type,
@@ -72,13 +74,26 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 
 		spec_samp_msg->signature = SPECTRAL_SIGNATURE;
 		spec_samp_msg->freq = params->freq;
+		spec_samp_msg->agile_freq1 = params->agile_freq1;
+		spec_samp_msg->agile_freq2 = params->agile_freq2;
 		spec_samp_msg->freq_loading = params->freq_loading;
+		spec_samp_msg->vhtop_ch_freq_seg1 = params->vhtop_ch_freq_seg1;
+		spec_samp_msg->vhtop_ch_freq_seg2 = params->vhtop_ch_freq_seg2;
 		samp_data->spectral_mode = params->smode;
 		samp_data->spectral_data_len = params->datalen;
 		samp_data->spectral_rssi = params->rssi;
-		samp_data->ch_width = spectral->ch_width;
+		samp_data->ch_width =
+				spectral->ch_width[SPECTRAL_SCAN_MODE_NORMAL];
+		samp_data->agile_ch_width =
+				spectral->ch_width[SPECTRAL_SCAN_MODE_AGILE];
 		samp_data->spectral_agc_total_gain = params->agc_total_gain;
 		samp_data->spectral_gainchange = params->gainchange;
+		samp_data->spectral_pri80ind = params->pri80ind;
+		samp_data->last_raw_timestamp = params->last_raw_timestamp;
+		samp_data->timestamp_war_offset = params->timestamp_war_offset;
+		samp_data->raw_timestamp = params->raw_timestamp;
+		samp_data->reset_delay = params->reset_delay;
+		samp_data->target_reset_count = params->target_reset_count;
 
 		samp_data->spectral_combined_rssi =
 		    (uint8_t)params->rssi;
@@ -138,16 +153,34 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		qdf_mem_copy(cp, pcp,
 			     sizeof(struct spectral_classifier_params));
 
-		if (spectral->fftbin_size_war ==
+		/*
+		 * To check whether FFT bin values exceed 8 bits, we add a
+		 * check before copying values to samp_data->bin_pwr.
+		 * If it crosses 8 bits, we cap the values to maximum value
+		 * supported by 8 bits ie. 255. This needs to be done as the
+		 * destination array in SAMP message is 8 bits. This is a
+		 * temporary solution till an array of 16 bits is used for
+		 * SAMP message.
+		 */
+		if (swar->fftbin_size_war ==
 				SPECTRAL_FFTBIN_SIZE_WAR_4BYTE_TO_1BYTE) {
 			binptr_32 = (uint32_t *)bin_pwr_data;
-			for (idx = 0; idx < pwr_count; idx++)
-				samp_data->bin_pwr[idx] = *(binptr_32++);
-		} else if (spectral->fftbin_size_war ==
+			for (idx = 0; idx < pwr_count; idx++) {
+				/* Read only the first 2 bytes of the DWORD */
+				pwr_16 = *((uint16_t *)binptr_32++);
+				if (qdf_unlikely(pwr_16 > MAX_FFTBIN_VALUE))
+					pwr_16 = MAX_FFTBIN_VALUE;
+				samp_data->bin_pwr[idx] = pwr_16;
+			}
+		} else if (swar->fftbin_size_war ==
 				SPECTRAL_FFTBIN_SIZE_WAR_2BYTE_TO_1BYTE) {
 			binptr_16 = (uint16_t *)bin_pwr_data;
-			for (idx = 0; idx < pwr_count; idx++)
-				samp_data->bin_pwr[idx] = *(binptr_16++);
+			for (idx = 0; idx < pwr_count; idx++) {
+				pwr_16 = *(binptr_16++);
+				if (qdf_unlikely(pwr_16 > MAX_FFTBIN_VALUE))
+					pwr_16 = MAX_FFTBIN_VALUE;
+				samp_data->bin_pwr[idx] = pwr_16;
+			}
 		} else {
 			SPECTRAL_MESSAGE_COPY_CHAR_ARRAY(
 					&samp_data->bin_pwr[0], bin_pwr_data,
@@ -157,7 +190,7 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		p_sops->get_mac_address(spectral, spec_samp_msg->macaddr);
 	}
 
-	if (is_secondaryseg_rx_inprog(spectral)) {
+	if (is_secondaryseg_rx_inprog(spectral, params->smode)) {
 		spec_samp_msg  = (struct spectral_samp_msg *)
 		      spectral->nl_cb.get_sbuff(spectral->pdev_obj,
 						msg_type,
@@ -169,8 +202,6 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		}
 
 		samp_data = &spec_samp_msg->samp_data;
-		spec_samp_msg->vhtop_ch_freq_seg1 = params->vhtop_ch_freq_seg1;
-		spec_samp_msg->vhtop_ch_freq_seg2 = params->vhtop_ch_freq_seg2;
 		samp_data->spectral_rssi_sec80 =
 		    params->rssi_sec80;
 		samp_data->noise_floor_sec80 =
@@ -179,6 +210,8 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 			params->agc_total_gain_sec80;
 		spec_samp_msg->samp_data.spectral_gainchange_sec80 =
 			params->gainchange_sec80;
+		spec_samp_msg->samp_data.spectral_pri80ind_sec80 =
+			params->pri80ind_sec80;
 
 		samp_data->spectral_data_len_sec80 =
 		    params->datalen_sec80;
@@ -186,6 +219,8 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		    params->max_index_sec80;
 		samp_data->spectral_max_mag_sec80 =
 		    params->max_mag_sec80;
+
+		samp_data->raw_timestamp_sec80 = params->raw_timestamp_sec80;
 
 		/*
 		 * Currently, we compute pwr_count_sec80 considering the size of
@@ -201,20 +236,50 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		 */
 		pwr_count_sec80 = qdf_min((size_t)params->pwr_count_sec80,
 					  sizeof(samp_data->bin_pwr_sec80));
+		pwr_count_5mhz = qdf_min((size_t)params->pwr_count_5mhz,
+					 sizeof(samp_data->bin_pwr_5mhz));
 
 		samp_data->bin_pwr_count_sec80 = pwr_count_sec80;
+		samp_data->bin_pwr_count_5mhz = pwr_count_5mhz;
 
 		bin_pwr_data = params->bin_pwr_data_sec80;
-		if (spectral->fftbin_size_war ==
+
+		/*
+		 * To check whether FFT bin values exceed 8 bits, we add a
+		 * check before copying values to samp_data->bin_pwr_sec80.
+		 * If it crosses 8 bits, we cap the values to maximum value
+		 * supported by 8 bits ie. 255. This needs to be done as the
+		 * destination array in SAMP message is 8 bits. This is a
+		 * temporary solution till an array of 16 bits is used for
+		 * SAMP message.
+		 */
+		if (swar->fftbin_size_war ==
 				SPECTRAL_FFTBIN_SIZE_WAR_4BYTE_TO_1BYTE) {
 			binptr_32 = (uint32_t *)bin_pwr_data;
-			for (idx = 0; idx < pwr_count_sec80; idx++)
-				samp_data->bin_pwr_sec80[idx] = *(binptr_32++);
-		} else if (spectral->fftbin_size_war ==
+			for (idx = 0; idx < pwr_count_sec80; idx++) {
+				/* Read only the first 2 bytes of the DWORD */
+				pwr_16 = *((uint16_t *)binptr_32++);
+				if (qdf_unlikely(pwr_16 > MAX_FFTBIN_VALUE))
+					pwr_16 = MAX_FFTBIN_VALUE;
+				samp_data->bin_pwr_sec80[idx] = pwr_16;
+			}
+		} else if (swar->fftbin_size_war ==
 				SPECTRAL_FFTBIN_SIZE_WAR_2BYTE_TO_1BYTE) {
 			binptr_16 = (uint16_t *)bin_pwr_data;
-			for (idx = 0; idx < pwr_count_sec80; idx++)
-				samp_data->bin_pwr_sec80[idx] = *(binptr_16++);
+			for (idx = 0; idx < pwr_count_sec80; idx++) {
+				pwr_16 = *(binptr_16++);
+				if (qdf_unlikely(pwr_16 > MAX_FFTBIN_VALUE))
+					pwr_16 = MAX_FFTBIN_VALUE;
+				samp_data->bin_pwr_sec80[idx] = pwr_16;
+			}
+
+			binptr_16 = (uint16_t *)params->bin_pwr_data_5mhz;
+			for (idx = 0; idx < pwr_count_5mhz; idx++) {
+				pwr_16 = *(binptr_16++);
+				if (qdf_unlikely(pwr_16 > MAX_FFTBIN_VALUE))
+					pwr_16 = MAX_FFTBIN_VALUE;
+				samp_data->bin_pwr_5mhz[idx] = pwr_16;
+			}
 		} else {
 			SPECTRAL_MESSAGE_COPY_CHAR_ARRAY(
 					&samp_data->bin_pwr_sec80[0],
@@ -223,9 +288,8 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 		}
 	}
 
-	if ((spectral->ch_width != CH_WIDTH_160MHZ) ||
-	    (params->smode == SPECTRAL_SCAN_MODE_AGILE) ||
-	    is_secondaryseg_rx_inprog(spectral)) {
+	if (!is_ch_width_160_or_80p80(spectral->ch_width[params->smode]) ||
+	    is_secondaryseg_rx_inprog(spectral, params->smode)) {
 		if (spectral->send_phy_data(spectral->pdev_obj,
 					    msg_type) == 0)
 			spectral->spectral_sent_msg++;
@@ -233,9 +297,10 @@ target_if_spectral_create_samp_msg(struct target_if_spectral *spectral,
 	}
 
 	/* Take care of state transitions for 160MHz/ 80p80 */
-	if ((spectral->spectral_gen == SPECTRAL_GEN3) &&
-	    (params->smode != SPECTRAL_SCAN_MODE_AGILE))
+	if (spectral->spectral_gen == SPECTRAL_GEN3 &&
+	    is_ch_width_160_or_80p80(spectral->ch_width[params->smode]) &&
+	    spectral->rparams.fragmentation_160[params->smode])
 		target_if_160mhz_delivery_state_change(
-				spectral,
-				SPECTRAL_DETECTOR_INVALID);
+				spectral, params->smode,
+				SPECTRAL_DETECTOR_ID_INVALID);
 }

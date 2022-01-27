@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -189,6 +189,23 @@ static QDF_STATUS mlme_stop_pending_start(struct wlan_objmgr_pdev *pdev,
 	return status;
 }
 
+static void wlan_vdev_start_fw_send(struct wlan_objmgr_pdev *pdev,
+				    void *object,
+				    void *arg)
+{
+	struct wlan_objmgr_vdev *vdev = (struct wlan_objmgr_vdev *)object;
+	unsigned long *send_array = (unsigned long *)arg;
+
+	if (wlan_util_map_index_is_set(send_array, wlan_vdev_get_id(vdev)) ==
+					false)
+		return;
+
+	mlme_vdev_start_fw_cmd_send(pdev, vdev, 0);
+
+	 /* Reset the flag */
+	wlan_util_change_map_index(send_array, wlan_vdev_get_id(vdev), 0);
+}
+
 static QDF_STATUS mlme_stop_pending_restart(struct wlan_objmgr_pdev *pdev,
 					    struct wlan_objmgr_vdev *vdev)
 {
@@ -214,16 +231,31 @@ static QDF_STATUS mlme_stop_pending_restart(struct wlan_objmgr_pdev *pdev,
 					wlan_vdev_get_id(vdev), 0);
 			status = QDF_STATUS_SUCCESS;
 		}
-		if ((!pdev_mlme->restart_pend_vdev_bmap[0] &&
-		     !pdev_mlme->restart_pend_vdev_bmap[1]) &&
-		    (!pdev_mlme->restart_send_vdev_bmap[0] &&
-		     !pdev_mlme->restart_send_vdev_bmap[1])) {
+		if (!wlan_util_map_is_any_index_set(
+				pdev_mlme->restart_pend_vdev_bmap,
+				sizeof(pdev_mlme->restart_pend_vdev_bmap)) &&
+		    !wlan_util_map_is_any_index_set(
+				pdev_mlme->restart_send_vdev_bmap,
+				sizeof(pdev_mlme->restart_send_vdev_bmap))) {
+			mlme_err("Clear MVR bit for Pdev %d",
+				 wlan_objmgr_pdev_get_pdev_id(pdev));
 			wlan_pdev_mlme_op_clear
 					(pdev,
 					 WLAN_PDEV_OP_RESTART_INPROGRESS);
 			wlan_pdev_mlme_op_clear(pdev,
 						WLAN_PDEV_OP_MBSSID_RESTART);
+
+			if (wlan_util_map_is_any_index_set(
+			    pdev_mlme->start_send_vdev_arr,
+			    sizeof(pdev_mlme->start_send_vdev_arr))) {
+				wlan_objmgr_pdev_iterate_obj_list(
+					 pdev, WLAN_VDEV_OP,
+					 wlan_vdev_start_fw_send,
+					 pdev_mlme->start_send_vdev_arr, 0,
+					 WLAN_MLME_NB_ID);
+			}
 		}
+
 	}
 	qdf_spin_unlock_bh(&pdev_mlme->vdev_restart_lock);
 
@@ -246,21 +278,33 @@ static void wlan_vdev_restart_fw_send(struct wlan_objmgr_pdev *pdev,
 	wlan_util_change_map_index(send_array, wlan_vdev_get_id(vdev), 0);
 }
 
-static void wlan_vdev_start_fw_send(struct wlan_objmgr_pdev *pdev,
-				    void *object,
-				    void *arg)
+static void wlan_vdev_update_des_chan(struct wlan_objmgr_pdev *pdev,
+				      void *object,
+				      void *arg)
 {
 	struct wlan_objmgr_vdev *vdev = (struct wlan_objmgr_vdev *)object;
-	unsigned long *send_array = (unsigned long *)arg;
+	struct wlan_channel *des_chan = (struct wlan_channel *)arg;
+	struct wlan_channel *iter_chan = wlan_vdev_mlme_get_des_chan(vdev);
+	struct pdev_mlme_obj *pdev_mlme;
 
-	if (wlan_util_map_index_is_set(send_array, wlan_vdev_get_id(vdev)) ==
-					false)
+	pdev_mlme = wlan_pdev_mlme_get_cmpt_obj(pdev);
+	if (!pdev_mlme) {
+		mlme_err(" PDEV MLME is NULL");
+		return;
+	}
+
+	if (wlan_util_map_index_is_set(pdev_mlme->start_send_vdev_arr,
+				       wlan_vdev_get_id(vdev)) == false)
 		return;
 
-	mlme_vdev_start_fw_cmd_send(pdev, vdev, 0);
-
-	 /* Reset the flag */
-	wlan_util_change_map_index(send_array, wlan_vdev_get_id(vdev), 0);
+	if (wlan_chan_eq(iter_chan, des_chan) != QDF_STATUS_SUCCESS) {
+		mlme_err("==> vdev id: %d: ieee %d, restart vdev ieee %d, updating",
+			 wlan_vdev_get_id(vdev), iter_chan->ch_ieee,
+			 des_chan->ch_ieee);
+		wlan_chan_copy(iter_chan, des_chan);
+	} else {
+		mlme_err("is invoked");
+	}
 }
 
 static void mlme_restart_req_timer_start(struct pdev_mlme_obj *pdev_mlme)
@@ -273,9 +317,51 @@ static void mlme_restart_req_timer_stop(struct pdev_mlme_obj *pdev_mlme)
 	qdf_timer_stop(&pdev_mlme->restart_req_timer);
 }
 
+static struct wlan_channel *wlan_pdev_mlme_get_restart_des_chan(
+					struct wlan_objmgr_pdev *pdev)
+{
+	struct wlan_channel *des_chan;
+	uint32_t max_vdevs = 0, i;
+	uint8_t vdev_id = 0xFF;
+	struct wlan_objmgr_vdev *vdev;
+	struct pdev_mlme_obj *pdev_mlme;
+
+	pdev_mlme = wlan_pdev_mlme_get_cmpt_obj(pdev);
+	if (!pdev_mlme) {
+		mlme_err(" PDEV MLME is NULL");
+		return NULL;
+	}
+
+	max_vdevs = wlan_psoc_get_max_vdev_count(wlan_pdev_get_psoc(pdev));
+	for (i = 0; i < max_vdevs; i++) {
+		if (wlan_util_map_index_is_set(
+			pdev_mlme->restart_send_vdev_bmap, i)
+					== false)
+			continue;
+
+		vdev_id = i;
+		break;
+	}
+
+	if (vdev_id == 0xFF)
+		return NULL;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_pdev(pdev, vdev_id,
+						    WLAN_MLME_NB_ID);
+	if (!vdev)
+		return NULL;
+
+	des_chan = wlan_vdev_mlme_get_des_chan(vdev);
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_NB_ID);
+
+	return des_chan;
+}
+
 static void mlme_multivdev_restart(struct pdev_mlme_obj *pdev_mlme)
 {
 	struct wlan_objmgr_pdev *pdev;
+	struct wlan_channel *des_chan = NULL;
 
 	pdev = pdev_mlme->pdev;
 
@@ -283,9 +369,11 @@ static void mlme_multivdev_restart(struct pdev_mlme_obj *pdev_mlme)
 	 * that vdev bit, if pending vdev is still in SUSPEND (CSA_RESTART or
 	 * SUSPEND_RESTART), then restart the timer
 	 */
-	if (!pdev_mlme->restart_pend_vdev_bmap[0] &&
-	    !pdev_mlme->restart_pend_vdev_bmap[1]) {
-
+	if (!wlan_util_map_is_any_index_set(
+			pdev_mlme->restart_pend_vdev_bmap,
+			sizeof(pdev_mlme->restart_pend_vdev_bmap))) {
+		mlme_err("Sending MVR for Pdev %d",
+			 wlan_objmgr_pdev_get_pdev_id(pdev));
 		wlan_pdev_mlme_op_clear(pdev, WLAN_PDEV_OP_MBSSID_RESTART);
 		wlan_pdev_mlme_op_clear(pdev, WLAN_PDEV_OP_RESTART_INPROGRESS);
 
@@ -293,6 +381,8 @@ static void mlme_multivdev_restart(struct pdev_mlme_obj *pdev_mlme)
 			     &pdev_mlme->restart_send_vdev_bmap,
 			     sizeof(pdev_mlme->pdev_restart.restart_bmap));
 
+		qdf_atomic_init(&pdev_mlme->multivdev_restart_wait_cnt);
+		des_chan = wlan_pdev_mlme_get_restart_des_chan(pdev);
 		if (!wlan_pdev_nif_feat_cap_get(pdev,
 						WLAN_PDEV_F_MULTIVDEV_RESTART))
 			wlan_objmgr_pdev_iterate_obj_list
@@ -303,8 +393,16 @@ static void mlme_multivdev_restart(struct pdev_mlme_obj *pdev_mlme)
 		else
 			mlme_vdev_ops_multivdev_restart_fw_cmd_send(pdev);
 
-		if (pdev_mlme->start_send_vdev_arr[0] ||
-		    pdev_mlme->start_send_vdev_arr[1]) {
+		if (wlan_util_map_is_any_index_set(
+				pdev_mlme->start_send_vdev_arr,
+				sizeof(pdev_mlme->start_send_vdev_arr))) {
+			if (des_chan) {
+				wlan_objmgr_pdev_iterate_obj_list(pdev,
+						WLAN_VDEV_OP,
+						wlan_vdev_update_des_chan,
+						des_chan, 0,
+						WLAN_MLME_NB_ID);
+			}
 			wlan_objmgr_pdev_iterate_obj_list
 				(pdev, WLAN_VDEV_OP,
 				 wlan_vdev_start_fw_send,
@@ -316,9 +414,11 @@ static void mlme_multivdev_restart(struct pdev_mlme_obj *pdev_mlme)
 	}
 }
 
+#define MULTIVDEV_RESTART_MAX_RETRY_CNT 200
 static os_timer_func(mlme_restart_req_timeout)
 {
-	unsigned long restart_pend_vdev_bmap[2];
+	qdf_bitmap(tmp_restart_pend_vdev_bmap, WLAN_UMAC_PSOC_MAX_VDEVS);
+	qdf_bitmap(tmp_dest_bmap, WLAN_UMAC_PSOC_MAX_VDEVS);
 	struct wlan_objmgr_pdev *pdev;
 	struct pdev_mlme_obj *pdev_mlme;
 
@@ -326,19 +426,34 @@ static os_timer_func(mlme_restart_req_timeout)
 
 	pdev = pdev_mlme->pdev;
 
+	qdf_mem_zero(tmp_restart_pend_vdev_bmap,
+		     sizeof(tmp_restart_pend_vdev_bmap));
+	qdf_mem_zero(tmp_dest_bmap, sizeof(tmp_dest_bmap));
+
 	qdf_spin_lock_bh(&pdev_mlme->vdev_restart_lock);
 	if (wlan_pdev_mlme_op_get(pdev, WLAN_PDEV_OP_RESTART_INPROGRESS)) {
 		wlan_pdev_chan_change_pending_vdevs(pdev,
-						    restart_pend_vdev_bmap,
+						    tmp_restart_pend_vdev_bmap,
 						    WLAN_MLME_SB_ID);
+		qdf_atomic_inc(&pdev_mlme->multivdev_restart_wait_cnt);
+		if (qdf_atomic_read(&pdev_mlme->multivdev_restart_wait_cnt) >
+				    MULTIVDEV_RESTART_MAX_RETRY_CNT) {
+			mlme_err("Multivdev restart_pend_vdev_bmap is");
+			qdf_trace_hex_dump(
+				QDF_MODULE_ID_CMN_MLME, QDF_TRACE_LEVEL_ERROR,
+				pdev_mlme->restart_pend_vdev_bmap,
+				sizeof(pdev_mlme->restart_pend_vdev_bmap));
+			QDF_BUG(0);
+		}
 
 		/* If all the pending vdevs goes down, this would fail,
 		 * otherwise start timer
 		 */
-		if ((restart_pend_vdev_bmap[0] &
-		     pdev_mlme->restart_pend_vdev_bmap[0]) ||
-		   ((restart_pend_vdev_bmap[1] &
-		     pdev_mlme->restart_pend_vdev_bmap[1])))
+		qdf_bitmap_and(tmp_dest_bmap, tmp_restart_pend_vdev_bmap,
+			       pdev_mlme->restart_pend_vdev_bmap,
+			       QDF_CHAR_BIT * sizeof(tmp_dest_bmap));
+		if (wlan_util_map_is_any_index_set(tmp_dest_bmap,
+						   sizeof(tmp_dest_bmap)))
 			mlme_restart_req_timer_start(pdev_mlme);
 		else
 			mlme_multivdev_restart(pdev_mlme);
@@ -374,10 +489,11 @@ static QDF_STATUS mlme_vdev_restart_is_allowed(struct wlan_objmgr_pdev *pdev,
 				(pdev,
 				 pdev_mlme->restart_pend_vdev_bmap,
 				 WLAN_MLME_SB_ID);
-		pdev_mlme->restart_send_vdev_bmap[0] = 0;
-		pdev_mlme->restart_send_vdev_bmap[1] = 0;
-		if (!pdev_mlme->restart_pend_vdev_bmap[0] &&
-		    !pdev_mlme->restart_pend_vdev_bmap[1])
+		qdf_mem_zero(pdev_mlme->restart_send_vdev_bmap,
+			     sizeof(pdev_mlme->restart_send_vdev_bmap));
+		if (!wlan_util_map_is_any_index_set(
+				pdev_mlme->restart_pend_vdev_bmap,
+				sizeof(pdev_mlme->restart_pend_vdev_bmap)))
 			QDF_BUG(0);
 
 		wlan_pdev_mlme_op_set(pdev, WLAN_PDEV_OP_RESTART_INPROGRESS);
@@ -400,8 +516,9 @@ static QDF_STATUS mlme_vdev_restart_is_allowed(struct wlan_objmgr_pdev *pdev,
 		/* If all vdev id bits are enabled, start vdev restart for all
 		 * vdevs, otherwise, start timer and return
 		 */
-		if (!pdev_mlme->restart_pend_vdev_bmap[0] &&
-		    !pdev_mlme->restart_pend_vdev_bmap[1]) {
+		if (!wlan_util_map_is_any_index_set(
+				pdev_mlme->restart_pend_vdev_bmap,
+				sizeof(pdev_mlme->restart_pend_vdev_bmap))) {
 			mlme_restart_req_timer_stop(pdev_mlme);
 			mlme_multivdev_restart(pdev_mlme);
 			status = QDF_STATUS_E_FAILURE;
@@ -566,6 +683,7 @@ QDF_STATUS mlme_register_cmn_ops(struct vdev_mlme_obj *vdev_mlme)
 
 void mlme_restart_timer_init(struct pdev_mlme_obj *pdev_mlme)
 {
+	qdf_atomic_init(&pdev_mlme->multivdev_restart_wait_cnt);
 	qdf_timer_init(NULL, &pdev_mlme->restart_req_timer,
 		       mlme_restart_req_timeout, (void *)(pdev_mlme),
 		       QDF_TIMER_TYPE_WAKE_APPS);

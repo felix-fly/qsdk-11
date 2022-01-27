@@ -75,7 +75,11 @@ int hyfi_fdb_fillbuf(struct net_bridge *br, void *buf, u_int32_t buf_len,
 		u_int32_t skip, u_int32_t *bytes_written, u_int32_t *bytes_needed)
 {
 	struct __hfdb_entry *fe = buf;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	u_int32_t total = 0, num = 0, num_entries;
+#else
 	u_int32_t i, total = 0, num = 0, num_entries;
+#endif
 	int ret = 0;
 	struct hlist_node *h;
 	struct net_bridge_fdb_entry *f;
@@ -84,8 +88,12 @@ int hyfi_fdb_fillbuf(struct net_bridge *br, void *buf, u_int32_t buf_len,
 	num_entries = buf_len / sizeof(struct __hfdb_entry);
 
 	rcu_read_lock();
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	os_hlist_for_each_entry_rcu(f, h, &br->fdb_list, fdb_node) {
+#else
 	for (i = 0; i < BR_HASH_SIZE; i++) {
 		os_hlist_for_each_entry_rcu(f, h, &br->hash[i], hlist)	{
+#endif
 			if (has_expired(br, f))
 				continue;
 
@@ -107,7 +115,11 @@ int hyfi_fdb_fillbuf(struct net_bridge *br, void *buf, u_int32_t buf_len,
 			}
 
 			/* convert from internal format to API */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+			memcpy(fe->mac_addr, f->key.addr.addr, ETH_ALEN);
+#else
 			memcpy(fe->mac_addr, f->addr.addr, ETH_ALEN);
+#endif
 
 			/* due to ABI compat need to split into hi/lo */
 			fe->ifindex = f->dst->dev->ifindex & 0xff;
@@ -120,8 +132,9 @@ int hyfi_fdb_fillbuf(struct net_bridge *br, void *buf, u_int32_t buf_len,
 			++fe;
 			++num;
 		}
-	}
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
+        }
+#endif
 	rcu_read_unlock();
 	if (bytes_written)
 		*bytes_written = num * sizeof(struct __hfdb_entry);

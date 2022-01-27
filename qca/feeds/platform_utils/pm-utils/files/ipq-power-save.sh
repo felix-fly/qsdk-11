@@ -16,7 +16,12 @@
 # CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-. /lib/ipq806x.sh
+[ -e /lib/ipq806x.sh ] && . /lib/ipq806x.sh
+
+type ipq806x_board_name &>/dev/null  || ipq806x_board_name() {
+	echo $(board_name) | sed 's/^\([^-]*-\)\{1\}//g'
+}
+
 . /lib/functions.sh
 
 ipq8064_ac_power()
@@ -426,11 +431,49 @@ ipq4019_ap_dk04_1_battery_power()
 	echo "powersave" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
 }
 
+ipq5018_phy_power_on()
+{
+	local board=$(ipq806x_board_name)
+	case "$board" in
+		ap-mp03.1 | ap-mp03.1-c2 | db-mp03.1)
+		echo 1 > /sys/ssdk/dev_id
+		ssdk_sh port poweron set 1
+		ssdk_sh port poweron set 2
+		ssdk_sh port poweron set 3
+		ssdk_sh port poweron set 4
+		echo 0 > /sys/ssdk/dev_id
+		;;
+		ap-mp02.1 | ap-mp03.3 | ap-mp03.3-c2 | ap-mp03.3-c3 | ap-mp03.3-c4 | ap-mp03.3-c5 | ap-mp03.5-c1 | ap-mp03.5-c2 | ap-mp03.6-c1 | ap-mp03.6-c2 | db-mp02.1 | db-mp03.3 | db-mp03.3-c2)
+		echo 0 > /sys/ssdk/dev_id
+		ssdk_sh port poweron set 2
+		;;
+	esac
+}
+
+ipq5018_phy_power_off()
+{
+	local board=$(ipq806x_board_name)
+	case "$board" in
+		ap-mp03.1 | ap-mp03.1-c2 | db-mp03.1)
+		echo 1 > /sys/ssdk/dev_id
+		ssdk_sh port poweroff set 1
+		ssdk_sh port poweroff set 2
+		ssdk_sh port poweroff set 3
+		ssdk_sh port poweroff set 4
+		echo 0 > /sys/ssdk/dev_id
+		;;
+		ap-mp02.1 | ap-mp03.3 | ap-mp03.3-c2 | ap-mp03.3-c3 | ap-mp03.3-c4 | ap-mp03.3-c5 | ap-mp03.5-c1 | ap-mp03.5-c2 | ap-mp03.6-c1 | ap-mp03.6-c2 | db-mp02.1 | db-mp03.3 | db-mp03.3-c2)
+		echo 0 > /sys/ssdk/dev_id
+		ssdk_sh port poweroff set 2
+		;;
+	esac
+}
+
 ipq6018_phy_power_on()
 {
 	local board=$(ipq806x_board_name)
 	case "$board" in
-		ap-cp01-c1 | ap-cp01-c2 | db-cp01)
+		ap-cp01-c1 | ap-cp01-c2 | ap-cp01-c3 | ap-cp01-c4 | db-cp01)
 		ssdk_sh port poweron set 2
 		ssdk_sh port poweron set 3
 		ssdk_sh port poweron set 4
@@ -449,7 +492,7 @@ ipq6018_phy_power_off()
 {
 	local board=$(ipq806x_board_name)
 	case "$board" in
-		ap-cp01-c1 | ap-cp01-c2 | db-cp01)
+		ap-cp01-c1 | ap-cp01-c2 | ap-cp01-c3 | ap-cp01-c4 | db-cp01)
 		ssdk_sh port poweroff set 2
 		ssdk_sh port poweroff set 3
 		ssdk_sh port poweroff set 4
@@ -464,7 +507,7 @@ ipq6018_phy_power_off()
 	esac
 }
 
-ipq6018_ac_power()
+ipq5018_ac_power()
 {
 	echo "Entering AC-Power Mode"
 # Cortex Power-UP Sequence
@@ -474,7 +517,7 @@ ipq6018_ac_power()
 	echo 1 > /proc/sys/dev/nss/clock/auto_scale
 
 # Power on PHYs of LAN ports
-	ipq6018_phy_power_on
+	ipq5018_phy_power_on
 # PCIe Power-UP Sequence
 	sleep 1
 	echo 1 > /sys/bus/pci/rcrescan
@@ -483,19 +526,11 @@ ipq6018_ac_power()
 
 	sleep 1
 
-# Wifi Power-up Sequence
-	lsmod | grep ath11k > /dev/null
-	if [ $? -eq 0 ]; then
-		wifi up
-	else
-		wifi load
-	fi
-
 # USB Power-UP Sequence
 	if ! [ -d /sys/module/dwc3_qcom ]
 	then
-		insmod phy-msm-ssusb-qmp.ko
-		insmod phy-msm-qusb.ko
+		insmod phy-qca-uniphy.ko
+		insmod phy-qca-m31.ko
 		insmod dwc3.ko
 		insmod dwc3-qcom.ko
 		insmod u_qdss.ko
@@ -508,6 +543,17 @@ ipq6018_ac_power()
 	fi
 # LAN interface up
 	ifup lan
+
+# Wifi Power-up Sequence
+	if [ -f /lib/modules/$(uname -r)/ath11k.ko ]; then
+		insmod ath11k
+		insmod ath11k_ahb
+		insmod ath11k_pci
+		sleep 2
+		wifi up
+	else
+		wifi load
+	fi
 
 # SD/MMC Power-UP sequence
 	local emmcblock="$(find_mmc_part "rootfs")"
@@ -524,9 +570,21 @@ ipq6018_ac_power()
 	exit 0
 }
 
-ipq6018_battery_power()
+ipq5018_battery_power()
 {
 	echo "Entering Battery Mode..."
+
+# Wifi Power-down Sequence
+	lsmod | grep ath11k > /dev/null
+	if [ $? -eq 0 ]; then
+		wifi down
+		sleep 2
+		rmmod ath11k_pci
+		rmmod ath11k_ahb
+		rmmod ath11k
+	else
+		wifi unload
+	fi
 
 # PCIe Power-Down Sequence
 
@@ -556,13 +614,166 @@ ipq6018_battery_power()
 	}
 	sleep 1
 
+# Find scsi devices and remove it
+	partition=`cat /proc/partitions | awk -F " " '{print $4}'`
+
+	for entry in $partition; do
+		sd_entry=$(echo $entry | head -c 2)
+
+		if [ "$sd_entry" = "sd" ]; then
+			[ -f /sys/block/$entry/device/delete ] && {
+				echo 1 > /sys/block/$entry/device/delete
+			}
+		fi
+	done
+
+# Power off PHYs of LAN ports
+	ipq5018_phy_power_off
+
+# USB Power-down Sequence
+	if [ -d config/usb_gadget/g1 ]
+	then
+		echo "" > /config/usb_gadget/g1/UDC
+	fi
+
+	if [ -d /sys/module/dwc3_qcom ]
+	then
+		rmmod usb_f_qdss
+		rmmod u_qdss
+		rmmod dwc3-qcom
+		rmmod dwc3
+		rmmod phy_qca_m31
+		rmmod phy_qca_uniphy
+	fi
+	sleep 2
+
+#SD/MMC Power-down Sequence
+	local emmcblock="$(find_mmc_part "rootfs")"
+
+	if [ -z "$emmcblock" ]; then
+		rm /tmp/sysinfo/sd_drvname
+		if [ -d /sys/block/mmcblk0 ]; then
+			sd_drvname=`readlink /sys/block/mmcblk0 | grep -o "[0-9]*.sdhci[^/]*"`
+			echo "$sd_drvname" >> /tmp/sysinfo/sd_drvname
+			echo $sd_drvname >> /sys/bus/platform/drivers/sdhci_msm/unbind
+		fi
+	fi
+# LAN interface down
+	ifdown lan
+
+# Disabling Auto scale on NSS cores
+	echo 0 > /proc/sys/dev/nss/clock/auto_scale
+
+# Cortex Power-down Sequence
+	echo "powersave" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+}
+
+ipq6018_ac_power()
+{
+	echo "Entering AC-Power Mode"
+# Cortex Power-UP Sequence
+	/etc/init.d/powerctl restart
+
+# Enabling Auto scale on NSS cores
+	echo 1 > /proc/sys/dev/nss/clock/auto_scale
+
+# Power on PHYs of LAN ports
+	ipq6018_phy_power_on
+# PCIe Power-UP Sequence
+	sleep 1
+	echo 1 > /sys/bus/pci/rcrescan
+	sleep 2
+	echo 1 > /sys/bus/pci/rescan
+
+	sleep 1
+
+# USB Power-UP Sequence
+	if ! [ -d /sys/module/dwc3_qcom ]
+	then
+		insmod phy-msm-ssusb-qmp.ko
+		insmod phy-msm-qusb.ko
+		insmod dwc3.ko
+		insmod dwc3-qcom.ko
+		insmod u_qdss.ko
+		insmod usb_f_qdss.ko
+	fi
+
+	if [ -d config/usb_gadget/g1 ]
+	then
+		echo "8a00000.dwc3" > /config/usb_gadget/g1/UDC
+	fi
+# LAN interface up
+	ifup lan
+
+# Wifi Power-up Sequence
+	if [ -f /lib/modules/$(uname -r)/ath11k.ko ]; then
+		insmod ath11k
+		insmod ath11k_ahb
+		insmod ath11k_pci
+		sleep 2
+		wifi up
+	else
+		wifi load
+	fi
+
+# SD/MMC Power-UP sequence
+	local emmcblock="$(find_mmc_part "rootfs")"
+
+	if [ -z "$emmcblock" ]; then
+		for sd_drvname in $(cat /tmp/sysinfo/sd_drvname)
+		do
+			echo $sd_drvname > /sys/bus/platform/drivers/sdhci_msm/bind
+		done
+	fi
+
+	sleep 1
+
+	exit 0
+}
+
+ipq6018_battery_power()
+{
+	echo "Entering Battery Mode..."
+
 # Wifi Power-down Sequence
 	lsmod | grep ath11k > /dev/null
 	if [ $? -eq 0 ]; then
 		wifi down
+		sleep 2
+		rmmod ath11k_pci
+		rmmod ath11k_ahb
+		rmmod ath11k
 	else
 		wifi unload
 	fi
+
+# PCIe Power-Down Sequence
+
+# Remove devices
+	sleep 2
+	for i in `ls /sys/bus/pci/devices/`; do
+		d=/sys/bus/pci/devices/${i}
+		v=`cat ${d}/vendor`
+		[ "xx${v}" != "xx0x17cb" ] && echo 1 > ${d}/remove
+	done
+
+# Remove Buses
+	sleep 2
+	for i in `ls /sys/bus/pci/devices/`; do
+		d=/sys/bus/pci/devices/${i}
+		echo 1 > ${d}/remove
+	done
+
+# Remove RC
+	sleep 2
+
+	[ -f /sys/bus/pci/rcremove ] && {
+		echo 1 > /sys/bus/pci/rcremove
+	}
+	[ -f /sys/devices/pci0000:00/pci_bus/0000:00/rcremove ] && {
+		echo 1 > /sys/devices/pci0000:00/pci_bus/0000:00/rcremove
+	}
+	sleep 1
 
 # Find scsi devices and remove it
 	partition=`cat /proc/partitions | awk -F " " '{print $4}'`
@@ -625,15 +836,15 @@ ipq8074_phy_power_on()
 {
 	local board=$(ipq806x_board_name)
 	case "$board" in
-		ap-hk01-c1 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk07 |\
-		ap-hk09 | ap-ac01 | ap-ac02 | ap-oak03 | db-hk01 | db-hk02)
+		ap-hk01-c1 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk01-c6 | ap-hk07 |\
+		ap-hk09 | ap-hk10-c1 | ap-hk10-c2 | ap-hk11-c1 | ap-hk12 | ap-ac01 | ap-ac02 | ap-oak03 | db-hk01 | db-hk02)
 		ssdk_sh port poweron set 2
 		ssdk_sh port poweron set 3
 		ssdk_sh port poweron set 4
 		ssdk_sh port poweron set 5
 		ssdk_sh port poweron set 6
 		;;
-		ap-hk01-c2 | ap-oak02)
+		ap-hk01-c2 | ap-oak02 | ap-hk14)
 		ssdk_sh port poweron set 2
 		ssdk_sh port poweron set 3
 		ssdk_sh port poweron set 4
@@ -656,15 +867,15 @@ ipq8074_phy_power_off()
 {
 	local board=$(ipq806x_board_name)
 	case "$board" in
-		ap-hk01-c1 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk07 |\
-		ap-hk09 | ap-ac01 | ap-ac02 | ap-oak03 | db-hk01 | db-hk02)
+		ap-hk01-c1 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk01-c6 | ap-hk07 |\
+		ap-hk09 | ap-hk10-c1 | ap-hk10-c2 | ap-hk11-c1 | ap-hk12 | ap-ac01 | ap-ac02 | ap-oak03 | db-hk01 | db-hk02)
 		ssdk_sh port poweroff set 2
 		ssdk_sh port poweroff set 3
 		ssdk_sh port poweroff set 4
 		ssdk_sh port poweroff set 5
 		ssdk_sh port poweroff set 6
 		;;
-		ap-hk01-c2 | ap-oak02)
+		ap-hk01-c2 | ap-oak02 | ap-hk14)
 		ssdk_sh port poweroff set 2
 		ssdk_sh port poweroff set 3
 		ssdk_sh port poweroff set 4
@@ -703,7 +914,7 @@ ipq8074_ac_power()
 	sleep 1
 
 # USB Power-UP Sequence
-	if ! [ -d /sys/module/dwc3_of_simple ]
+	if [ -e /lib/modules/$(uname -r)/dwc3-of-simple.ko ]
 	then
 		insmod phy-msm-ssusb-qmp.ko
 		insmod phy-msm-qusb.ko
@@ -712,6 +923,12 @@ ipq8074_ac_power()
 		insmod dwc3.ko
 	        insmod u_qdss
 	        insmod usb_f_qdss
+	elif [ -e /lib/modules/$(uname -r)/dwc3-qcom.ko ]
+	then
+		insmod phy-qcom-qusb2.ko
+		insmod dwc3-qcom.ko
+		insmod dwc3.ko
+		insmod usb_f_qdss.ko
 	fi
 
 	if [ -d config/usb_gadget/g1 ]
@@ -723,8 +940,11 @@ ipq8074_ac_power()
 	ifup lan
 
 # Wifi Power-up Sequence
-	lsmod | grep ath11k > /dev/null
-	if [ $? -eq 0 ]; then
+	if [ -f /lib/modules/$(uname -r)/ath11k.ko ]; then
+		insmod ath11k
+		insmod ath11k_ahb
+		insmod ath11k_pci
+		sleep 2
 		wifi up
 	else
 		wifi load
@@ -755,6 +975,17 @@ ipq8074_battery_power()
 {
 	echo "Entering Battery Mode..."
 
+# Wifi Power-down Sequence
+	lsmod | grep ath11k > /dev/null
+	if [ $? -eq 0 ]; then
+		wifi down
+		sleep 2
+		rmmod ath11k_pci
+		rmmod ath11k_ahb
+		rmmod ath11k
+	else
+		wifi unload
+	fi
 
 # PCIe Power-Down Sequence
 
@@ -783,14 +1014,6 @@ ipq8074_battery_power()
 		echo 1 > /sys/devices/pci0000:00/pci_bus/0000:00/rcremove
 	}
 	sleep 1
-
-# Wifi Power-down Sequence
-	lsmod | grep ath11k > /dev/null
-	if [ $? -eq 0 ]; then
-		wifi down
-	else
-		wifi unload
-	fi
 
 # Find scsi devices and remove it
 	partition=`cat /proc/partitions | awk -F " " '{print $4}'`
@@ -823,6 +1046,12 @@ ipq8074_battery_power()
 		rmmod dbm
 		rmmod phy_msm_qusb
 		rmmod phy_msm_ssusb_qmp
+	elif [ -d /sys/module/dwc3_qcom ]
+	then
+		rmmod usb_f_qdss
+		rmmod dwc3
+		rmmod dwc3_qcom
+		rmmod phy_qcom_qusb2
 	fi
 	sleep 2
 
@@ -885,10 +1114,12 @@ case "$1" in
 			ipq4019_ap_dk01_1_ac_power ;;
 		ap-dk04.1-c1 | ap-dk04.1-c2 | ap-dk04.1-c3 | ap-dk04.1-c4 | ap-dk04.1-c5 | ap-dk04.1-c6 | ap-dk06.1-c1 | ap-dk07.1-c1 | ap-dk07.1-c2 | ap-dk07.1-c3 | ap-dk07.1-c4)
 			ipq4019_ap_dk04_1_ac_power ;;
-		ap-hk01-c1 | ap-hk01-c2 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk02 | ap-hk05 | ap-hk06 | ap-hk07 | ap-hk08 | ap-hk09 | ap-hk10 | ap-ac01 | ap-ac02 | ap-ac03 | ap-ac04 | ap-oak02 | ap-oak03 | db-hk01 | db-hk02)
+		ap-hk01-c1 | ap-hk01-c2 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk01-c6 | ap-hk02 | ap-hk06 | ap-hk07 | ap-hk08 | ap-hk09 | ap-hk10-c1 | ap-hk10-c2 | ap-hk11-c1 | ap-hk12 | ap-hk14 | ap-ac01 | ap-ac02 | ap-ac03 | ap-ac04 | ap-oak02 | ap-oak03 | db-hk01 | db-hk02)
 			ipq8074_ac_power ;;
-		ap-cp01-c1 | ap-cp01-c2 | ap-cp02-c1 | ap-cp03-c1 | db-cp01 | db-cp02)
+		ap-cp01-c1 | ap-cp01-c2 | ap-cp01-c3 | ap-cp01-c4 | ap-cp02-c1 | ap-cp03-c1 | db-cp01 | db-cp02)
 			ipq6018_ac_power ;;
+		ap-mp02.1 | ap-mp03.1 | ap-mp03.1-c2 | ap-mp03.3 | ap-mp03.3-c2 | ap-mp03.3-c3 | ap-mp03.3-c4 | ap-mp03.3-c5 | ap-mp03.5-c1 | ap-mp03.5-c2 | ap-mp03.6-c1 | ap-mp03.6-c2 | db-mp02.1 | db-mp03.1 | db-mp03.1-c2 | db-mp03.3 | db-mp03.3-c2)
+			ipq5018_ac_power ;;
 		esac ;;
 	true)
 		case "$board" in
@@ -898,9 +1129,11 @@ case "$1" in
 			ipq4019_ap_dk01_1_battery_power ;;
 		ap-dk04.1-c1 | ap-dk04.1-c2 | ap-dk04.1-c3 | ap-dk04.1-c4 | ap-dk04.1-c5 | ap-dk04.1-c6 | ap-dk06.1-c1 | ap-dk07.1-c1 | ap-dk07.1-c2 | ap-dk07.1-c3 | ap-dk07.1-c4)
 			ipq4019_ap_dk04_1_battery_power ;;
-		ap-hk01-c1 | ap-hk01-c2 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk02 | ap-hk05 | ap-hk06 | ap-hk07 | ap-hk08 | ap-hk09 | ap-hk10 | ap-ac01 | ap-ac02 | ap-ac03 | ap-ac04 | ap-oak02 | ap-oak03 | db-hk01 | db-hk02)
+		ap-hk01-c1 | ap-hk01-c2 | ap-hk01-c3 | ap-hk01-c4 | ap-hk01-c5 | ap-hk01-c6 | ap-hk02 | ap-hk06 | ap-hk07 | ap-hk08 | ap-hk09 | ap-hk10-c1 | ap-hk10-c2 | ap-hk11-c1 | ap-hk12 | ap-hk14 | ap-ac01 | ap-ac02 | ap-ac03 | ap-ac04 | ap-oak02 | ap-oak03 | db-hk01 | db-hk02)
 			ipq8074_battery_power ;;
-		ap-cp01-c1 | ap-cp01-c2 | ap-cp02-c1 | ap-cp03-c1 | db-cp01 | db-cp02)
+		ap-cp01-c1 | ap-cp01-c2 | ap-cp01-c3 | ap-cp01-c4 | ap-cp02-c1 | ap-cp03-c1 | db-cp01 | db-cp02)
 			ipq6018_battery_power ;;
+		ap-mp02.1 | ap-mp03.1 | ap-mp03.1-c2 | ap-mp03.3 | ap-mp03.3-c2 | ap-mp03.3-c3 | ap-mp03.3-c4 | ap-mp03.3-c5 | ap-mp03.5-c1 | ap-mp03.5-c2 | ap-mp03.6-c1 | ap-mp03.6-c2 | db-mp02.1 | db-mp03.1 | db-mp03.1-c2 | db-mp03.3 | db-mp03.3-c2)
+			ipq5018_battery_power ;;
 		esac ;;
 esac

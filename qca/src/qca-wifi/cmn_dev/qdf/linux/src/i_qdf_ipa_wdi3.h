@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,8 @@
 #include <qdf_status.h>         /* QDF_STATUS */
 #include <linux/ipa_wdi3.h>
 
-#ifdef CONFIG_IPA_WDI_UNIFIED_API
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)) || \
+	defined(CONFIG_IPA_WDI_UNIFIED_API)
 
 /**
  * __qdf_ipa_wdi_version_t - IPA WDI version
@@ -57,7 +58,7 @@ typedef struct ipa_wdi_init_out_params __qdf_ipa_wdi_init_out_params_t;
 	(((struct ipa_wdi_init_out_params *)(out_params))->is_uC_ready)
 #define __QDF_IPA_WDI_INIT_OUT_PARAMS_IS_SMMU_ENABLED(out_params)	\
 	(((struct ipa_wdi_init_out_params *)(out_params))->is_smmu_enabled)
-#ifdef IPA_WDI3_GSI
+#if (defined(IPA_WDI3_GSI)) || (defined(IPA_WDI2_GSI))
 #define QDF_IPA_WDI_INIT_OUT_PARAMS_IS_OVER_GSI(out_params)	\
 	(((struct ipa_wdi_init_out_params *)(out_params))->is_over_gsi)
 #else
@@ -97,6 +98,10 @@ typedef struct ipa_wdi_reg_intf_in_params  __qdf_ipa_wdi_reg_intf_in_params_t;
 	(((struct ipa_wdi_reg_intf_in_params *)(in))->meta_data)
 #define __QDF_IPA_WDI_REG_INTF_IN_PARAMS_META_DATA_MASK(in)	\
 	(((struct ipa_wdi_reg_intf_in_params *)(in))->meta_data_mask)
+#ifdef IPA_WDI3_TX_TWO_PIPES
+#define __QDF_IPA_WDI_REG_INTF_IN_PARAMS_IS_TX1_USED(in)	\
+	(((struct ipa_wdi_reg_intf_in_params *)(in))->is_tx1_used)
+#endif
 
 typedef struct ipa_ep_cfg __qdf_ipa_ep_cfg_t;
 
@@ -207,6 +212,14 @@ typedef struct ipa_wdi_conn_in_params  __qdf_ipa_wdi_conn_in_params_t;
 	(((struct ipa_wdi_conn_in_params *)(pipe_in))->u_tx.tx)
 #define __QDF_IPA_WDI_CONN_IN_PARAMS_TX_SMMU(pipe_in)	\
 	(((struct ipa_wdi_conn_in_params *)(pipe_in))->u_tx.tx_smmu)
+#ifdef IPA_WDI3_TX_TWO_PIPES
+#define __QDF_IPA_WDI_CONN_IN_PARAMS_IS_TX1_USED(pipe_in)	\
+	(((struct ipa_wdi_conn_in_params *)(pipe_in))->is_tx1_used)
+#define __QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE(pipe_in)	\
+	(((struct ipa_wdi_conn_in_params *)(pipe_in))->u_tx1.tx)
+#define __QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE_SMMU(pipe_in)	\
+	(((struct ipa_wdi_conn_in_params *)(pipe_in))->u_tx1.tx_smmu)
+#endif
 #define __QDF_IPA_WDI_CONN_IN_PARAMS_RX(pipe_in)	\
 	(((struct ipa_wdi_conn_in_params *)(pipe_in))->u_rx.rx)
 #define __QDF_IPA_WDI_CONN_IN_PARAMS_RX_SMMU(pipe_in)	\
@@ -220,8 +233,18 @@ typedef struct ipa_wdi_conn_out_params  __qdf_ipa_wdi_conn_out_params_t;
 
 #define __QDF_IPA_WDI_CONN_OUT_PARAMS_TX_UC_DB_PA(pipe_out)	\
 	(((struct ipa_wdi_conn_out_params *)(pipe_out))->tx_uc_db_pa)
+#ifdef IPA_WDI3_TX_TWO_PIPES
+#define __QDF_IPA_WDI_CONN_OUT_PARAMS_TX_UC_ALT_DB_PA(pipe_out)	\
+	(((struct ipa_wdi_conn_out_params *)(pipe_out))->tx1_uc_db_pa)
+#endif
 #define __QDF_IPA_WDI_CONN_OUT_PARAMS_RX_UC_DB_PA(pipe_out)	\
 	(((struct ipa_wdi_conn_out_params *)(pipe_out))->rx_uc_db_pa)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+#define __QDF_IPA_WDI_CONN_OUT_PARAMS_IS_DB_DDR_MAPPED(pipe_out)	\
+	(((struct ipa_wdi_conn_out_params *)(pipe_out))->is_ddr_mapped)
+#else
+#define __QDF_IPA_WDI_CONN_OUT_PARAMS_IS_DB_DDR_MAPPED(pipe_out) false
+#endif
 
 /**
  * __qdf_ipa_wdi_perf_profile_t - To set BandWidth profile
@@ -386,6 +409,30 @@ static inline int __qdf_ipa_wdi_release_smmu_mapping(u32 num_buffers,
 	return ipa_wdi_release_smmu_mapping(num_buffers, info);
 }
 
+#ifdef WDI3_STATS_UPDATE
+/**
+ * __qdf_ipa_wdi_wlan_stats() - Client should call this function to
+ *		send Tx byte counts to IPA driver
+ * @tx_stats: number of Tx bytes on STA and SAP
+ *
+ * Returns: 0 on success, negative on failure
+ */
+static inline int __qdf_ipa_wdi_wlan_stats(struct ipa_wdi_tx_info *tx_stats)
+{
+	return ipa_wdi_sw_stats(tx_stats);
+}
+
+/**
+ * ipa_uc_bw_monitor() - start/stop uc bw monitoring
+ * @bw_info: set bw info levels to monitor
+ *
+ * Returns: 0 on success, negative on failure
+ */
+static inline int __qdf_ipa_uc_bw_monitor(struct ipa_wdi_bw_info *bw_info)
+{
+	return ipa_uc_bw_monitor(bw_info);
+}
+#endif
 #else /* CONFIG_IPA_WDI_UNIFIED_API */
 
 /**

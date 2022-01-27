@@ -101,10 +101,15 @@ detect_mac80211() {
 		channel="36"
 		htmode=""
 		ht_capab=""
+		edmg_setting=""
 
 		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
 		(iw phy "$dev" info | grep -q '5745 MHz' && !(iw phy "$dev" info | grep -q '5180 MHz')) && { mode_band="a"; channel="149"; }
-		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
+		iw phy "$dev" info | grep -q '60480 MHz' && {
+			mode_11n="a"; mode_band="d"; channel="2";
+			append edmg_setting "	option enable_edmg 1" "$N"
+			append edmg_setting "	option edmg_channel 10" "$N"
+		}
 
 		iw phy "$dev" info | grep -q 'Capabilities:' && htmode=HT20
 		vht_cap=$(iw phy "$dev" info | grep -c 'VHT Capabilities')
@@ -137,6 +142,7 @@ $dev_id
 $ht_capab
 	# REMOVE THIS LINE TO ENABLE WIFI:
 	option disabled 1
+$edmg_setting
 
 config wifi-iface
 	option device   radio$devidx

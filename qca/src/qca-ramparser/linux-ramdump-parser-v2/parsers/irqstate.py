@@ -21,9 +21,7 @@ class IrqParse(RamParser):
         print_out_str(
             '=========================== IRQ STATE ===============================')
         per_cpu_offset_addr = ram_dump.addr_lookup('__per_cpu_offset')
-        cpu_present_bits_addr = ram_dump.addr_lookup('cpu_present_bits')
-        cpu_present_bits = ram_dump.read_word(cpu_present_bits_addr)
-        cpus = bin(cpu_present_bits).count('1')
+        cpus = ram_dump.get_num_cpus()
         irq_desc = ram_dump.addr_lookup('irq_desc')
         foo, irq_desc_size, dummy, symtab_st_size = ram_dump.unwind_lookup(irq_desc, 1)
         h_irq_offset = ram_dump.field_offset('struct irq_desc', 'handle_irq')
@@ -113,6 +111,51 @@ class IrqParse(RamParser):
             shift -= radix_tree_map_shift
         return (node_addr & 0xfffffffffffffffe)
 
+    def shift_to_maxindex(self, shift):
+        radix_tree_map_shift = 6
+        radix_tree_map_size = 1 << radix_tree_map_shift
+        return (radix_tree_map_size << shift) - 1
+
+    def is_internal_node(self, addr):
+        radix_tree_entry_mask = 0x3
+        radix_tree_internal_node = 0x2
+        return (addr & radix_tree_entry_mask) == radix_tree_internal_node
+
+    def entry_to_node(self, addr):
+        return addr & 0xfffffffffffffffd
+
+    def xarray_lookup_element(self, ram_dump, root_addr, index):
+        rnode_offset = ram_dump.field_offset('struct xarray', 'xa_head')
+        rnode_shift_offset = ram_dump.field_offset('struct xa_node', 'shift')
+        slots_offset = ram_dump.field_offset('struct xa_node', 'slots')
+        pointer_size = ram_dump.sizeof('struct xa_node *')
+
+        # if CONFIG_BASE_SMALL=0: radix_tree_map_shift = 6
+        maxindex = 0
+        radix_tree_map_shift = 6
+        radix_tree_map_mask = 0x3f
+
+        rnode_addr = ram_dump.read_word(root_addr + rnode_offset)
+        if self.is_internal_node(rnode_addr):
+            node_addr = self.entry_to_node(rnode_addr)
+            shift = ram_dump.read_byte(node_addr + rnode_shift_offset)
+            maxindex = self.shift_to_maxindex(shift)
+
+        if index > maxindex:
+            return None
+
+        while self.is_internal_node(rnode_addr):
+            parent_addr = self.entry_to_node(rnode_addr)
+            parent_shift = ram_dump.read_byte(parent_addr + rnode_shift_offset)
+            offset = (index >> parent_shift) & radix_tree_map_mask
+            rnode_addr = ram_dump.read_word(parent_addr + slots_offset +
+                (offset * pointer_size))
+
+        if rnode_addr is 0:
+            return None
+
+        return rnode_addr
+
     def print_irq_state_sparse_irq(self, ram_dump):
         h_irq_offset = ram_dump.field_offset('struct irq_desc', 'handle_irq')
         irq_num_offset = ram_dump.field_offset('struct irq_data', 'irq')
@@ -140,11 +183,13 @@ class IrqParse(RamParser):
             return
 
         for i in range(0, nr_irqs):
-            irq_desc = self.radix_tree_lookup_element(
-                ram_dump, irq_desc_tree, i)
+            if (ram_dump.kernel_version[0], ram_dump.kernel_version[1]) >= (5, 4):
+                irq_desc = self.xarray_lookup_element(ram_dump, irq_desc_tree, i)
+            else:
+                irq_desc = self.radix_tree_lookup_element(ram_dump, irq_desc_tree, i)
             if irq_desc is None:
                 continue
-            irqnum = ram_dump.read_u32(irq_desc + irq_num_offset)
+            irqnum = ram_dump.read_u32(irq_desc + irq_data_offset + irq_num_offset)
             irqcount = ram_dump.read_u32(irq_desc + irq_count_offset)
             action = ram_dump.read_word(irq_desc + irq_action_offset)
             kstat_irqs_addr = ram_dump.read_word(irq_desc + kstat_irqs_offset)
@@ -166,6 +211,8 @@ class IrqParse(RamParser):
             if action != 0:
                 name_addr = ram_dump.read_word(action + action_name_offset)
                 name = ram_dump.read_cstring(name_addr, 48)
+                if name is None:
+                    continue
                 print_out_str(
                     '{0:4} {1} {2:30} {3:10}'.format(irqnum, irq_stats_str, name, chip_name))
 

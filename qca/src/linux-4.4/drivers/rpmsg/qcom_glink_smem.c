@@ -34,19 +34,6 @@
 #define SMEM_GLINK_NATIVE_XPRT_FIFO_0		479
 #define SMEM_GLINK_NATIVE_XPRT_FIFO_1		480
 
-struct glink_smem_pipe {
-	struct qcom_glink_pipe native;
-
-	__le32 *tail;
-	__le32 *head;
-
-	void *fifo;
-
-	int remote_pid;
-};
-
-#define to_smem_pipe(p) container_of(p, struct glink_smem_pipe, native)
-
 static size_t glink_smem_rx_avail(struct qcom_glink_pipe *np)
 {
 	struct glink_smem_pipe *pipe = to_smem_pipe(np);

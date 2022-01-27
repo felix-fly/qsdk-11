@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2008, Google Inc.
  * All rights reserved.
- * Copyright (c) 2009-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2019 The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,8 @@
 #ifndef __QPIC_NAND_H
 #define __QPIC_NAND_H
 
-#if defined(CONFIG_IPQ40XX) || defined(CONFIG_IPQ_RUMI) || defined(CONFIG_IPQ6018)
+#if defined(CONFIG_IPQ40XX) || defined(CONFIG_IPQ_RUMI) \
+	|| defined(CONFIG_IPQ6018) || defined(CONFIG_IPQ5018)
 #define QPIC_EBI2ND_BASE		(0x079b0000)
 #else
 #error "QPIC NAND not supported"
@@ -93,11 +94,255 @@
 #define NAND_EBI2_ECC_BUF_CFG		NAND_REG(0x00F0)
 #define NAND_HW_INFO			NAND_REG(0x00FC)
 #define NAND_FLASH_BUFFER		NAND_REG(0x0100)
+#define NAND_MULTI_PAGE_CMD		NAND_REG(0x0F60)
+#define NAND_FLASH_FEATURES		NAND_REG(0x0F64)
 #define QPIC_NAND_CTRL			NAND_REG(0x0F00)
 #define QPIC_NAND_DEBUG			NAND_REG(0x0F0C)
+/* Additional Register set for Serial NAND */
+#define NAND_AUTO_STATUS_EN		NAND_REG(0x002C)
+#define NAND_VERSION			NAND_REG(0x4F08)
+#define SPI_NAND_DEV_CMD0		NAND_REG(0x70A0)
+#define SPI_NAND_DEV_CMD1		NAND_REG(0x70A4)
+#define SPI_NAND_DEV_CMD2		NAND_REG(0x70A8)
+#define SPI_NAND_DEV_CMD3		NAND_REG(0x70D0)
+#define NAND_FLASH_DEV_CMD_VLD		NAND_REG(0x70AC)
+#define SPI_NAND_DEV_CMD7		NAND_REG(0x70B0)
+#define SPI_NAND_DEV_CMD8		NAND_REG(0x70B4)
+#define SPI_NAND_DEV_CMD9		NAND_REG(0x70B8)
+#define NAND_FLASH_SPI_CFG		NAND_REG(0x70C0)
+#define NAND_SPI_NUM_ADDR_CYCLES	NAND_REG(0x70C4)
+#define NAND_SPI_BUSY_CHECK_WAIT_CNT	NAND_REG(0x70C8)
+#define NAND_QSPI_MSTR_CONFIG           NAND_REG(0x7f60)
+
+/* Register mask & shift value used in SPI transfer mode */
+#define SPI_TRANSFER_MODE_1X		0x1
+#define SPI_TRANSFER_MODE_4X		0x3
+/* These value as per HPG , these value as per 2K device*/
+#define SPI_NAND_DEVn_CFG0		0x1A5408D0
+#define SPI_NAND_DEVn_CFG1		0x08287440
+#define SPI_NAND_DEVn_CFG1_RESET	0x087476B1
+/* value for below register according to HPG : 0x42040702 for reset
+ * and 0x42040700 for reset disable
+ */
+#define SPI_NAND_DEVn_ECC_CFG		0x42040702
+#define SPI_NAND_DEVn_ECC_CFG_RST_DIS	0x42040700
+#define FLASH_DEV_CMD_VLD		0x0000000D
+/* These Value as per HPG */
+#define NAND_FLASH_DEV_CMD0_VAL		0x1080D8D8
+#define NAND_FLASH_DEV_CMD1_VAL		0xF00F3000
+#define NAND_FLASH_DEV_CMD2_VAL		0xF0FF709F
+#define NAND_FLASH_DEV_CMD3_VAL		0x3F310015
+/* For Micron NAND_FLASH_DEV_CMD3_VAL value should
+ * be 0x3F300015
+ */
+#define NAND_FLASH_DEV_CMD7_VAL		0x04061F0F
+#define NAND_FLASH_DEV_CMD7_WE		0x60000
+#define NAND_FLASH_DEV_CMD7_WD		0x40000000
+#define NAND_FLASH_DEV_CMD7_SET_FTR	0x1F00
+#define NAND_FLASH_DEV_CMD7_GET_FTR	0x0F
+#define SPI_BUSY_CHECK_WAIT_CNT		0x00000010
+#define SPI_CFG_VAL			0x1924C00D
+#define SPI_LOAD_CLK_CNTR_INIT_EN	(1 << 28)
+#define SPI_NUM_ADDR_CYCLES		0x000DA4DB
+#define NAND_FLASH_SET_FEATURE_MASK	0xB800000E
+#define NAND_FLASH_GET_FEATURE_MASK	0x3800000E
+#define QPIC_HARDWARE_VERSION_2_0	0x20000000
+#define NAND_FLASH_STATUS_MASK		0xC
+#define QPIC_SERIAL_ERROR		517
+#define QPIC_SPI_SET_FEATURE		(1 << 31)
+#define QPIC_SPI_GET_FEATURE		~(1 << 31)
+#define QPIC_SPI_WP_SET			(1 << 28)
+#define QPIC_SPI_HOLD_SET		(1 << 27)
+#define QPIC_SPI_TRANSFER_MODE_X1	(1 << 29)
+#define QPIC_SPI_TRANSFER_MODE_X4	(3 << 29)
+#define QPIC_SPI_BOOST_MODE		(1 << 11)
+#define QPIC_SPI_NAND_CTRL_VAL		0x341
+#define QPIC_PAGE_SCOPE_CMD_EN		(1 << 23)
+#define QPIC_MULTIPAGE_CMD_EN		(1 << 22)
+#define QPIC_LAST_PAGE_MASK		(1 << 5)
+/* For all status
+ * #define QPIC_SPI_NAND_AUTO_STATUS_VAL 0x003F003F
+ */
+#define QPIC_SPI_NAND_AUTO_STATUS_VAL	0x000B000B
+#define QPIC_SPI_MAX_CODE_WORD_2K_PAGE	0x4
+#define QPIC_SPI_MAX_STATUS_REG		12
+#define QPIC_AUTO_STATUS_BUFFER_SIZE	(QPIC_SPI_MAX_CODE_WORD_2K_PAGE * \
+					 QPIC_SPI_MAX_STATUS_REG)
+#define QPIC_NAND_FLASH_CMD_WE_VAL	0XB800000F
+#define QPIC_NAND_FLASH_CMD_WD_VAL	0x3800000F
+#define WR_EN				0x1
+#define WR_DIS				0x0
+
+#define PAGE_2KiB_STATUS_BUF_SIZE      48
+#define PAGE_4KiB_STATUS_BUF_SIZE      96
+#define PAGE_8KiB_STATUS_BUF_SIZE      192
+#define PAGE_2KiB                      2048
+#define PAGE_4KiB                      4096
+#define PAGE_8KiB                      8192
+#define MAX_MULTI_PAGE			64
+#define GET_STATUS_BUFF_PARSE_SIZE_PER_PAGE(page_size, parse_size) ({	\
+		switch(page_size) {					\
+			case PAGE_2KiB:					\
+				parse_size = PAGE_2KiB_STATUS_BUF_SIZE;	\
+				break;					\
+			case PAGE_4KiB:					\
+				parse_size = PAGE_4KiB_STATUS_BUF_SIZE;	\
+				break;					\
+			case PAGE_8KiB:					\
+				parse_size = PAGE_8KiB_STATUS_BUF_SIZE;	\
+				break;					\
+			default:					\
+				break;					\
+		}							\
+	})
+
+#define GET_STATUS_BUFF_ALLOC_SIZE(page_size, status_buf_size) ({	\
+		switch(page_size) {                                     \
+			case PAGE_2KiB:                                 \
+			status_buf_size = PAGE_2KiB_STATUS_BUF_SIZE *	\
+						MAX_MULTI_PAGE;		\
+				break;					\
+			case PAGE_4KiB:                                 \
+			status_buf_size = PAGE_4KiB_STATUS_BUF_SIZE *	\
+						MAX_MULTI_PAGE;		\
+				break;					\
+			case PAGE_8KiB:					\
+			status_buf_size = PAGE_8KiB_STATUS_BUF_SIZE *	\
+						MAX_MULTI_PAGE; 	\
+				break;                                  \
+			default:                                        \
+				break;                                  \
+		}                                                       \
+	})
+
+/* According to GigaDevice data sheet Block Protection Register is:
+ *  ____________________________________________
+ * |	  |    |    |    |    |     |     |	|
+ * |BRWD  |RSVD| BP2| BP1| BP0| INV | CMP |RSVD |
+ * |      |    |    |    |    |     |     |	|
+ * |______|____|____|____|____|_____|_____|_____|
+ *
+ * NOTE: RSVD = Reserved.
+ *
+ * After power-up the device is in "locked" state i.e feature bits
+ * BP0, BP1, BP2 are set to 1. ENV, CMP, BRWD are set to 0.
+ * When BRWD is set to 1 and WP# is LOW i.e 0, none of the writable
+ * protection feature bits can be set.
+ * When an ERASE command is issued to a locked block, the erase failure,
+ * 04H, is returned.
+ *
+ * With CMP = X, INV = X, BP2 = 0, BP1 = 0, BP0 = 0 : There will be no
+ * block protection functionality.
+ *
+ * When WP# is not LOW, user can issue bellows commands to alter the
+ * protection.
+ *
+ * Issue SET FEATURES register write (1FH)
+ * Issue the feature bit address (A0h)
+ */
+#define FLASH_SPI_NAND_BLK_PROCT_ADDR		0xA0
+#define FLASH_SPI_NAND_BLK_PROCT_DISABLE	0x00
+#define FLASH_SPI_NAND_BLK_PROCT_ENABLE		0x78
+/* According to GigaDevice data sheet Feature Register is:
+ *  _________________________________________________
+ * |	   |      |     |      |    |     |     |    |
+ * |OTP-PRT|OTP_EN| RSVD|ECC-EN|RSVD|RSVD |RSVD |QE  |
+ * |       |      |     |      |    |     |     |    |
+ * |_______|______|_____|______|____|_____|_____|____|
+ *
+ *
+ * NOTE : When a feature is set, it remains active until the
+ * device is power cycled or the feature is written to.once
+ * the device is set, it remains set, even if a RESET (FFH)
+ * command is issued.
+ *
+ * OTP-PRT = X , OTP_EN = 0 : Normal Operation
+ * OTP-PRT = 0, OTP_EN = 1 : Access OTP region, read and program data.
+ *
+ * ECC-EN : ECC is enabled after device power up, so the default
+ * READ and PROGRAM commands operate with internal ECC in the “active”
+ * state. To enable/disable ECC, perform the following command sequence:
+ *
+ * 1) Issue the SET FEATURES command (1FH).
+ * 2) Set the feature bit ECC_EN as you want:
+ * 	a) To enable ECC, Set ECC_EN to 1.
+ * 	b) To disable ECC, Clear ECC_EN to 0.
+ *
+ * NOTE: For this device GD5F1GQ4xExxG
+ * --> Internal ECC Off (ECC_EN=0):
+ *  2048-Byte+128-Byte Full Access.
+ *
+ * --> Internal ECC On (ECC_EN=1, default):
+ *  Program: 2048-Byte+64-Byte.
+ *  Read: 2048-Byte+128-Byte.
+ *
+ * QE : If QE is enabled, the quad IO operations can be executed.
+ *
+ */
+#define FLASH_SPI_NAND_FR_ADDR		0xB0
+#define FLASH_SPI_NAND_FR_ECC_ENABLE	(1 << 4)
+#define FLASH_SPI_NAND_FR_BUFF_ENABLE	(1 << 3)
+#define FLASH_SPI_NAND_FR_QUAD_ENABLE	0x1
+/* According to GigaDevice data sheet Status Register(0xC0) is:
+ *  _________________________________________________
+ * |	  |    	 |     |     |      |      |    |    |
+ * |RSVD  |RSVD  |ECCS1|ECCS0|P-FAIL|E-FAIL|WEL |OIP |
+ * |      |    	 |     |     |      |      |    |    |
+ * |______|______|_____|_____|_____ |______|____|____|
+ *
+ *
+ * NOTE: RSVD = Reserved.
+ *
+ * P-FAIL : This bit indicates that a program failure has occurred
+ * (P_FAIL set to 1). It will also be set if the user attempts to
+ * program an invalid address or a protected region, including
+ * the OTP area.
+ *
+ * E-FAIL : This bit indicates that an erase failure has occurred
+ * (E_FAIL set to 1). It will also be set if the user attempts to
+ * erase a locked region.
+ *
+ * WEL : This bit indicates the current status of the write enable
+ * latch (WEL) and must be set (WEL = 1), prior to issuing a
+ * PROGRAM EXECUTE or BLOCK ERASE command. It is set by issuing the
+ * WRITE ENABLE command. WEL can also be disabled (WEL = 0), by issuing
+ * the WRITE DISABLE command.
+ *
+ * OIP : This bit is set (OIP = 1 ) when a PROGRAM EXECUTE, PAGE READ,
+ * BLOCK ERASE, or RESET command is executing, indicating the device
+ * is busy. When the bit is 0, the interface is in the ready state.
+ *
+ * ECC Status : ECCS and ECCSE are set to 00b either following a RESET,
+ * or at the beginning of the READ.ECCS and ECCSE are invalid if internal
+ * ECC is disabled (via a SET FEATURES command to reset ECC_EN to 0).
+ *
+ * NOTE: After power-on RESET, ECC status is set to reflect the contents
+ * of block 0, page 0.
+ */
+#define FLASH_SPI_NAND_SR_ADDR       0xC0
+#define FLASH_SPI_NAND_SR_DATA       0x00
+
+/* According to GigaDevice data sheet Feature Register(0xD0) is:
+ *  _________________________________________________
+ * |	  |    	|     |     |      |      |     |    |
+ * |RSVD  |DS-S1|DS-S0|RSVD |RSVD  |RSVD  |RSVD |RSVD|
+ * |      |    	|     |     |      |      |     |    |
+ * |______|_____|_____|_____|______|______|_____|____|
+ *
+ * DS-S1 = 0 , DS-S0 = 0   : Drive strength is 50%
+ * DS-S1 = 0 , DS-S0 = 1   : Drive strength is 25%
+ * DS-S1 = 1 , DS-S0 = 0   : Drive strength is 75%
+ * DS-S1 = 1 , DS-S0 = 1   : Drive strength is 100%
+ *
+ * 00 is the default data byte value for Output Driver Register after power-up
+ */
+#define FLASH_SPI_NAND_FR_DS_ADDR	0xD0
+#define FLASH_SPI_NAND_FR_DS_DATA	0x00
+
 
 /* NANDc registers used during BAM transfer */
 #define NAND_READ_LOCATION_n(n)		(NAND_REG(0xF20) + 4 * (n))
+#define NAND_READ_LOCATION_LAST_CW_n(n)	(NAND_REG(0xF40) + 4 * (n))
 #define NAND_RD_LOC_LAST_BIT(x)		((x) << 31)
 #define NAND_RD_LOC_SIZE(x)		((x) <<  16)
 #define NAND_RD_LOC_OFFSET(x)		((x) <<  0)
@@ -150,6 +395,23 @@
 #define NAND_CMD_BLOCK_ERASE				0x3A
 #define NAND_CMD_FETCH_ID				0x0B
 #define NAND_CMD_RESET_DEVICE				0x0D
+#define NAND_CMD_SET_FEATURE				0x1F
+#define NAND_CMD_GET_FEATURE				0x0F
+#define NAND_CMD_ACC_FEATURE				0x0E
+/* Serial NAND Device command */
+#define SERIAL_NAND_CMD_READ_FROM_CACHE_X4		0x6B
+#define SERIAL_NAND_CMD_READ_FROM_CACHE_DUAL_IO		0xBB
+#define SERIAL_NAND_CMD_READ_FROM_CACHE_QUAD_IO		0xEB
+#define SERIAL_NAND_CMD_READ_ID				0x9F
+#define SERIAL_NAND_CMD_PROGRAM_LOAD			0x02
+#define SERIAL_NAND_CMD_PROGRAM_LOAD_X4			0x32
+#define SERIAL_NAND_CMD_PROGRAM_EXECUTE			0x10
+#define SERIAL_NAND_CMD_PROGRAM_LOAD_RND_DATA		0x84
+#define SERIAL_NAND_CMD_PROGRAM_LOAD_RND_DATA_X4	0xC4  /* Or 0x34 */
+#define SERIAL_NAND_CMD_PROGRAM_LOAD_QUAD_IO		0x72
+#define SERIAL_NAND_CMD_BLOCK_ERASE			0xD8
+#define SERIAL_NAND_CMD_RESET				0xFF
+
 /* NAND Status errors */
 #define NAND_FLASH_MPU_ERR				(1 << 8)
 #define NAND_FLASH_TIMEOUT_ERR				(1 << 6)
@@ -169,6 +431,9 @@
 #define DATA_CONSUMER_PIPE_INDEX		0
 #define DATA_PRODUCER_PIPE_INDEX		1
 #define CMD_PIPE_INDEX				2
+#define BAM_STATUS_PIPE_INDEX			3
+
+#define QPIC_AUTO_STATUS_DES_SIZE		12
 
 /* Define BAM pipe lock groups for NANDc*/
 #define P_LOCK_GROUP_0				0
@@ -237,11 +502,13 @@
 #define DATA_CONSUMER_PIPE			0
 #define DATA_PRODUCER_PIPE			1
 #define CMD_PIPE				2
+#define NAND_BAM_STATUS_PIPE			3
 
 /* NANDc BAM pipe groups */
 #define DATA_PRODUCER_PIPE_GRP			0
 #define DATA_CONSUMER_PIPE_GRP			0
 #define CMD_PIPE_GRP				1
+#define NAND_BAM_STATUS_PIPE_GRP		0
 
 /* NANDc EE */
 #define QPIC_NAND_EE				0
@@ -251,6 +518,7 @@
 
 /* Register: NAND_CTRL */
 #define BAM_MODE_EN				0x1
+#define NANDC_READ_DELAY_COUNTER_VAL		0x340
 
 /* Register: NAND_DEBUG */
 #define BAM_MODE_BIT_RESET			(1 << 31)
@@ -274,8 +542,15 @@
 #define MTD_NAND_CHIP(mtd)			((struct nand_chip *)((mtd)->priv))
 #define MTD_QPIC_NAND_DEV(mtd)			(MTD_NAND_CHIP(mtd)->priv)
 
+#ifdef CONFIG_PAGE_SCOPE_MULTI_PAGE_READ
+#define QPIC_BAM_DATA_FIFO_SIZE			512
+#define QPIC_BAM_CMD_FIFO_SIZE			128
+#define QPIC_BAM_STATUS_FIFO_SIZE		512
+#else
 #define QPIC_BAM_DATA_FIFO_SIZE			64
 #define QPIC_BAM_CMD_FIFO_SIZE			64
+#define QPIC_BAM_STATUS_FIFO_SIZE		64
+#endif
 
 #define QPIC_MAX_ONFI_MODES				4
 #define QPIC_NUM_XFER_STEPS				7
@@ -283,9 +558,10 @@
 enum qpic_verion{
 	QCA_QPIC_V1_4_20,
 	QCA_QPIC_V1_5_20,
-
+	QCA_QPIC_V2_1_1,
 };
 
+extern unsigned int qpic_frequency, qpic_phase;
 
 /* result type */
 typedef enum {
@@ -308,6 +584,28 @@ enum nand_cfg_value
 {
 	NAND_CFG_RAW,
 	NAND_CFG,
+};
+
+/* Structure for Serial nand parameter */
+struct qpic_serial_nand_params {
+	u8 id[4];
+	u16 page_size;
+	u16 pgs_per_blk;
+	u32 spare_size;
+	u32 erase_blk_size;
+	u16 no_of_blocks;
+	u32 density;
+	u32 otp_region;
+	u8 no_of_addr_cycle;
+	u8 no_of_dies;
+	u8 num_bits_ecc_correctability;
+	u8 timing_mode_support;
+	bool quad_mode;
+	bool check_quad_config;
+	int prev_die_id;
+	u8 protec_bpx;
+	u64 pages_per_die;
+	const char *name;
 };
 
 struct onfi_param_page
@@ -395,9 +693,15 @@ struct qpic_nand_bam_pipes
 	unsigned read_pipe;
 	unsigned write_pipe;
 	unsigned cmd_pipe;
+#ifdef CONFIG_PAGE_SCOPE_MULTI_PAGE_READ
+	unsigned status_pipe;
+#endif
 	uint8_t  read_pipe_grp;
 	uint8_t  write_pipe_grp;
 	uint8_t  cmd_pipe_grp;
+#ifdef CONFIG_PAGE_SCOPE_MULTI_PAGE_READ
+	uint8_t status_pipe_grp;
+#endif
 };
 
 /* Structure to define the initial nand config */
@@ -441,6 +745,10 @@ struct qpic_nand_dev {
 	uint32_t cfg0_raw;
 	uint32_t cfg1_raw;
 	uint32_t ecc_bch_cfg;
+#ifdef CONFIG_QPIC_SERIAL
+	bool quad_mode;
+	bool check_quad_config;
+#endif
 	unsigned oob_per_page;
 	unsigned char *buffers;
 	unsigned char *pad_dat;
@@ -449,10 +757,16 @@ struct qpic_nand_dev {
 	unsigned char *zero_oob;
 	unsigned char *tmp_datbuf;
 	unsigned char *tmp_oobbuf;
+#ifdef CONFIG_PAGE_SCOPE_MULTI_PAGE_READ
+	bool multi_page_copy;
+	uint32_t multi_page_req_len;
+	unsigned char *status_buff;
+	uint32_t status_buf_size;
+#endif
 	uint16_t timing_mode_support;
 	struct read_stats stats[QPIC_NAND_MAX_CWS_IN_PAGE];
 };
 
-void qpic_nand_init(void);
+void qpic_nand_init(qpic_nand_cfg_t *qpic_nand_cfg);
 
 #endif

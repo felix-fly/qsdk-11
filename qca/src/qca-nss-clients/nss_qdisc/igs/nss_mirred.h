@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -14,6 +14,7 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <net/act_api.h>
 
 #define NSS_MIRRED_TAB_MASK 7
@@ -23,7 +24,11 @@
  *	nss mirred internal structure.
  */
 struct nss_mirred_tcf {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	struct tcf_common common;		/* Common filter structure */
+#else
+	struct tc_action common;		/* Common filter structure */
+#endif
 	__u32 tcfm_to_ifindex;			/* Index number of device to which
 						 * traffic will be redirected.
 						 */
@@ -40,5 +45,10 @@ struct nss_mirred_tcf {
  * To get the pointer of nss mirred action structure from the common
  * tc_action structure pointer.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 #define nss_mirred_get(a) \
 	container_of(a->priv, struct nss_mirred_tcf, common)
+#else
+#define nss_mirred_get(a) ((struct nss_mirred_tcf *)a)
+#endif
+

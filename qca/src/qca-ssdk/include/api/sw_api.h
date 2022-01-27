@@ -52,6 +52,7 @@ typedef enum
 	SW_EGMODE,
 	SW_CAP,
 	SW_VLAN,
+	SW_LAN_WAN_CFG,
 	SW_PBMP,
 	SW_MIB,
 	SW_MIB_CNTR,

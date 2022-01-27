@@ -827,6 +827,32 @@ static void macvlan_uninit(struct net_device *dev)
 		macvlan_port_destroy(port->dev);
 }
 
+/* Update macvlan statistics processed by offload engines */
+static void macvlan_dev_update_stats(struct net_device *dev,
+				     struct rtnl_link_stats64 *offl_stats,
+				     bool update_mcast_rx_stats)
+{
+	struct vlan_pcpu_stats *stats;
+	struct macvlan_dev *macvlan;
+
+	/* Is this a macvlan? */
+	if (!netif_is_macvlan(dev))
+		return;
+
+	macvlan = netdev_priv(dev);
+	stats = this_cpu_ptr(macvlan->pcpu_stats);
+	u64_stats_update_begin(&stats->syncp);
+	stats->rx_packets += offl_stats->rx_packets;
+	stats->rx_bytes += offl_stats->rx_bytes;
+	stats->tx_packets += offl_stats->tx_packets;
+	stats->tx_bytes += offl_stats->tx_bytes;
+	/* Update multicast statistics */
+	if (unlikely(update_mcast_rx_stats)) {
+		stats->rx_multicast += offl_stats->rx_packets;
+	}
+	u64_stats_update_end(&stats->syncp);
+}
+
 static struct rtnl_link_stats64 *macvlan_dev_get_stats64(struct net_device *dev,
 							 struct rtnl_link_stats64 *stats)
 {
@@ -1287,6 +1313,7 @@ int macvlan_common_newlink(struct net *src_net, struct net_device *dev,
 	vlan->port     = port;
 	vlan->set_features = MACVLAN_FEATURES;
 	vlan->nest_level = dev_get_nest_level(lowerdev, netif_is_macvlan) + 1;
+	vlan->offload_stats_update = macvlan_dev_update_stats;
 
 	vlan->mode     = MACVLAN_MODE_VEPA;
 	if (data && data[IFLA_MACVLAN_MODE])

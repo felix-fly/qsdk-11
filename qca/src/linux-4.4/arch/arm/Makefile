@@ -13,6 +13,8 @@
 # Ensure linker flags are correct
 LDFLAGS		:=
 
+KASAN_SANITIZE := n
+
 LDFLAGS_vmlinux	:=-p --no-undefined -X --pic-veneer
 ifeq ($(CONFIG_CPU_ENDIAN_BE8),y)
 LDFLAGS_vmlinux	+= --be8
@@ -156,7 +158,11 @@ ifeq ($(CONFIG_ARCH_SA1100),y)
 textofs-$(CONFIG_SA1111) := 0x00208000
 endif
 textofs-$(CONFIG_ARCH_MSM8X60) := 0x00208000
+ifneq ($(CONFIG_ARCH_IPQ6018),y)
 textofs-$(CONFIG_ARCH_IPQ256M) := 0x01208000
+else
+textofs-$(CONFIG_ARCH_IPQ256M) := 0x01008000
+endif
 textofs-$(CONFIG_ARCH_MSM8960) := 0x00208000
 textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, 2016-2020 The Linux Foundation. All rights reserved.
  * Copyright (c) 2002-2010, Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -52,9 +52,8 @@ int dfs_bin5_check_pulse(struct wlan_dfs *dfs, struct dfs_event *re,
 		return 0;
 	}
 
-#define CHANNEL_TURBO 0x00010
 	/* Adjust the filter threshold for rssi in non TURBO mode. */
-	if (!(dfs->dfs_curchan->dfs_ch_flags & CHANNEL_TURBO))
+	if (!WLAN_IS_CHAN_TURBO(dfs->dfs_curchan))
 		b5_rssithresh += br->br_pulse.b5_rssimargin;
 
 	/* Check if the pulse is within duration and rssi thresholds. */
@@ -292,7 +291,7 @@ int dfs_bin5_check(struct wlan_dfs *dfs)
 		}
 
 		dfs_debug(dfs, WLAN_DEBUG_DFS_BIN5,
-			"bursts=%u numevents=%u", bursts, numevents);
+			  "bursts=%u numevents=%u", bursts, numevents);
 		if (bursts >= br->br_pulse.b5_threshold) {
 			if ((br->br_elems[br->br_lastelem].be_ts -
 					br->br_elems[br->br_firstelem].be_ts) <
@@ -300,13 +299,13 @@ int dfs_bin5_check(struct wlan_dfs *dfs)
 				return 0;
 
 			dfs_debug(dfs, WLAN_DEBUG_DFS_BIN5,
-					"bursts=%u numevents=%u total_width=%d average_width=%d total_diff=%d average_diff=%d",
-					bursts, numevents, total_width,
-					average_width, total_diff,
-					average_diff);
-			dfs_info(dfs, WLAN_DEBUG_DFS_ALWAYS,
-					"bin 5 radar detected, bursts=%d",
-					bursts);
+				  "bursts=%u numevents=%u total_width=%d average_width=%d total_diff=%d average_diff=%d",
+				   bursts, numevents, total_width,
+				   average_width, total_diff,
+				   average_diff);
+			dfs_debug(dfs, WLAN_DEBUG_DFS_ALWAYS,
+				  "bin 5 radar detected, bursts=%d",
+				   bursts);
 			return 1;
 		}
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, 2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -24,6 +24,25 @@
 #include "qdf_trace.h"
 #include "qdf_types.h"
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0))
+static inline
+int qdf_firmware_request_nowarn(const struct firmware **fw,
+				const char *name,
+				struct device *device)
+{
+	return firmware_request_nowarn(fw, name, device);
+}
+#else
+static inline
+int qdf_firmware_request_nowarn(const struct firmware **fw,
+				const char *name,
+				struct device *device)
+{
+	return request_firmware(fw, name, device);
+}
+#endif
+
+
 QDF_STATUS qdf_file_read(const char *path, char **out_buf)
 {
 	int errno;
@@ -32,7 +51,7 @@ QDF_STATUS qdf_file_read(const char *path, char **out_buf)
 
 	*out_buf = NULL;
 
-	errno = request_firmware(&fw, path, NULL);
+	errno = qdf_firmware_request_nowarn(&fw, path, NULL);
 	if (errno) {
 		qdf_err("Failed to read file %s", path);
 		return QDF_STATUS_E_FAILURE;
@@ -63,3 +82,42 @@ void qdf_file_buf_free(char *file_buf)
 }
 qdf_export_symbol(qdf_file_buf_free);
 
+#ifdef QCA_WIFI_MODULE_PARAMS_FROM_INI
+QDF_STATUS qdf_module_param_file_read(const char *path, char **out_buf)
+{
+	int errno;
+	const struct firmware *fw;
+	char *buf;
+
+	*out_buf = NULL;
+	errno = qdf_firmware_request_nowarn(&fw, path, NULL);
+	if (errno) {
+		qdf_err("Failed to read file %s", path);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	/* qdf_untracked_mem_malloc zeros new memory; +1 size
+	 * ensures null-termination
+	 */
+	buf = qdf_untracked_mem_malloc(fw->size + 1);
+	if (!buf) {
+		release_firmware(fw);
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	qdf_mem_copy(buf, fw->data, fw->size);
+	release_firmware(fw);
+	*out_buf = buf;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+void qdf_module_param_file_free(char *file_buf)
+{
+	QDF_BUG(file_buf);
+	if (!file_buf)
+		return;
+
+	qdf_untracked_mem_free(file_buf);
+}
+#endif

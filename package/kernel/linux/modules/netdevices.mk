@@ -698,7 +698,9 @@ define KernelPackage/macvlan
   TITLE:=MAC-VLAN support
   KCONFIG:=CONFIG_MACVLAN
   FILES:=$(LINUX_DIR)/drivers/net/macvlan.ko
+ifeq ($(CONFIG_TARGET_ipq),)
   AUTOLOAD:=$(call AutoProbe,macvlan)
+endif
 endef
 
 define KernelPackage/macvlan/description

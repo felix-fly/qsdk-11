@@ -197,6 +197,22 @@ struct spinand_ops spinand_dev[] = {
 		toshiba_verify_ecc,
 		NULL,
 	},
+	{
+		NAND_MFR_FIDELIX,
+		2,		/*No of planes*/
+		0x72,
+		INT_MAX,
+		FIDELIX_PAGES_PER_PLANE,
+		fidelix_set_defaults,
+		fidelix_read_cmd,
+		fidelix_read_data,
+		fidelix_write_cmd,
+		fidelix_write_data,
+		fidelix_erase_blk,
+		fidelix_parse_id,
+		macronix_verify_ecc,
+		NULL,
+	},
 	{ },
 };
 
@@ -1299,6 +1315,9 @@ struct nand_flash_dev spinand_flash_ids[] = {
 
 	{"GD5F1GQ4R 128MiB 3.3V",
 		{ .id = {0xc8, 0xc1} }, SZ_2K, 128, SZ_128K, 0, 2, 128},
+
+	{"FM35X2GA 256MiB 3.3V",
+		{ .id = {0xe5, 0x72} }, SZ_2K, 256, SZ_128K, 0, 2, 64},
 
 	{NULL}
 };

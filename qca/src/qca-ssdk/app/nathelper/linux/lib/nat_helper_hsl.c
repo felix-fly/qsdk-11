@@ -522,22 +522,22 @@ napt_hw_mode_init(void)
     /* Also set NAT mode Port strict mode/symmetric mode */
     a_uint32_t entry = 0x15F01CB;
 
-    HSL_REG_ENTRY_SET(rv, 0, NAT_CTRL, 0, (a_uint8_t *) (&entry),
+    REG_ENTRY_SET(rv, 0, NAT_CTRL, 0, (a_uint8_t *) (&entry),
                       sizeof (a_uint32_t));
 
-    HSL_REG_ENTRY_GET(rv, 0, ROUTER_CTRL, 0,
+    REG_ENTRY_GET(rv, 0, ROUTER_CTRL, 0,
                       (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 
     /*set locktime 100us*/
     SW_SET_REG_BY_FIELD(ROUTER_CTRL, GLB_LOCKTIME, 1, entry);
     SW_SET_REG_BY_FIELD(ROUTER_CTRL, ARP_AGE_MODE, 1, entry);
 
-    HSL_REG_ENTRY_SET(rv, 0, ROUTER_CTRL, 0,
+    REG_ENTRY_SET(rv, 0, ROUTER_CTRL, 0,
                       (a_uint8_t *) (&entry), sizeof (a_uint32_t));
-    HSL_REG_ENTRY_GET(rv, 0, MOD_ENABLE, 0,
+    REG_ENTRY_GET(rv, 0, MOD_ENABLE, 0,
                       (a_uint8_t *) (&entry), sizeof (a_uint32_t));
     SW_SET_REG_BY_FIELD(MOD_ENABLE, L3_EN, 1, entry);
-    HSL_REG_ENTRY_SET(rv, 0, MOD_ENABLE, 0,
+    REG_ENTRY_SET(rv, 0, MOD_ENABLE, 0,
                       (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 
     ACL_STATUS_SET(0, A_TRUE);
@@ -552,11 +552,11 @@ napt_hw_mode_cleanup(void)
 		IP_ROUTE_STATUS_SET(0, A_FALSE);
 		entry = 0;
 	} else {
-		HSL_REG_ENTRY_GET(rv, 0, NAT_CTRL, 0,
+		REG_ENTRY_GET(rv, 0, NAT_CTRL, 0,
                       		(a_uint8_t *) (&entry), sizeof (a_uint32_t));
 		SW_SET_REG_BY_FIELD(NAT_CTRL, NAT_EN, 0, entry);
 	}
-	HSL_REG_ENTRY_SET(rv, 0, NAT_CTRL, 0,
+	REG_ENTRY_SET(rv, 0, NAT_CTRL, 0,
                       (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 	ACL_STATUS_SET(0, A_FALSE);
 }
@@ -803,7 +803,7 @@ a_int32_t napt_hw_get_by_sip(a_uint32_t sip)
 	memset(&napt, 0, sizeof(fal_napt_entry_t));
 	napt.entry_id = FAL_NEXT_ENTRY_FIRST_ID;
 	napt.src_addr = sip;
-	if (fal_napt_next(0, FAL_NAT_ENTRY_SOURCE_IP_EN, &napt) == SW_OK) {
+	if (NAPT_NEXT(0, FAL_NAT_ENTRY_SOURCE_IP_EN, &napt) == SW_OK) {
 		return 0;
 	}
 
@@ -821,7 +821,7 @@ napt_hw_used_count_get(void)
     sw_error_t rv;
 
     a_uint32_t count = 0;
-    HSL_REG_ENTRY_GET(rv, 0, NAPT_USED_COUNT, 0, (a_uint8_t *) (&count),
+    REG_ENTRY_GET(rv, 0, NAPT_USED_COUNT, 0, (a_uint8_t *) (&count),
                       sizeof (a_uint32_t));
 
     return count;

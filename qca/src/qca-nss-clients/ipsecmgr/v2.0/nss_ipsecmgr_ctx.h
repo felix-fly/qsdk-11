@@ -1,6 +1,6 @@
 /*
  * ********************************************************************************
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -43,7 +43,7 @@ struct nss_ipsecmgr_ctx_host_stats {
 	uint64_t inner_fail_flow;	/* Failed to find flow for inner packet */
 	uint64_t outer_exp;		/* Host processed inner IPv6 exceptioned packet */
 	uint64_t outer_exp_drop;	/* Host processed and dropped inner IPv6 exceptioned packet */
-	uint64_t outer_cb;		/* Number of times data call back called for inner packet */
+	uint64_t outer_cb;		/* Number of times exception call back called for outer packet */
 	uint64_t outer_fail_dev;	/* Failed to find netdevice for inner packet */
 	uint64_t outer_fail_sa;		/* Failed to find SA for outer packet */
 	uint64_t outer_fail_flow;	/* Failed to find flow for outer packet */
@@ -70,10 +70,17 @@ struct nss_ipsecmgr_ctx_stats_priv {
 	uint64_t exceptioned;		/* Exceptioned to host */
 	uint64_t linearized;		/* Linearized packets */
 	uint64_t redirected;		/* Redirected from inline */
+	uint64_t dropped;		/* Total dropped packets */
 	uint64_t fail_sa;		/* Failed to find SA */
 	uint64_t fail_flow;		/* Failed to find flow */
-	uint64_t fail_exception;	/* Failed to exception */
 	uint64_t fail_stats;		/* Failed to send statistics */
+	uint64_t fail_exception;	/* Failed to exception */
+	uint64_t fail_transform;	/* Failed to transform */
+	uint64_t fail_linearized;	/* Failed to linearized */
+	uint64_t fail_mdata_ver;	/* Invalid meta data version */
+	uint64_t fail_ctx_active;	/* Failed to queue as ctx is not active. */
+	uint64_t fail_pbuf_crypto;	/* Failed to allocate pbuf for crypto operation */
+	uint64_t fail_queue_crypto;	/* Failed to queue pbuf to crypto pnode */
 };
 
 /*
@@ -83,6 +90,7 @@ struct nss_ipsecmgr_ctx_state {
 	ssize_t print_len;				/* Print buffer length */
 	ssize_t stats_len;				/* Total stats length */
 	uint32_t except_ifnum;				/* Exception interface number */
+	uint32_t sibling_ifnum;				/* Sibling interface number */
 	enum nss_ipsec_cmn_ctx_type type;		/* Type */
 	enum nss_dynamic_interface_type di_type;	/* Dynamic interface type */
 };
@@ -104,20 +112,19 @@ struct nss_ipsecmgr_ctx {
 };
 
 /*
- * nss_ipsecmgr_ctx_attach()
- * 	Attach context to the database
- */
-static inline void nss_ipsecmgr_ctx_attach(struct list_head *db, struct nss_ipsecmgr_ctx *ctx)
-{
-	list_add(&ctx->list, db);
-}
-
-/*
  * Set the exception interface number for context
  */
 static inline void nss_ipsecmgr_ctx_set_except(struct nss_ipsecmgr_ctx *ctx, uint32_t except_ifnum)
 {
 	ctx->state.except_ifnum = except_ifnum;
+}
+
+/*
+ * Set the sibling interface number for context
+ */
+static inline void nss_ipsecmgr_ctx_set_sibling(struct nss_ipsecmgr_ctx *ctx, uint32_t sibling_ifnum)
+{
+	ctx->state.sibling_ifnum = sibling_ifnum;
 }
 
 extern const struct file_operations ipsecmgr_ctx_file_ops;
@@ -128,6 +135,7 @@ extern void nss_ipsecmgr_ctx_rx_redir(struct net_device *dev, struct sk_buff *sk
 extern void nss_ipsecmgr_ctx_rx_outer(struct net_device *dev, struct sk_buff *skb, struct napi_struct *napi);
 extern void nss_ipsecmgr_ctx_rx_inner(struct net_device *dev, struct sk_buff *skb, struct napi_struct *napi);
 
+extern void nss_ipsecmgr_ctx_attach(struct list_head *db, struct nss_ipsecmgr_ctx *ctx);
 extern bool nss_ipsecmgr_ctx_config(struct nss_ipsecmgr_ctx *ctx);
 extern void nss_ipsecmgr_ctx_free(struct nss_ipsecmgr_ctx *ctx);
 extern struct nss_ipsecmgr_ctx *nss_ipsecmgr_ctx_alloc(struct nss_ipsecmgr_tunnel *tun,

@@ -237,7 +237,8 @@ void ipq_config_mclk_sel(u32 stereo_id, u32 val)
 	cfg = readl(stereo_priv[stereo_id].stereo_base
 			+ ADSS_STEREOn_STEREO0_CONFIG_REG);
 	cfg &= ~STEREOn_CONFIG_MCK_SEL;
-	cfg |= val;
+	if (val)
+		cfg |= STEREOn_CONFIG_MCK_SEL;
 	writel(cfg, stereo_priv[stereo_id].stereo_base
 			+ ADSS_STEREOn_STEREO0_CONFIG_REG);
 	spin_unlock_irqrestore(&stereo_priv[stereo_id].stereo_lock, flags);

@@ -83,6 +83,7 @@
  * 	Private structure for NSS clmapmgr.
  */
 struct nss_clmapmgr_priv_t {
+	bool clmap_enabled;			/* Clmap status */
 	int nss_if_number_us;			/* Clmapmgr upstream NSS interface number */
 	int nss_if_number_ds;			/* Clmapmgr downstream NSS interface number */
 	struct rtnl_link_stats64 stats;		/* Netdev stats */

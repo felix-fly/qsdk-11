@@ -2,6 +2,7 @@
 # Makefile for the linux arm-specific parts of the memory manager.
 #
 
+KASAN_SANITIZE := n
 obj-y				:= dma-mapping.o extable.o fault.o init.o \
 				   iomap.o
 

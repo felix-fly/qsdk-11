@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, 2016-2019, 2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2002-2010, Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -431,6 +431,7 @@ int dfs_check_etsi_overlap(int center_freq, int chan_width,
 					 chan_freq_high));
 }
 
+#ifdef CONFIG_CHAN_FREQ_API
 bool dfs_is_en302_502_applicable(struct wlan_dfs *dfs)
 {
 	int chan_freq;
@@ -440,8 +441,7 @@ bool dfs_is_en302_502_applicable(struct wlan_dfs *dfs)
 	struct wlan_channel *bss_chan = NULL;
 
 	/* Get centre frequency */
-	chan_freq = utils_dfs_chan_to_freq(
-			dfs->dfs_curchan->dfs_ch_vhtop_ch_freq_seg1);
+	chan_freq = dfs->dfs_curchan->dfs_ch_mhz_freq_seg1;
 	vdev = wlan_objmgr_pdev_get_first_vdev(dfs->dfs_pdev_obj, WLAN_DFS_ID);
 	if (!vdev) {
 		dfs_err(dfs, WLAN_DEBUG_DFS_ALWAYS,  "vdev is NULL");
@@ -463,8 +463,7 @@ bool dfs_is_en302_502_applicable(struct wlan_dfs *dfs)
 				ETSI_RADAR_EN302_502_FREQ_UPPER);
 
 		/* check for extension channel */
-		chan_freq = utils_dfs_chan_to_freq(
-				dfs->dfs_curchan->dfs_ch_vhtop_ch_freq_seg2);
+		chan_freq = dfs->dfs_curchan->dfs_ch_mhz_freq_seg2;
 
 		overlap += dfs_check_etsi_overlap(
 				chan_freq, chan_width / 2,
@@ -480,3 +479,4 @@ bool dfs_is_en302_502_applicable(struct wlan_dfs *dfs)
 	return(wlan_reg_is_regdmn_en302502_applicable(dfs->dfs_pdev_obj) &&
 	       overlap);
 }
+#endif

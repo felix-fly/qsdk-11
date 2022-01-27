@@ -702,4 +702,16 @@ static inline void bond_tx_drop(struct net_device *dev, struct sk_buff *skb)
 	dev_kfree_skb_any(skb);
 }
 
+struct bond_cb {
+	void (*bond_cb_link_up)(struct net_device *slave);
+	void (*bond_cb_link_down)(struct net_device *slave);
+	void (*bond_cb_enslave)(struct net_device *slave);
+	void (*bond_cb_release)(struct net_device *slave);
+	void (*bond_cb_delete_by_slave)(struct net_device *slave);
+	void (*bond_cb_delete_by_mac)(uint8_t *mac_addr);
+};
+
+extern int bond_register_cb(struct bond_cb *cb);
+extern void bond_unregister_cb(void);
+extern int bond_get_id(struct net_device *bond_dev);
 #endif /* _NET_BONDING_H */

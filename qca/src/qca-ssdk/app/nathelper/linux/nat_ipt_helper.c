@@ -630,7 +630,7 @@ nat_ipt_rules_cp_from_user(void **buf, unsigned int *buf_len,
         }
     }
     HNAT_PRINTK("(2)nat_ipt_rules_cp_from_user *buf:%x user:%x user_len:%d\n",
-                (unsigned int)*buf, (unsigned int)user, user_len);
+                (unsigned int)(uintptr_t)*buf, (unsigned int)(uintptr_t)user, user_len);
     copy_from_user(*buf, user, user_len);
 
     return;

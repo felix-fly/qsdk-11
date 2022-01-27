@@ -44,6 +44,17 @@ linux-parser-output.txt is used
 
 --qtf-path <path> : QTF tool executable
 
+--dump_q6_etr <q6mem path> <wlanfw path> : Extract etr from q6mem file passed
+as the first parameter and wlan firmware elf file passed as second parameter.
+It's a standalone option and doesn't need any other option to be specified
+
+--dump_q6_etr : Extract etr from EBICS dump using etr region specified
+in device-tree
+
+--readelf-path <readelf-file>: readelf File with the path used to extract symbols
+
+--ath11k : use the tool feature on ath11k modules. 
+
 The list of features parsed is constantly growing. Please use --help option
 to see the full list of features that can be parsed.
 

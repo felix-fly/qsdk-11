@@ -585,6 +585,9 @@ static int qce_crypto_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, qce);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENOMEM;
+
 	qce->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(qce->base))
 		return PTR_ERR(qce->base);
@@ -595,6 +598,11 @@ static int qce_crypto_probe(struct platform_device *pdev)
 
 	if (device_property_read_bool(dev, "qce,use_fixed_hw_key"))
 		use_fixed_key = true;
+
+	if (device_property_read_bool(dev, "qce,cmd_desc_support")) {
+		qce->qce_cmd_desc_enable = true;
+		qce->base_dma = phys_to_dma(dev, (phys_addr_t)res->start);
+	}
 
 	qce->core = devm_clk_get(qce->dev, "core");
 	if (IS_ERR(qce->core))

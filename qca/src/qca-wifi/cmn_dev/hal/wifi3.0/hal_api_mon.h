@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -21,6 +21,7 @@
 
 #include "qdf_types.h"
 #include "hal_internal.h"
+#include "hal_hw_headers.h"
 #include <target_type.h>
 
 #define HAL_RX_PHY_DATA_RADAR 0x01
@@ -28,18 +29,6 @@
 
 #define HAL_RX_FCS_LEN (4)
 #define KEY_EXTIV 0x20
-
-#define HAL_RX_USER_TLV32_TYPE_OFFSET		0x00000000
-#define HAL_RX_USER_TLV32_TYPE_LSB		1
-#define HAL_RX_USER_TLV32_TYPE_MASK		0x000003FE
-
-#define HAL_RX_USER_TLV32_LEN_OFFSET		0x00000000
-#define HAL_RX_USER_TLV32_LEN_LSB		10
-#define HAL_RX_USER_TLV32_LEN_MASK		0x003FFC00
-
-#define HAL_RX_USER_TLV32_USERID_OFFSET		0x00000000
-#define HAL_RX_USER_TLV32_USERID_LSB		26
-#define HAL_RX_USER_TLV32_USERID_MASK		0xFC000000
 
 #define HAL_ALIGN(x, a)				HAL_ALIGN_MASK(x, (a)-1)
 #define HAL_ALIGN_MASK(x, mask)	(typeof(x))(((uint32)(x) + (mask)) & ~(mask))
@@ -118,6 +107,16 @@
 #define HE_GI_1_6 2
 #define HE_GI_3_2 3
 
+#define HE_GI_RADIOTAP_0_8 0
+#define HE_GI_RADIOTAP_1_6 1
+#define HE_GI_RADIOTAP_3_2 2
+#define HE_GI_RADIOTAP_RESERVED 3
+
+#define HE_LTF_RADIOTAP_UNKNOWN 0
+#define HE_LTF_RADIOTAP_1_X 1
+#define HE_LTF_RADIOTAP_2_X 2
+#define HE_LTF_RADIOTAP_4_X 3
+
 #define HT_SGI_PRESENT 0x80
 
 #define HE_LTF_1_X 0
@@ -144,16 +143,54 @@
 		rs->rs_flags |= (IEEE80211_AMSDU_FLAG); \
 } \
 
+#define HAL_RX_SET_MSDU_AGGREGATION((rs_mpdu), (rs_ppdu))\
+{\
+	if (rs_mpdu->rs_flags & IEEE80211_AMSDU_FLAG)\
+		rs_ppdu->rs_flags |= IEEE80211_AMSDU_FLAG;\
+} \
+
 #else
 #define HAL_RX_GET_MSDU_AGGREGATION(rx_desc, rs)
+#define HAL_RX_SET_MSDU_AGGREGATION(rs_mpdu, rs_ppdu)
 #endif
 
 /* Max MPDUs per status buffer */
 #define HAL_RX_MAX_MPDU 256
 #define HAL_RX_NUM_WORDS_PER_PPDU_BITMAP (HAL_RX_MAX_MPDU >> 5)
+#define HAL_RX_MAX_MPDU_H_PER_STATUS_BUFFER 16
 
 /* Max pilot count */
 #define HAL_RX_MAX_SU_EVM_COUNT 32
+
+/**
+ * struct hal_rx_mon_desc_info () - HAL Rx Monitor descriptor info
+ *
+ * @ppdu_id:                 PHY ppdu id
+ * @status_ppdu_id:          status PHY ppdu id
+ * @status_buf_count:        number of status buffer count
+ * @rxdma_push_reason:       rxdma push reason
+ * @rxdma_error_code:        rxdma error code
+ * @msdu_cnt:                msdu count
+ * @end_of_ppdu:             end of ppdu
+ * @link_desc:               msdu link descriptor address
+ * @status_buf:              for a PPDU, status buffers can span acrosss
+ *                           multiple buffers, status_buf points to first
+ *                           status buffer address of PPDU
+ * @drop_ppdu:               flag to indicate current destination
+ *                           ring ppdu drop
+ */
+struct hal_rx_mon_desc_info {
+	uint16_t ppdu_id;
+	uint16_t status_ppdu_id;
+	uint8_t status_buf_count;
+	uint8_t rxdma_push_reason;
+	uint8_t rxdma_error_code;
+	uint8_t msdu_count;
+	uint8_t end_of_ppdu;
+	struct hal_buf_info link_desc;
+	struct hal_buf_info status_buf;
+	bool drop_ppdu;
+};
 
 /*
  * Struct hal_rx_su_evm_info - SU evm info
@@ -174,111 +211,24 @@ enum {
 	DP_PPDU_STATUS_DONE,
 };
 
-static inline
-uint32_t HAL_RX_MON_HW_RX_DESC_SIZE(void)
-{
-	/* return the HW_RX_DESC size */
-	return sizeof(struct rx_pkt_tlvs);
-}
-
-static inline
-uint8_t *HAL_RX_MON_DEST_GET_DESC(uint8_t *data)
-{
-	return data;
-}
-
-static inline
-uint32_t HAL_RX_DESC_GET_MPDU_LENGTH_ERR(void *hw_desc_addr)
-{
-	struct rx_attention *rx_attn;
-	struct rx_pkt_tlvs *rx_desc = (struct rx_pkt_tlvs *)hw_desc_addr;
-
-	rx_attn = &rx_desc->attn_tlv.rx_attn;
-
-	return HAL_RX_GET(rx_attn, RX_ATTENTION_1, MPDU_LENGTH_ERR);
-}
-
-static inline
-uint32_t HAL_RX_DESC_GET_MPDU_FCS_ERR(void *hw_desc_addr)
-{
-	struct rx_attention *rx_attn;
-	struct rx_pkt_tlvs *rx_desc = (struct rx_pkt_tlvs *)hw_desc_addr;
-
-	rx_attn = &rx_desc->attn_tlv.rx_attn;
-
-	return HAL_RX_GET(rx_attn, RX_ATTENTION_1, FCS_ERR);
-}
-
-/*
- * HAL_RX_HW_DESC_MPDU_VALID() - check MPDU start TLV tag in MPDU
- *			start TLV of Hardware TLV descriptor
- * @hw_desc_addr: Hardware desciptor address
- *
- * Return: bool: if TLV tag match
- */
-static inline
-bool HAL_RX_HW_DESC_MPDU_VALID(void *hw_desc_addr)
-{
-	struct rx_pkt_tlvs *rx_desc = (struct rx_pkt_tlvs *)hw_desc_addr;
-	uint32_t tlv_tag;
-
-	tlv_tag = HAL_RX_GET_USER_TLV32_TYPE(
-		&rx_desc->mpdu_start_tlv);
-
-	return tlv_tag == WIFIRX_MPDU_START_E ? true : false;
-}
-
-static inline
-uint32_t HAL_RX_HW_DESC_GET_PPDUID_GET(void *hw_desc_addr)
-{
-	struct rx_mpdu_info *rx_mpdu_info;
-	struct rx_pkt_tlvs *rx_desc = (struct rx_pkt_tlvs *)hw_desc_addr;
-
-	rx_mpdu_info =
-		&rx_desc->mpdu_start_tlv.rx_mpdu_start.rx_mpdu_info_details;
-
-	return HAL_RX_GET(rx_mpdu_info, RX_MPDU_INFO_0, PHY_PPDU_ID);
-}
-
-/* TODO: Move all Rx descriptor functions to hal_rx.h to avoid duplication */
-
-#define HAL_RX_BUFFER_ADDR_31_0_GET(buff_addr_info)		\
-	(_HAL_MS((*_OFFSET_TO_WORD_PTR(buff_addr_info,		\
-		BUFFER_ADDR_INFO_0_BUFFER_ADDR_31_0_OFFSET)),	\
-		BUFFER_ADDR_INFO_0_BUFFER_ADDR_31_0_MASK,	\
-		BUFFER_ADDR_INFO_0_BUFFER_ADDR_31_0_LSB))
-
-#define HAL_RX_REO_ENT_BUFFER_ADDR_39_32_GET(reo_ent_desc)	\
-	(HAL_RX_BUFFER_ADDR_39_32_GET(&				\
-		(((struct reo_entrance_ring *)reo_ent_desc)	\
-			->reo_level_mpdu_frame_info.msdu_link_desc_addr_info)))
-
-#define HAL_RX_REO_ENT_BUFFER_ADDR_31_0_GET(reo_ent_desc)	\
-	(HAL_RX_BUFFER_ADDR_31_0_GET(&				\
-		(((struct reo_entrance_ring *)reo_ent_desc)	\
-			->reo_level_mpdu_frame_info.msdu_link_desc_addr_info)))
-
-#define HAL_RX_REO_ENT_BUF_COOKIE_GET(reo_ent_desc)		\
-	(HAL_RX_BUF_COOKIE_GET(&					\
-		(((struct reo_entrance_ring *)reo_ent_desc)	\
-			->reo_level_mpdu_frame_info.msdu_link_desc_addr_info)))
-
 /**
  * hal_rx_reo_ent_buf_paddr_get: Gets the physical address and
- * cookie from the REO entrance ring element
- *
- * @ hal_rx_desc_cookie: Opaque cookie pointer used by HAL to get to
+ *			cookie from the REO entrance ring element
+ * @hal_rx_desc_cookie: Opaque cookie pointer used by HAL to get to
  * the current descriptor
  * @ buf_info: structure to return the buffer information
  * @ msdu_cnt: pointer to msdu count in MPDU
+ *
+ * CAUTION: This API calls a hal_soc ops, so be careful before calling this in
+ * per packet path
+ *
  * Return: void
  */
 static inline
-void hal_rx_reo_ent_buf_paddr_get(hal_rxdma_desc_t rx_desc,
+void hal_rx_reo_ent_buf_paddr_get(hal_soc_handle_t hal_soc_hdl,
+				  hal_rxdma_desc_t rx_desc,
 				  struct hal_buf_info *buf_info,
-				  void **pp_buf_addr_info,
-				  uint32_t *msdu_cnt
-)
+				  uint32_t *msdu_cnt)
 {
 	struct reo_entrance_ring *reo_ent_ring =
 		(struct reo_entrance_ring *)rx_desc;
@@ -290,31 +240,30 @@ void hal_rx_reo_ent_buf_paddr_get(hal_rxdma_desc_t rx_desc,
 	&reo_ent_ring->reo_level_mpdu_frame_info.rx_mpdu_desc_info_details;
 
 	*msdu_cnt = HAL_RX_GET(rx_mpdu_desc_info_details,
-				RX_MPDU_DESC_INFO_0, MSDU_COUNT);
+				HAL_RX_MPDU_DESC_INFO, MSDU_COUNT);
 
-	loop_cnt = HAL_RX_GET(reo_ent_ring, REO_ENTRANCE_RING_7, LOOPING_COUNT);
+	loop_cnt = HAL_RX_GET(reo_ent_ring, HAL_REO_ENTRANCE_RING,
+			      LOOPING_COUNT);
 
 	buf_addr_info =
 	&reo_ent_ring->reo_level_mpdu_frame_info.msdu_link_desc_addr_info;
 
+	hal_rx_buf_cookie_rbm_get(hal_soc_hdl, (uint32_t *)buf_addr_info,
+				  buf_info);
 	buf_info->paddr =
 		(HAL_RX_BUFFER_ADDR_31_0_GET(buf_addr_info) |
 		((uint64_t)
 		(HAL_RX_BUFFER_ADDR_39_32_GET(buf_addr_info)) << 32));
 
-	buf_info->sw_cookie = HAL_RX_BUF_COOKIE_GET(buf_addr_info);
-
-	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
-		"[%s][%d] ReoAddr=%pK, addrInfo=%pK, paddr=0x%llx, loopcnt=%d",
-		__func__, __LINE__, reo_ent_ring, buf_addr_info,
+	dp_nofl_debug("[%s][%d] ReoAddr=%pK, addrInfo=%pK, paddr=0x%llx, loopcnt=%d",
+		      __func__, __LINE__, reo_ent_ring, buf_addr_info,
 	(unsigned long long)buf_info->paddr, loop_cnt);
-
-	*pp_buf_addr_info = (void *)buf_addr_info;
 }
 
 static inline
-void hal_rx_mon_next_link_desc_get(void *rx_msdu_link_desc,
-	struct hal_buf_info *buf_info, void **pp_buf_addr_info)
+void hal_rx_mon_next_link_desc_get(hal_soc_handle_t hal_soc_hdl,
+				   void *rx_msdu_link_desc,
+				   struct hal_buf_info *buf_info)
 {
 	struct rx_msdu_link *msdu_link =
 		(struct rx_msdu_link *)rx_msdu_link_desc;
@@ -322,15 +271,102 @@ void hal_rx_mon_next_link_desc_get(void *rx_msdu_link_desc,
 
 	buf_addr_info = &msdu_link->next_msdu_link_desc_addr_info;
 
+	hal_rx_buf_cookie_rbm_get(hal_soc_hdl, (uint32_t *)buf_addr_info,
+				  buf_info);
+
 	buf_info->paddr =
 		(HAL_RX_BUFFER_ADDR_31_0_GET(buf_addr_info) |
 		((uint64_t)
 		(HAL_RX_BUFFER_ADDR_39_32_GET(buf_addr_info)) << 32));
-
-	buf_info->sw_cookie = HAL_RX_BUF_COOKIE_GET(buf_addr_info);
-
-	*pp_buf_addr_info = (void *)buf_addr_info;
 }
+
+static inline
+uint8_t *HAL_RX_MON_DEST_GET_DESC(uint8_t *data)
+{
+	return data;
+}
+
+static inline uint32_t
+hal_rx_tlv_mpdu_len_err_get(hal_soc_handle_t hal_soc_hdl, void *hw_desc_addr)
+{
+	struct hal_soc *hal_soc = (struct hal_soc *)hal_soc_hdl;
+
+	if (!hal_soc || !hal_soc->ops) {
+		hal_err("hal handle is NULL");
+		QDF_BUG(0);
+		return 0;
+	}
+
+	if (hal_soc->ops->hal_rx_tlv_mpdu_len_err_get)
+		return hal_soc->ops->hal_rx_tlv_mpdu_len_err_get(hw_desc_addr);
+
+	return 0;
+}
+
+static inline uint32_t
+hal_rx_tlv_mpdu_fcs_err_get(hal_soc_handle_t hal_soc_hdl, void *hw_desc_addr)
+{
+	struct hal_soc *hal_soc = (struct hal_soc *)hal_soc_hdl;
+
+	if (!hal_soc || !hal_soc->ops) {
+		hal_err("hal handle is NULL");
+		QDF_BUG(0);
+		return 0;
+	}
+
+	if (hal_soc->ops->hal_rx_tlv_mpdu_fcs_err_get)
+		return hal_soc->ops->hal_rx_tlv_mpdu_fcs_err_get(hw_desc_addr);
+
+	return 0;
+}
+
+#ifdef notyet
+/*
+ * HAL_RX_HW_DESC_MPDU_VALID() - check MPDU start TLV tag in MPDU
+ *			start TLV of Hardware TLV descriptor
+ * @hw_desc_addr: Hardware descriptor address
+ *
+ * Return: bool: if TLV tag match
+ */
+static inline
+bool HAL_RX_HW_DESC_MPDU_VALID(void *hw_desc_addr)
+{
+	struct rx_mon_pkt_tlvs *rx_desc =
+		(struct rx_mon_pkt_tlvs *)hw_desc_addr;
+	uint32_t tlv_tag;
+
+	tlv_tag = HAL_RX_GET_USER_TLV32_TYPE(&rx_desc->mpdu_start_tlv);
+
+	return tlv_tag == WIFIRX_MPDU_START_E ? true : false;
+}
+#endif
+
+/*
+ * HAL_RX_HW_DESC_MPDU_VALID() - check MPDU start TLV user id in MPDU
+ *			start TLV of Hardware TLV descriptor
+ * @hw_desc_addr: Hardware descriptor address
+ *
+ * Return: unit32_t: user id
+ */
+static inline uint32_t
+hal_rx_hw_desc_mpdu_user_id(hal_soc_handle_t hal_soc_hdl,
+			    void *hw_desc_addr)
+{
+	struct hal_soc *hal_soc = (struct hal_soc *)hal_soc_hdl;
+
+	if (!hal_soc || !hal_soc->ops) {
+		hal_err("hal handle is NULL");
+		QDF_BUG(0);
+		return 0;
+	}
+
+	if (hal_soc->ops->hal_rx_hw_desc_mpdu_user_id)
+		return hal_soc->ops->hal_rx_hw_desc_mpdu_user_id(hw_desc_addr);
+
+	return 0;
+}
+
+/* TODO: Move all Rx descriptor functions to hal_rx.h to avoid duplication */
 
 /**
  * hal_rx_msdu_link_desc_set: Retrieves MSDU Link Descriptor to WBM
@@ -341,11 +377,10 @@ void hal_rx_mon_next_link_desc_get(void *rx_msdu_link_desc,
  *
  * Return: void
  */
-
 static inline
 void hal_rx_mon_msdu_link_desc_set(hal_soc_handle_t hal_soc_hdl,
 				   void *src_srng_desc,
-				   void *buf_addr_info)
+				   hal_buff_addrinfo_t buf_addr_info)
 {
 	struct buffer_addr_info *wbm_srng_buffer_addr_info =
 			(struct buffer_addr_info *)src_srng_desc;
@@ -358,18 +393,22 @@ void hal_rx_mon_msdu_link_desc_set(hal_soc_handle_t hal_soc_hdl,
 		((uint64_t)
 		(HAL_RX_BUFFER_ADDR_39_32_GET(buf_addr_info)) << 32));
 
-	QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_DEBUG,
-		"[%s][%d] src_srng_desc=%pK, buf_addr=0x%llx, cookie=0x%llx",
-		__func__, __LINE__, src_srng_desc, (unsigned long long)paddr,
-		(unsigned long long)p_buffer_addr_info->sw_buffer_cookie);
+	dp_nofl_debug("[%s][%d] src_srng_desc=%pK, buf_addr=0x%llx, cookie=0x%llx",
+		      __func__, __LINE__, src_srng_desc, (unsigned long long)paddr,
+		      (unsigned long long)p_buffer_addr_info->sw_buffer_cookie);
 
 	/* Structure copy !!! */
 	*wbm_srng_buffer_addr_info =
 		*((struct buffer_addr_info *)buf_addr_info);
 }
 
+/**
+ * hal_get_rx_msdu_link_desc_size() - Get msdu link descriptor size
+ *
+ * Return: size of rx_msdu_link
+ */
 static inline
-uint32 hal_get_rx_msdu_link_desc_size(void)
+uint32_t hal_get_rx_msdu_link_desc_size(void)
 {
 	return sizeof(struct rx_msdu_link);
 }
@@ -406,11 +445,13 @@ enum {
 /**
  * enum
  * @HAL_RX_MON_PPDU_START: PPDU start TLV is decoded in HAL
- * @HAL_RX_MON_PPDU_END: PPDU end TLV is decided in HAL
+ * @HAL_RX_MON_PPDU_END: PPDU end TLV is decoded in HAL
+ * @HAL_RX_MON_PPDU_RESET: Not PPDU start and end TLV
  */
 enum {
 	HAL_RX_MON_PPDU_START = 0,
 	HAL_RX_MON_PPDU_END,
+	HAL_RX_MON_PPDU_RESET,
 };
 
 /* struct hal_rx_ppdu_common_info  - common ppdu info
@@ -438,12 +479,10 @@ struct hal_rx_ppdu_common_info {
  * struct hal_rx_msdu_payload_info - msdu payload info
  * @first_msdu_payload: pointer to first msdu payload
  * @payload_len: payload len
- * @nbuf: status network buffer to which msdu belongs to
  */
 struct hal_rx_msdu_payload_info {
 	uint8_t *first_msdu_payload;
 	uint32_t payload_len;
-	qdf_nbuf_t nbuf;
 };
 
 /**
@@ -480,10 +519,149 @@ struct hal_rx_ppdu_msdu_info {
 	uint32_t flow_idx;
 };
 
+#if defined(WLAN_CFR_ENABLE) && defined(WLAN_ENH_CFR_ENABLE)
+/**
+ * struct hal_rx_ppdu_cfr_user_info - struct for storing peer info extracted
+ * from HW TLVs, this will be used for correlating CFR data with multiple peers
+ * in MU PPDUs
+ *
+ * @peer_macaddr: macaddr of the peer
+ * @ast_index: AST index of the peer
+ */
+struct hal_rx_ppdu_cfr_user_info {
+	uint8_t peer_macaddr[QDF_MAC_ADDR_SIZE];
+	uint32_t ast_index;
+};
+
+/**
+ * struct hal_rx_ppdu_cfr_info - struct for storing ppdu info extracted from HW
+ * TLVs, this will be used for CFR correlation
+ *
+ * @bb_captured_channel : Set by RXPCU when MACRX_FREEZE_CAPTURE_CHANNEL TLV is
+ * sent to PHY, SW checks it to correlate current PPDU TLVs with uploaded
+ * channel information.
+ *
+ * @bb_captured_timeout : Set by RxPCU to indicate channel capture condition is
+ * met, but MACRX_FREEZE_CAPTURE_CHANNEL is not sent to PHY due to AST delay,
+ * which means the rx_frame_falling edge to FREEZE TLV ready time exceeds
+ * the threshold time defined by RXPCU register FREEZE_TLV_DELAY_CNT_THRESH.
+ * Bb_captured_reason is still valid in this case.
+ *
+ * @rx_location_info_valid: Indicates whether CFR DMA address in the PPDU TLV
+ * is valid
+ * <enum 0 rx_location_info_is_not_valid>
+ * <enum 1 rx_location_info_is_valid>
+ * <legal all>
+ *
+ * @bb_captured_reason : Copy capture_reason of MACRX_FREEZE_CAPTURE_CHANNEL
+ * TLV to here for FW usage. Valid when bb_captured_channel or
+ * bb_captured_timeout is set.
+ * <enum 0 freeze_reason_TM>
+ * <enum 1 freeze_reason_FTM>
+ * <enum 2 freeze_reason_ACK_resp_to_TM_FTM>
+ * <enum 3 freeze_reason_TA_RA_TYPE_FILTER>
+ * <enum 4 freeze_reason_NDPA_NDP>
+ * <enum 5 freeze_reason_ALL_PACKET>
+ * <legal 0-5>
+ *
+ * @rtt_che_buffer_pointer_low32 : The low 32 bits of the 40 bits pointer to
+ * external RTT channel information buffer
+ *
+ * @rtt_che_buffer_pointer_high8 : The high 8 bits of the 40 bits pointer to
+ * external RTT channel information buffer
+ *
+ * @chan_capture_status : capture status reported by ucode
+ * a. CAPTURE_IDLE: FW has disabled "REPETITIVE_CHE_CAPTURE_CTRL"
+ * b. CAPTURE_BUSY: previous PPDU’s channel capture upload DMA ongoing. (Note
+ * that this upload is triggered after receiving freeze_channel_capture TLV
+ * after last PPDU is rx)
+ * c. CAPTURE_ACTIVE: channel capture is enabled and no previous channel
+ * capture ongoing
+ * d. CAPTURE_NO_BUFFER: next buffer in IPC ring not available
+ *
+ * @cfr_user_info: Peer mac for upto 4 MU users
+ *
+ * @rtt_cfo_measurement : raw cfo data extracted from hardware, which is 14 bit
+ * signed number. The first bit used for sign representation and 13 bits for
+ * fractional part.
+ *
+ * @agc_gain_info0: Chain 0 & chain 1 agc gain information reported by PHY
+ *
+ * @agc_gain_info1: Chain 2 & chain 3 agc gain information reported by PHY
+ *
+ * @agc_gain_info2: Chain 4 & chain 5 agc gain information reported by PHY
+ *
+ * @agc_gain_info3: Chain 6 & chain 7 agc gain information reported by PHY
+ *
+ * @rx_start_ts: Rx packet timestamp, the time the first L-STF ADC sample
+ * arrived at Rx antenna.
+ *
+ * @mcs_rate: Indicates the mcs/rate in which packet is received.
+ * If HT,
+ *    0-7: MCS0-MCS7
+ * If VHT,
+ *    0-9: MCS0 to MCS9
+ * If HE,
+ *    0-11: MCS0 to MCS11,
+ *    12-13: 4096QAM,
+ *    14-15: reserved
+ * If Legacy,
+ *    0: 48 Mbps
+ *    1: 24 Mbps
+ *    2: 12 Mbps
+ *    3: 6 Mbps
+ *    4: 54 Mbps
+ *    5: 36 Mbps
+ *    6: 18 Mbps
+ *    7: 9 Mbps
+ *
+ * @gi_type: Indicates the gaurd interval.
+ *    0: 0.8 us
+ *    1: 0.4 us
+ *    2: 1.6 us
+ *    3: 3.2 us
+ */
+struct hal_rx_ppdu_cfr_info {
+	bool bb_captured_channel;
+	bool bb_captured_timeout;
+	uint8_t bb_captured_reason;
+	bool rx_location_info_valid;
+	uint8_t chan_capture_status;
+	uint8_t rtt_che_buffer_pointer_high8;
+	uint32_t rtt_che_buffer_pointer_low32;
+	struct hal_rx_ppdu_cfr_user_info cfr_user_info[HAL_MAX_UL_MU_USERS];
+	int16_t rtt_cfo_measurement;
+	uint32_t agc_gain_info0;
+	uint32_t agc_gain_info1;
+	uint32_t agc_gain_info2;
+	uint32_t agc_gain_info3;
+	uint32_t rx_start_ts;
+	uint32_t mcs_rate;
+	uint32_t gi_type;
+};
+#else
+struct hal_rx_ppdu_cfr_info {};
+#endif
+
+struct mon_rx_info {
+	uint8_t  qos_control_info_valid;
+	uint16_t qos_control;
+	uint8_t mac_addr1_valid;
+	uint8_t mac_addr1[QDF_MAC_ADDR_SIZE];
+	uint32_t user_id;
+};
+
+struct mon_rx_user_info {
+	uint16_t qos_control;
+	uint8_t qos_control_info_valid;
+};
+
 struct hal_rx_ppdu_info {
 	struct hal_rx_ppdu_common_info com_info;
 	struct mon_rx_status rx_status;
 	struct mon_rx_user_status rx_user_status[HAL_MAX_UL_MU_USERS];
+	struct mon_rx_info rx_info;
+	struct mon_rx_user_info rx_user_info[HAL_MAX_UL_MU_USERS];
 	struct hal_rx_msdu_payload_info msdu_info;
 	struct hal_rx_msdu_payload_info fcs_ok_msdu_info;
 	struct hal_rx_nac_info nac_info;
@@ -497,11 +675,24 @@ struct hal_rx_ppdu_info {
 	uint32_t hdr_len;
 	/* MPDU FCS error */
 	bool fcs_err;
+	/* Id to indicate how to process mpdu */
+	uint8_t sw_frame_group_id;
 	struct hal_rx_ppdu_msdu_info rx_msdu_info[HAL_MAX_UL_MU_USERS];
-	/* first msdu payload for all mpdus in ppdu */
-	struct hal_rx_msdu_payload_info ppdu_msdu_info[HAL_RX_MAX_MPDU];
+	/* fcs passed mpdu count in rx monitor status buffer */
+	uint8_t fcs_ok_cnt;
+	/* fcs error mpdu count in rx monitor status buffer */
+	uint8_t fcs_err_cnt;
+	/* MPDU FCS passed */
+	bool is_fcs_passed;
+	/* first msdu payload for all mpdus in rx monitor status buffer */
+	struct hal_rx_msdu_payload_info ppdu_msdu_info[HAL_RX_MAX_MPDU_H_PER_STATUS_BUFFER];
 	/* evm info */
 	struct hal_rx_su_evm_info evm_info;
+	/**
+	 * Will be used to store ppdu info extracted from HW TLVs,
+	 * and for CFR correlation as well
+	 */
+	struct hal_rx_ppdu_cfr_info cfr_info;
 };
 
 static inline uint32_t
@@ -594,5 +785,4 @@ hal_clear_rx_status_done(uint8_t *rx_tlv)
 	*(uint32_t *)rx_tlv = 0;
 	return QDF_STATUS_SUCCESS;
 }
-
 #endif

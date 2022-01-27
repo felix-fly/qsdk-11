@@ -1319,13 +1319,23 @@ enum netdev_priv_flags {
 	IFF_OPENVSWITCH			= 1<<22,
 	IFF_L3MDEV_SLAVE		= 1<<23,
 	IFF_NO_IP_ALIGN			= 1<<24,
-	IFF_TUN_TAP			= 1<<25,
-	IFF_PPP_L2TPV2			= 1<<26,
-	IFF_PPP_L2TPV3			= 1<<27,
-	IFF_PPP_PPTP			= 1<<28,
-	IFF_GRE_V4_TAP			= 1<<29,
-	IFF_GRE_V6_TAP			= 1<<30,
-	IFF_IFB				= 1<<31,
+};
+
+/**
+ * enum netdev_priv_flags_ext - &struct net_device priv_flags_ext
+ *
+ * These flags are used to check for device type and can be
+ * set and used by the drivers
+ *
+ */
+enum netdev_priv_flags_ext {
+	IFF_EXT_TUN_TAP			= 1<<0,
+	IFF_EXT_PPP_L2TPV2		= 1<<1,
+	IFF_EXT_PPP_L2TPV3		= 1<<2,
+	IFF_EXT_PPP_PPTP		= 1<<3,
+	IFF_EXT_GRE_V4_TAP		= 1<<4,
+	IFF_EXT_GRE_V6_TAP		= 1<<5,
+	IFF_EXT_IFB			= 1<<6,
 };
 
 #define IFF_802_1Q_VLAN			IFF_802_1Q_VLAN
@@ -1353,7 +1363,6 @@ enum netdev_priv_flags {
 #define IFF_OPENVSWITCH			IFF_OPENVSWITCH
 #define IFF_L3MDEV_SLAVE		IFF_L3MDEV_SLAVE
 #define IFF_NO_IP_ALIGN			IFF_NO_IP_ALIGN
-#define IFF_TUN_TAP			IFF_TUN_TAP
 
 /**
  *	struct net_device - The DEVICE structure.
@@ -1421,6 +1430,8 @@ enum netdev_priv_flags {
  *	@flags:		Interface flags (a la BSD)
  *	@priv_flags:	Like 'flags' but invisible to userspace,
  *			see if.h for the definitions
+ *	@prirv_flags_ext:	Extension for 'priv_flags'
+ *
  *	@gflags:	Global flags ( kept as legacy )
  *	@padded:	How much padding added by alloc_netdev()
  *	@operstate:	RFC2863 operstate
@@ -1643,6 +1654,7 @@ struct net_device {
 
 	unsigned int		flags;
 	unsigned int		priv_flags;
+	unsigned int		priv_flags_ext;
 
 	unsigned short		gflags;
 	unsigned short		padded;
@@ -3986,7 +3998,7 @@ static inline bool netif_is_ovs_master(const struct net_device *dev)
 
 static inline bool netif_is_ifb_dev(const struct net_device *dev)
 {
-	return dev->priv_flags & IFF_IFB;
+	return dev->priv_flags_ext & IFF_EXT_IFB;
 }
 
 /* This device needs to keep skb dst for qdisc enqueue or ndo_start_xmit() */

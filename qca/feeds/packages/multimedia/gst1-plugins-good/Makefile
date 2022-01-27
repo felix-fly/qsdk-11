@@ -124,7 +124,6 @@ CONFIGURE_ARGS += \
 
 EXTRA_LDFLAGS+= \
 	-Wl,-rpath-link=$(STAGING_DIR)/usr/lib \
-	$(TOOLCHAIN_DIR)/lib/libm.a \
 	$(if $(ICONV_FULL),-liconv) \
 
 

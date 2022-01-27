@@ -28,8 +28,8 @@ int fuseipq(uint32_t address)
 	fuseip.address = address;
 	fuseip.status = (uint32_t)&fuse_status;
 
-	ret = scm_call(SCM_SVC_FUSE, TZ_BLOW_FUSE_SECDAT,
-			&fuseip, sizeof(fuseip), NULL, 0);
+	ret = qca_scm_fuseipq(SCM_SVC_FUSE, TZ_BLOW_FUSE_SECDAT,
+			&fuseip, sizeof(fuseip));
 	if (ret || fuse_status)
 		printf("%s: Error in QFPROM write (%d, %d)\n",
 			__func__, ret, fuse_status);

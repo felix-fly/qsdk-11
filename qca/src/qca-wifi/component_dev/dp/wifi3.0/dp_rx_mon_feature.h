@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -66,12 +66,25 @@ dp_rx_mon_enh_capture_process(struct dp_pdev *pdev, uint32_t tlv_status,
 
 /*
  * dp_config_enh_rx_capture()- API to enable/disable enhanced rx capture
- * @pdev_handle: DP_PDEV handle
+ * @pdev: DP_PDEV handle
  * @val: user provided value
  *
  * Return: 0 for success. nonzero for failure.
  */
 QDF_STATUS
-dp_config_enh_rx_capture(struct cdp_pdev *pdev_handle, uint8_t val);
+dp_config_enh_rx_capture(struct dp_pdev *pdev, uint8_t val);
+
+/**
+ * dp_peer_set_rx_capture_enabled: Set rx_cap_enabled bit in peer
+ * @pdev: DP_PDEV handle
+ * @peer_handle: Peer handle
+ * @value: Enable/disable setting for rx_cap_enabled
+ * @mac_addr: peer mac address
+ *
+ * Return: status
+ */
+QDF_STATUS dp_peer_set_rx_capture_enabled(struct dp_pdev *pdev,
+					  struct dp_peer *peer_handle,
+					  bool value, uint8_t *mac_addr);
 #endif /* WLAN_RX_PKT_CAPTURE_ENH */
 #endif /* _DP_RX_MON_FEATURE_H_ */

@@ -2208,6 +2208,7 @@ void pci_pm_init(struct pci_dev *dev)
 
 	pmc &= PCI_PM_CAP_PME_MASK;
 	if (pmc) {
+		pmc = 0;
 		dev_printk(KERN_DEBUG, &dev->dev,
 			 "PME# supported from%s%s%s%s%s\n",
 			 (pmc & PCI_PM_CAP_PME_D0) ? " D0" : "",

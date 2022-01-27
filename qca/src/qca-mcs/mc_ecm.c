@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2015, 2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,14 +23,15 @@
 #include "mc_ecm.h"
 
 static mc_bridge_ipv4_update_callback_t __rcu mc_ipv4_event_cb = NULL;
-static mc_bridge_ipv6_update_callback_t __rcu mc_ipv6_event_cb = NULL;
 
-
+/* mc_bridge_if_source_filter
+ *	validate the source in the source filter list
+ */
 static int mc_bridge_if_source_filter(struct mc_mdb_entry *mdb, uint32_t ifindex, struct mc_ip *mc_source)
 {
 	struct mc_port_group *pg;
 	struct hlist_node *pgh;
-	int i;
+	int i = 0;
 
 	/*no bridge port joining*/
 	if (hlist_empty(&mdb->pslist))
@@ -40,7 +41,7 @@ static int mc_bridge_if_source_filter(struct mc_mdb_entry *mdb, uint32_t ifindex
 		struct mc_fdb_group *fg;
 		struct hlist_node *fgh;
 
-		if (ifindex != ((struct net_bridge_port *)pg->port)->dev->ifindex)
+		if (ifindex != ((struct net_device *)pg->port)->ifindex)
 			continue;
 
 		/*no client joining*/
@@ -59,7 +60,7 @@ static int mc_bridge_if_source_filter(struct mc_mdb_entry *mdb, uint32_t ifindex
 				u_int32_t ip4 = mc_source->u.ip4;
 				u_int32_t *srcs = (u_int32_t *) fg->a.srcs;
 
-				for (i = 0; i < fg->a.nsrcs; i++) {
+				for (; i < fg->a.nsrcs; i++) {
 					if (srcs[i] == ip4)
 						break;
 				}
@@ -69,7 +70,7 @@ static int mc_bridge_if_source_filter(struct mc_mdb_entry *mdb, uint32_t ifindex
 				struct in6_addr *ip6 = &mc_source->u.ip6;
 				struct in6_addr *srcs = (struct in6_addr *)fg->a.srcs;
 
-				for (i = 0; i < fg->a.nsrcs; i++) {
+				for (; i < fg->a.nsrcs; i++) {
 					if (!ipv6_addr_cmp(&srcs[i], ip6))
 						break;
 				}
@@ -87,6 +88,9 @@ static int mc_bridge_if_source_filter(struct mc_mdb_entry *mdb, uint32_t ifindex
 
 }
 
+/* __mc_bridge_get_ifs
+ *	get the port list for a given group and source
+ */
 static int __mc_bridge_get_ifs(struct net_device *brdev, struct mc_ip *mc_group,
 			       struct mc_ip *mc_source, uint32_t max_dst, uint32_t dst_dev[])
 {
@@ -115,12 +119,12 @@ static int __mc_bridge_get_ifs(struct net_device *brdev, struct mc_ip *mc_group,
 		if (mc_bridge_if_source_filter(mdb, mdb->flood_ifindex[i], mc_source)) {
 
 			if (mc_group->pro == htons(ETH_P_IP))
-				MC_PRINT("Group "MC_IP4_STR" Source "MC_IP4_STR"  ignored for port %d\n",
-					MC_IP4_FMT((u8 *) &mc_group->u.ip4), MC_IP4_FMT((u8 *) &mc_source->u.ip4), mdb->flood_ifindex[i]);
+				MC_PRINT("Group %pI4 Source %pI4 ignored for port %d\n",
+					&mc_group->u.ip4, &mc_source->u.ip4, mdb->flood_ifindex[i]);
 #ifdef MC_SUPPORT_MLD
 			else
-				MC_PRINT("Group "MC_IP6_STR" Source "MC_IP6_STR"  ignored for port %d\n",
-					MC_IP6_FMT((__be16 *) &mc_group->u.ip6), MC_IP6_FMT((__be16 *) &mc_source->u.ip6), mdb->flood_ifindex[i]);
+				MC_PRINT("Group %pI6 Source %pI6  ignored for port %d\n",
+					&mc_group->u.ip6, &mc_source->u.ip6, mdb->flood_ifindex[i]);
 #endif
 			continue;
 		}
@@ -141,6 +145,9 @@ static int __mc_bridge_get_ifs(struct net_device *brdev, struct mc_ip *mc_group,
 
 }
 
+/* mc_bridge_ipv4_get_if
+ *	get the port list for a group
+ */
 int mc_bridge_ipv4_get_if(struct net_device *brdev, __be32 origin, __be32 group,
 			 uint32_t max_dst, uint32_t dst_dev[])
 {
@@ -164,6 +171,9 @@ int mc_bridge_ipv4_get_if(struct net_device *brdev, __be32 origin, __be32 group,
 }
 EXPORT_SYMBOL(mc_bridge_ipv4_get_if);
 
+/* mc_bridge_ipv4_update_callback_register
+ *	register the callback for the group change event
+ */
 int mc_bridge_ipv4_update_callback_register(mc_bridge_ipv4_update_callback_t snoop_event_cb)
 {
 	mc_bridge_ipv4_update_callback_t event_cb;
@@ -179,6 +189,9 @@ int mc_bridge_ipv4_update_callback_register(mc_bridge_ipv4_update_callback_t sno
 }
 EXPORT_SYMBOL(mc_bridge_ipv4_update_callback_register);
 
+/* mc_bridge_ipv4_update_callback_deregister
+ *	unregister the callback
+ */
 int mc_bridge_ipv4_update_callback_deregister(void)
 {
 	rcu_assign_pointer(mc_ipv4_event_cb, NULL);
@@ -187,12 +200,21 @@ int mc_bridge_ipv4_update_callback_deregister(void)
 }
 EXPORT_SYMBOL(mc_bridge_ipv4_update_callback_deregister);
 
+/* mc_bridge_ipv4_update_callback_get
+ *	get the event cb
+ */
 mc_bridge_ipv4_update_callback_t mc_bridge_ipv4_update_callback_get(void)
 {
 	return rcu_dereference(mc_ipv4_event_cb);
 }
 
 #ifdef MC_SUPPORT_MLD
+
+static mc_bridge_ipv6_update_callback_t __rcu mc_ipv6_event_cb = NULL;
+
+/* mc_bridge_ipv6_get_if
+ *	get the port list for a given ipv6 group
+ */
 int mc_bridge_ipv6_get_if(struct net_device *brdev, struct in6_addr *origin, struct in6_addr *group,
 						  uint32_t max_dst, uint32_t dst_dev[])
 {
@@ -216,6 +238,9 @@ int mc_bridge_ipv6_get_if(struct net_device *brdev, struct in6_addr *origin, str
 }
 EXPORT_SYMBOL(mc_bridge_ipv6_get_if);
 
+/* mc_bridge_ipv6_update_callback_register
+ *	register for the ipv6 group change event
+ */
 int mc_bridge_ipv6_update_callback_register(mc_bridge_ipv6_update_callback_t snoop_event_cb)
 {
 	mc_bridge_ipv6_update_callback_t event_cb;
@@ -231,6 +256,9 @@ int mc_bridge_ipv6_update_callback_register(mc_bridge_ipv6_update_callback_t sno
 }
 EXPORT_SYMBOL(mc_bridge_ipv6_update_callback_register);
 
+/* mc_bridge_ipv6_update_callback_deregister
+ *	unregister the ipv6 group event cb
+ */
 int mc_bridge_ipv6_update_callback_deregister(void)
 {
 	rcu_assign_pointer(mc_ipv6_event_cb, NULL);
@@ -238,6 +266,9 @@ int mc_bridge_ipv6_update_callback_deregister(void)
 }
 EXPORT_SYMBOL(mc_bridge_ipv6_update_callback_deregister);
 
+/* mc_bridge_ipv6_update_callback_get
+ *	get ipv6 event cb
+ */
 mc_bridge_ipv6_update_callback_t mc_bridge_ipv6_update_callback_get(void)
 {
 	return rcu_dereference(mc_ipv6_event_cb);

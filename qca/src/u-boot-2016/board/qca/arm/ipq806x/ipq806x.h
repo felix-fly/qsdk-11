@@ -154,6 +154,8 @@ static inline int gmac_cfg_is_valid(ipq_gmac_board_cfg_t *cfg)
 
 __weak void aquantia_phy_reset_init_done(void) {}
 __weak void aquantia_phy_reset_init(void) {}
+__weak void qgic_init(void) {}
+__weak void handle_noc_err(void) {}
 
 struct smem_ram_ptn {
 	char name[16];

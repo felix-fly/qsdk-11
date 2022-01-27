@@ -607,7 +607,8 @@ source "drivers/char/xillybus/Kconfig"
 
 config MSM_ADSPRPC
 	tristate "QTI ADSP RPC driver"
-	depends on MSM_GLINK && ION_MSM
+	depends on (MSM_GLINK || RPMSG) && ION_MSM
+	select QTI_ADSPRPC_LOADER
 	default n
 	help
           Provides a communication mechanism that allows clients to

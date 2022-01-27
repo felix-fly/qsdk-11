@@ -73,6 +73,8 @@ struct spi_flash {
 	struct udevice *dev;
 #endif
 	const char *name;
+	u32 jedec;
+	u16 ext_jedec;
 	u8 dual_flash;
 	u8 shift;
 	u8 addr_width;

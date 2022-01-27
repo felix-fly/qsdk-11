@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2016,2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016,2018-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -38,15 +38,16 @@
  * @brief IPv6 rule
  */
 struct nss_nlipv6_rule {
-	struct nss_nlcmn cm;			/**< common message header */
+	struct nss_nlcmn cm;				/**< common message header */
 
-	char flow_ifname[IFNAMSIZ];		/**< ingress interface name */
-	char return_ifname[IFNAMSIZ];		/**< egress interface name */
+	char flow_ifname[IFNAMSIZ];			/**< ingress interface name */
+	char return_ifname[IFNAMSIZ];			/**< egress interface name */
 
-	enum nss_nl_iftype flow_iftype;		/**< ingress interface type */
-	enum nss_nl_iftype return_iftype;	/**< egress interface type */
+	enum nss_nl_iftype flow_iftype;			/**< ingress interface type */
+	enum nss_nl_iftype return_iftype;		/**< egress interface type */
 
-	struct nss_ipv6_msg nim;		/**< rule message */
+	struct nss_ipv6_msg nim;			/**< rule message */
+	struct nss_ipv6_stats_notification stats;	/**< NSS statistics */
 };
 
 /**

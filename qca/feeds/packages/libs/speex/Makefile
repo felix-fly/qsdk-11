@@ -65,10 +65,7 @@ define Build/Configure
 	$(call Build/Configure/Default, \
 		--enable-shared \
 		--enable-static \
-		--enable-fixed-point \
 		--disable-oggtest \
-		--disable-float-api \
-		--disable-vbr \
 		--with-ogg=$(STAGING_DIR)/usr \
 	)
 endef

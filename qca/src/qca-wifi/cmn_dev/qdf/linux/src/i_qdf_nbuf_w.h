@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -93,14 +93,14 @@
 		(QDF_NBUF_CB_RX_FLOW_TAG((skb)))
 
 /**
- * qdf_nbuf_cb_update_peer_local_id() - update peer local id in skb cb
- * @skb: skb pointer whose cb is updated with peer local id information
- * @peer_local_id: peer local id to be update in cb
+ * qdf_nbuf_cb_update_vdev_id() - update vdev id in skb cb
+ * @skb: skb pointer whose cb is updated with vdev id information
+ * @vdev_id: vdev id to be updated in cb
  *
  * Return: void
  */
-static inline void qdf_nbuf_cb_update_peer_local_id(struct sk_buff *skb,
-						    uint16_t peer_local_id)
+static inline void
+qdf_nbuf_cb_update_vdev_id(struct sk_buff *skb, uint8_t vdev_id)
 {
 	/* Does not apply to WIN */
 }
@@ -134,4 +134,30 @@ static inline uint8_t *__qdf_nbuf_pull_head(struct sk_buff *skb, size_t size)
 static inline void qdf_nbuf_init_replenish_timer(void) {}
 static inline void qdf_nbuf_deinit_replenish_timer(void) {}
 
+/**
+ * __qdf_nbuf_dma_inv_range() - nbuf invalidate
+ * @buf_start: from
+ * @buf_end: to address to invalidate
+ *
+ * Return: none
+ */
+#if (defined(__LINUX_ARM_ARCH__))
+static inline void
+__qdf_nbuf_dma_inv_range(const void *buf_start, const void *buf_end)
+{
+	dmac_inv_range(buf_start, buf_end);
+}
+#elif defined(__LINUX_MIPS32_ARCH__) || defined(__LINUX_MIPS64_ARCH__)
+static inline void
+__qdf_nbuf_dma_inv_range(const void *buf_start, const void *buf_end)
+{
+	dma_cache_inv((unsigned long)buf_start,
+		      (unsigned long)(buf_end - buf_start));
+}
+#else
+static inline void
+__qdf_nbuf_dma_inv_range(const void *buf_start, const void *buf_end)
+{
+}
+#endif
 #endif /*_I_QDF_NBUF_W_H */

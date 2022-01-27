@@ -8,7 +8,7 @@
  * in the DNS response as net_server_ip. This can then be used for any other
  * network related activities.
  *
- * The packet handling is partly based on TADNS, original copyrights
+ *  The packet handling is partly based on TADNS, original copyrights
  * follow below.
  *
  */

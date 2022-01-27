@@ -15,6 +15,29 @@
 
 #include <linux/device.h>
 #include <linux/sched.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/types.h>
+#include <linux/device.h>
+#include <linux/io.h>
+#include <linux/err.h>
+#include <linux/fs.h>
+#include <linux/miscdevice.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/dma-mapping.h>
+#include <linux/spinlock.h>
+#include <linux/pm_runtime.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+#include <linux/amba/bus.h>
+#include <asm/cacheflush.h>
+#include <linux/msm-sps.h>
+#include <linux/usb_bam.h>
+#include <linux/usb/usb_qdss.h>
+#include <soc/qcom/memory_dump.h>
 
 /* Peripheral id registers (0xFD0-0xFEC) */
 #define CORESIGHT_PERIPHIDR4	0xfd0
@@ -37,6 +60,13 @@
 #define PFT_ARCH_V1_1		0x31
 
 #define CORESIGHT_UNLOCK	0xc5acce55
+
+#define TMC_ETR_SG_ENT_TO_BLK(phys_pte)	(((phys_addr_t)phys_pte >> 4)	\
+					 << PAGE_SHIFT)
+#define Q6STREAM_SIZE	(1024 * 1024)
+#define TOTAL_PAGES_PER_DATA	(Q6STREAM_SIZE / PAGE_SIZE)
+#define PAGES_PER_DATA	8
+#define COMP_PAGES_PER_DATA (TOTAL_PAGES_PER_DATA - PAGES_PER_DATA)
 
 extern struct bus_type coresight_bustype;
 
@@ -225,6 +255,110 @@ struct coresight_ops {
 	const struct coresight_ops_link *link_ops;
 	const struct coresight_ops_source *source_ops;
 };
+
+enum tmc_config_type {
+	TMC_CONFIG_TYPE_ETB,
+	TMC_CONFIG_TYPE_ETR,
+	TMC_CONFIG_TYPE_ETF,
+};
+
+enum tmc_mode {
+	TMC_MODE_CIRCULAR_BUFFER,
+	TMC_MODE_SOFTWARE_FIFO,
+	TMC_MODE_HARDWARE_FIFO,
+};
+
+enum tmc_mem_intf_width {
+	TMC_MEM_INTF_WIDTH_32BITS	= 0x2,
+	TMC_MEM_INTF_WIDTH_64BITS	= 0x3,
+	TMC_MEM_INTF_WIDTH_128BITS	= 0x4,
+	TMC_MEM_INTF_WIDTH_256BITS	= 0x5,
+};
+
+enum tmc_etr_mem_type {
+	TMC_ETR_MEM_TYPE_CONTIG,
+	TMC_ETR_MEM_TYPE_SG,
+};
+
+static const char * const str_tmc_etr_mem_type[] = {
+	[TMC_ETR_MEM_TYPE_CONTIG]	= "contig",
+	[TMC_ETR_MEM_TYPE_SG]		= "sg",
+};
+
+enum tmc_etr_out_mode {
+	TMC_ETR_OUT_MODE_NONE,
+	TMC_ETR_OUT_MODE_MEM,
+	TMC_ETR_OUT_MODE_USB,
+	TMC_ETR_OUT_MODE_Q6MEM,
+	TMC_ETR_OUT_MODE_Q6MEM_STREAM,
+};
+
+/**
+ * struct tmc_drvdata - specifics associated to an TMC component
+ * @base:	memory mapped base address for this component.
+ * @dev:	the device entity associated to this component.
+ * @csdev:	component vitals needed by the framework.
+ * @miscdev:	specifics to handle "/dev/xyz.tmc" entry.
+ * @spinlock:	only one at a time pls.
+ * @read_count:	manages preparation of buffer for reading.
+ * @buf:	area of memory where trace data get sent.
+ * @paddr:	DMA start location in RAM.
+ * @vaddr:	virtual representation of @paddr.
+ * @size:	@buf size.
+ * @enable:	this TMC is being used.
+ * @config_type: TMC variant, must be of type @tmc_config_type.
+ * @trigger_cntr: amount of words to store after a trigger.
+ * @reg_data:	MSM memory dump data to store TMC registers.
+ * @buf_data:	MSM memory dump data to store ETF/ETB buffer.
+ */
+struct tmc_drvdata {
+	void __iomem		*base;
+	struct device		*dev;
+	struct coresight_device	*csdev;
+	struct miscdevice	miscdev;
+	spinlock_t		spinlock;
+	int			read_count;
+	bool			reading;
+	bool			aborting;
+	char			*buf;
+	dma_addr_t		paddr;
+	void __iomem		*vaddr;
+	u32			size;
+	struct mutex		mem_lock;
+	u32			mem_size;
+	bool			enable;
+	bool			sticky_enable;
+	enum tmc_config_type	config_type;
+	u32			trigger_cntr;
+	enum tmc_etr_mem_type	mem_type;
+	enum tmc_etr_mem_type	memtype;
+	u32			delta_bottom;
+	int			sg_blk_num;
+	enum tmc_etr_out_mode	out_mode;
+	struct usb_qdss_ch	*usbch;
+	struct tmc_etr_bam_data	*bamdata;
+	bool			enable_to_bam;
+	struct msm_dump_data	reg_data;
+	struct msm_dump_data	buf_data;
+	struct coresight_cti	*cti_flush;
+	struct coresight_cti	*cti_reset;
+	char			*reg_buf;
+	bool			force_reg_dump;
+	bool			is_emulation;
+	bool			dump_reg;
+	void __iomem		*q6_etr_vaddr;
+	dma_addr_t		q6_etr_paddr;
+	u32			q6_size;
+	int			byte_cntr_irq;
+	int			occupied_pingpong;
+	int			current_pingpong;
+	struct work_struct	qld_stream_work;
+	struct socket		*qld_stream_sock;
+	atomic_t		seq_no;
+	atomic_t		completed_seq_no;
+};
+
+
 
 #ifdef CONFIG_CORESIGHT
 extern struct coresight_device *

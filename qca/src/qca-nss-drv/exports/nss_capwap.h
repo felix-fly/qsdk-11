@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -31,6 +31,49 @@
  * Size of the headroom required for CAPWAP packets.
  */
 #define NSS_CAPWAP_HEADROOM 256
+
+/**
+ * nss_capwap_stats_encap_types
+ *	CAPWAP encapsulation statistics.
+ */
+enum nss_capwap_stats_encap_types {
+	NSS_CAPWAP_STATS_ENCAP_TX_PKTS,
+	NSS_CAPWAP_STATS_ENCAP_TX_BYTES,
+	NSS_CAPWAP_STATS_ENCAP_TX_SEGMENTS,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_SG_REF,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_VER_MISMATCH,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_UNALIGN,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_HEADER_ROOM,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_DTLS,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_NWIRELESS,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_QUEUE_FULL,
+	NSS_CAPWAP_STATS_ENCAP_TX_DROP_MEM_FAIL,
+	NSS_CAPWAP_STATS_ENCAP_FAST_MEM,
+	NSS_CAPWAP_STATS_ENCAP_MAX
+};
+
+/**
+ * nss_capwap_stats_decap_types
+ *	CAPWAP decapsulation statistics.
+ */
+enum nss_capwap_stats_decap_types {
+	NSS_CAPWAP_STATS_DECAP_RX_PKTS,
+	NSS_CAPWAP_STATS_DECAP_RX_BYTES,
+	NSS_CAPWAP_STATS_DECAP_RX_DTLS_PKTS,
+	NSS_CAPWAP_STATS_DECAP_RX_SEGMENTS,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_OVERSIZE,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_FRAG_TIMEOUT,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_DUP_FRAG,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_FRAG_GAP,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_QUEUE_FULL,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_N2H_QUEUE_FULL,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_MEM_FAIL,
+	NSS_CAPWAP_STATS_DECAP_RX_DROP_CHECKSUM,
+	NSS_CAPWAP_STATS_DECAP_RX_MALFORMED,
+	NSS_CAPWAP_STATS_DECAP_FAST_MEM,
+	NSS_CAPWAP_STATS_DECAP_MAX
+};
 
 /**
  * nss_capwap_msg_type
@@ -96,8 +139,8 @@ struct nss_capwap_stats_msg {
 
 	uint32_t rx_frag_timeout_drops;
 			/**< Packets dropped because of a reassembly timeout. */
-	uint32_t rx_queue_full_drops;
-			/**< Packets dropped because the queue is full. */
+	uint32_t rx_n2h_drops;
+			/**< Packets dropped because of error in packet processing. */
 	uint32_t rx_n2h_queue_full_drops;
 			/**< Packets dropped because the NSS-to-host queue is full. */
 	uint32_t rx_csum_drops;
@@ -255,6 +298,14 @@ struct nss_capwap_flow_rule_msg {
 };
 
 /**
+ * nss_capwap_enable_tunnel_msg
+ *	Structure to update sibling interface number.
+ */
+struct nss_capwap_enable_tunnel_msg {
+	uint32_t sibling_if_num; /**< Sibling interface number. */
+};
+
+/**
  * nss_capwap_msg
  *	Data for sending and receiving CAPWAP messages.
  */
@@ -279,6 +330,8 @@ struct nss_capwap_msg {
 				/**< Flow rule add message. */
 		struct nss_capwap_flow_rule_msg flow_rule_del;
 				/**< Flow rule delete message. */
+		struct nss_capwap_enable_tunnel_msg enable_tunnel;
+				/**< Enable tunnel message. */
 	} msg;			/**< Message payload. */
 };
 
@@ -315,8 +368,8 @@ struct nss_capwap_tunnel_stats {
 
 	uint64_t rx_frag_timeout_drops;
 			/**< Packets dropped because of a reassembly timeout. */
-	uint64_t rx_queue_full_drops;
-			/**< Packets dropped because the queue is full. */
+	uint64_t rx_n2h_drops;
+			/**< Packets dropped because of error in processing the packet. */
 	uint64_t rx_n2h_queue_full_drops;
 			/**< Packets dropped because the NSS-to-host queue is full. */
 	uint64_t rx_csum_drops;
@@ -331,6 +384,7 @@ struct nss_capwap_tunnel_stats {
 	/*
 	 * Tx/encap stats
 	 */
+	uint64_t tx_dropped_inner;	/**<Packets dropped due to inflow queue full. */
 	uint64_t tx_segments;		/**< Number of segments or fragments. */
 	uint64_t tx_queue_full_drops;
 			/**< Packets dropped because the queue is full. */
@@ -353,6 +407,18 @@ struct nss_capwap_tunnel_stats {
 	uint32_t fast_mem;
 			/**< Set to 1 when tunnel is operating in fast memory. */
 };
+
+/**
+ * nss_capwap_stats_notification
+ *	CAPWAP statistics structure.
+ */
+struct nss_capwap_stats_notification {
+	uint32_t core_id;			/**< Core ID. */
+	uint32_t if_num;			/**< Interface number. */
+	struct nss_capwap_tunnel_stats stats;	/**< Per-tunnel statistics. */
+};
+
+#ifdef __KERNEL__ /* only kernel will use. */
 
 /**
  * Callback function for receiving CAPWAP tunnel data.
@@ -557,9 +623,37 @@ extern void nss_capwap_init(void);
  */
 extern void nss_capwap_msg_init(struct nss_capwap_msg *ncm, uint16_t if_num, uint32_t type, uint32_t len,
 								nss_capwap_msg_callback_t cb, void *app_data);
+/**
+ * nss_capwap_stats_register_notifier
+ *	Registers a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_capwap_stats_register_notifier(struct notifier_block *nb);
+
+/**
+ * nss_capwap_stats_unregister_notifier
+ *	Deregisters a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_capwap_stats_unregister_notifier(struct notifier_block *nb);
 
 /**
  * @}
  */
 
+#endif /* __KERNEL__ */
 #endif /* __NSS_CAPWAP_H */

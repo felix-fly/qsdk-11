@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -250,9 +250,9 @@ static void __nss_data_plane_register(struct nss_ctx_instance *nss_ctx)
 
 	for (i = 0; i < NSS_DATA_PLANE_GMAC_MAX_INTERFACES; i++) {
 		if (!nss_data_plane_register_to_nss_gmac(nss_ctx, i)) {
-			nss_warning("%p: Register data plane failed for gmac:%d\n", nss_ctx, i);
+			nss_warning("%px: Register data plane failed for gmac:%d\n", nss_ctx, i);
 		} else {
-			nss_info("%p: Register data plan to gmac:%d success\n", nss_ctx, i);
+			nss_info("%px: Register data plan to gmac:%d success\n", nss_ctx, i);
 		}
 	}
 }

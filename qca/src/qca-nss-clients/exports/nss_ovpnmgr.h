@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -45,9 +45,8 @@
  */
 #define NSS_OVPNMGR_TUN_DATA_V1       6		/* Data version 1 packet. */
 #define NSS_OVPNMGR_TUN_DATA_V2       9		/* Data version 2 packet. */
-#define NSS_OVPNMGR_TUN_KEY_ID_MASK   0x07	/* Key ID mask, lower 3 bits. */
-#define NSS_OVPNMGR_TUN_OPCODE_SHIFT  3		/* Opcode shift, upper 5 bits. */
-#define NSS_OVPNMGR_TUN_PEER_ID_SHIFT 24	/* Peer ID shift, lower 24 bits. */
+#define NSS_OVPNMGR_TUN_KEY_ID_SHIFT  24	/* Key ID shift, lower 3 bits - 26-24. */
+#define NSS_OVPNMGR_TUN_OPCODE_SHIFT  27	/* Opcode shift, upper 5 bits - 31-27. */
 #define NSS_OVPNMGR_TUN_PEER_ID_MASK  0xFFFFFF	/* Peer ID mask. */
 
 

@@ -276,4 +276,14 @@ config IPV6_PIMSM_V2
 	  Support for IPv6 PIM multicast routing protocol PIM-SMv2.
 	  If unsure, say N.
 
+config MAP_E_SUPPORT
+	bool "IPv6: MAP (RFC 7597) support"
+	default n
+	depends on IPV6
+	---help---
+	  MAP-E is a mechanism for transporting IPv4 packets across
+	  an IPv6 network using IP encapsulation.
+
+	  If unsure, say N.
+
 endif # IPV6

@@ -169,6 +169,7 @@ enum {
 #define SOFT_RESET_DATA                           BIT(2)
 #define SDHCI_RESET_MAX_TIMEOUT                   0x64
 #define SDHCI_1_8_VOL_SET                         BIT(3)
+#define SDHCI_POWER_ON				0x01
 
 /*
  * Interrupt related

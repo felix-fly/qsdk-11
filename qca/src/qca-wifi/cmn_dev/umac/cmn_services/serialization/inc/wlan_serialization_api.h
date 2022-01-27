@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -80,6 +80,7 @@ enum wlan_serialization_cb_reason {
  * @is_cac_in_progress: boolean to check the cac status
  * @is_tdls_in_progress: boolean to check the tdls status
  * @is_mlme_op_in_progress: boolean to check the mlme op status
+ * @is_scan_for_connect: boolean to check if scan for connect
  *
  * This information is needed for scan command from other components
  * to apply the rules and check whether the cmd is allowed or not
@@ -88,6 +89,7 @@ struct wlan_serialization_scan_info {
 	bool is_cac_in_progress;
 	bool is_tdls_in_progress;
 	bool is_mlme_op_in_progress;
+	bool is_scan_for_connect;
 };
 
 /**
@@ -129,7 +131,8 @@ typedef QDF_STATUS
  * Return: None
  */
 typedef void (*wlan_serialization_comp_info_cb)(struct wlan_objmgr_vdev *vdev,
-		union wlan_serialization_rules_info *comp_info);
+		union wlan_serialization_rules_info *comp_info,
+		struct wlan_serialization_command *cmd);
 
 /**
  * wlan_serialization_apply_rules_cb() - callback per command to apply rules
@@ -161,12 +164,6 @@ typedef QDF_STATUS (*wlan_ser_umac_cmd_cb)(void *umac_cmd);
  * enum wlan_umac_cmd_id - Command Type
  * @WLAN_SER_CMD_SCAN: Scan command
  * @WLAN_SER_CMD_NONSCAN: Non-scan command
- * @WLAN_SER_CMD_HDD_ISSUE_REASSOC_SAME_AP: HDD Reassoc cmd
- * @WLAN_SER_CMD_SME_ISSUE_REASSOC_SAME_AP: SME Reassoc cmd
- * @WLAN_SER_CMD_SME_ISSUE_DISASSOC_FOR_HANDOFF: SME Disassoc cmd
- * @WLAN_SER_CMD_SME_ISSUE_ASSOC_TO_SIMILAR_AP: SME Assoc cmd
- * @WLAN_SER_CMD_FORCE_IBSS_LEAVE: IBSS leave AP cmd
- * @WLAN_SER_CMD_SME_ISSUE_FT_REASSOC: SME reassoc cmd
  * @WLAN_SER_CMD_FORCE_DISASSOC_STA: Force diassoc for STA vap
  * @WLAN_SER_CMD_FORCE_DEAUTH_STA: Force deauth for STA vap
  * @WLAN_SER_CMD_PERFORM_PRE_AUTH: Pre auth ops cmd
@@ -191,18 +188,15 @@ typedef QDF_STATUS (*wlan_ser_umac_cmd_cb)(void *umac_cmd);
  * @WLAN_SER_CMD_VDEV_DISCONNECT: Cmd to stop a STA VDEV
  * @WLAN_SER_CMD_VDEV_RESTART: Cmd to restart a VDEV
  * @WLAN_SER_CMD_PDEV_RESTART: Cmd to restart all VDEVs of a PDEV
+ * @WLAN_SER_CMD_PDEV_CSA_RESTART: Cmd to CSA restart all AP VDEVs of a PDEV
+ * @WLAN_SER_CMD_GET_DISCONNECT_STATS: Cmd to get peer stats on disconnection
+ * @WLAN_SER_CMD_VDEV_ROAM: Cmd to roam a STA VDEV
  */
 enum wlan_serialization_cmd_type {
 	/* all scan command before non-scan */
 	WLAN_SER_CMD_SCAN,
 	/* all non-scan command below */
 	WLAN_SER_CMD_NONSCAN,
-	WLAN_SER_CMD_HDD_ISSUE_REASSOC_SAME_AP,
-	WLAN_SER_CMD_SME_ISSUE_REASSOC_SAME_AP,
-	WLAN_SER_CMD_SME_ISSUE_DISASSOC_FOR_HANDOFF,
-	WLAN_SER_CMD_SME_ISSUE_ASSOC_TO_SIMILAR_AP,
-	WLAN_SER_CMD_FORCE_IBSS_LEAVE,
-	WLAN_SER_CMD_SME_ISSUE_FT_REASSOC,
 	WLAN_SER_CMD_FORCE_DISASSOC_STA,
 	WLAN_SER_CMD_FORCE_DEAUTH_STA,
 	WLAN_SER_CMD_PERFORM_PRE_AUTH,
@@ -227,6 +221,9 @@ enum wlan_serialization_cmd_type {
 	WLAN_SER_CMD_VDEV_DISCONNECT,
 	WLAN_SER_CMD_VDEV_RESTART,
 	WLAN_SER_CMD_PDEV_RESTART,
+	WLAN_SER_CMD_PDEV_CSA_RESTART,
+	WLAN_SER_CMD_GET_DISCONNECT_STATS,
+	WLAN_SER_CMD_VDEV_ROAM,
 	WLAN_SER_CMD_MAX
 };
 
@@ -235,6 +232,7 @@ enum wlan_serialization_cmd_type {
  * @WLAN_SER_CANCEL_SINGLE_SCAN: Cancel a single scan with a given ID
  * @WLAN_SER_CANCEL_PDEV_SCANS: Cancel all the scans on a given pdev
  * @WLAN_SER_CANCEL_VDEV_SCANS: Cancel all the scans on given vdev
+ * @WLAN_SER_CANCEL_VDEV_HOST_SCANS: Cancel all host scans on given vdev
  * @WLAN_SER_CANCEL_PDEV_NON_SCAN_CMD: Cancel all non scans on a given pdev
  * @WLAN_SER_CANCEL_VDEV_NON_SCAN_CMD: Cancel all non scans on a given vdev
  * @WLAN_SER_CANCEL_VDEV_NON_SCAN_CMD_TYPE: Cancel all non scans on a given vdev
@@ -247,6 +245,7 @@ enum wlan_serialization_cancel_type {
 	WLAN_SER_CANCEL_SINGLE_SCAN,
 	WLAN_SER_CANCEL_PDEV_SCANS,
 	WLAN_SER_CANCEL_VDEV_SCANS,
+	WLAN_SER_CANCEL_VDEV_HOST_SCANS,
 	WLAN_SER_CANCEL_PDEV_NON_SCAN_CMD,
 	WLAN_SER_CANCEL_VDEV_NON_SCAN_CMD,
 	WLAN_SER_CANCEL_VDEV_NON_SCAN_CMD_TYPE,
@@ -383,22 +382,6 @@ wlan_serialization_cancel_request(
  * Return: None
  */
 void wlan_serialization_remove_cmd(
-		struct wlan_serialization_queued_cmd_info *cmd);
-
-/**
- * wlan_serialization_flush_cmd() - Request to flush command
- * @cmd: Command information
- *
- * This API is used to flush a cmd sitting in the queue. It
- * simply flushes the cmd from the queue and does not call
- * any callbacks in between. If the request is for active
- * queue, and if the active queue becomes empty upon flush,
- * then it will pick the next pending cmd and put in the active
- * queue before returning.
- *
- * Return: None
- */
-void wlan_serialization_flush_cmd(
 		struct wlan_serialization_queued_cmd_info *cmd);
 
 /**
@@ -691,6 +674,17 @@ void wlan_serialization_purge_all_pending_cmd_by_vdev_id(
 					uint8_t vdev_id);
 
 /**
+ * wlan_serialization_purge_all_cmd_by_vdev_id() - Purge all scan and non scan
+ * commands for vdev id
+ * @pdev: pointer to pdev
+ * @vdev_id: vdev_id variable
+ *
+ * Return: none
+ */
+void wlan_serialization_purge_all_cmd_by_vdev_id(struct wlan_objmgr_pdev *pdev,
+						 uint8_t vdev_id);
+
+/**
  * wlan_serialization_purge_all_scan_cmd_by_vdev_id() - Purge all pending/active
  * scan commands for vdev id
  * @pdev: pointer to pdev
@@ -701,4 +695,14 @@ void wlan_serialization_purge_all_pending_cmd_by_vdev_id(
 void wlan_serialization_purge_all_scan_cmd_by_vdev_id(
 					struct wlan_objmgr_pdev *pdev,
 					uint8_t vdev_id);
+
+/**
+ * wlan_ser_vdev_queue_disable -Disable vdev specific serialization queue
+ * @vdev: Vdev Object
+ *
+ * This function disables the serialization for the vdev queue
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS wlan_ser_vdev_queue_disable(struct wlan_objmgr_vdev *vdev);
 #endif

@@ -62,7 +62,11 @@ FUNCTION(arch_disable_cache)
 #else
 #error whut?
 #endif
+#if ARM_ISA_ARMV7
+	dsb
+#else
 	mcr		p15, 0, r0, c7, c10, 4		// data sync barrier (formerly drain write buffer)
+#endif
 
 .Licache_disable:
 	tst		r0, #ICACHE
@@ -328,7 +332,11 @@ FUNCTION(arch_clean_cache_range)
 	blo		0b
 	
 	mov		r0, #0
+#if ARM_ISA_ARMV7
+	dsb
+#else
 	mcr		p15, 0, r0, c7, c10, 4		// data sync barrier (formerly drain write buffer)
+#endif
 
 	bx		lr
 
@@ -343,7 +351,11 @@ FUNCTION(arch_clean_invalidate_cache_range)
 	blo		0b
 
 	mov		r0, #0
+#if ARM_ISA_ARMV7
+	dsb
+#else
 	mcr		p15, 0, r0, c7, c10, 4		// data sync barrier (formerly drain write buffer)
+#endif
 
 	bx		lr
 
@@ -359,7 +371,11 @@ FUNCTION(arch_invalidate_cache_range)
 	blo		0b
 	mov		r0, #0
 	/* data sync barrier (formerly drain write buffer*/
+#if ARM_ISA_ARMV7
+	dsb
+#else
 	mcr		p15, 0, r0, c7, c10, 4
+#endif
 	bx		lr
 
 	/* void arch_sync_cache_range(addr_t start, size_t len); */

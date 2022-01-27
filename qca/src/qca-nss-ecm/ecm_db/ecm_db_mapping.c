@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, 2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -41,7 +41,6 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
@@ -60,8 +59,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_classifier_default.h"
 #include "ecm_db.h"
 
@@ -115,10 +114,10 @@ int _ecm_db_mapping_count_get(void)
  */
 void _ecm_db_mapping_ref(struct ecm_db_mapping_instance *mi)
 {
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed\n", mi);
 	mi->refs++;
-	DEBUG_TRACE("%p: mapping ref %d\n", mi, mi->refs);
-	DEBUG_ASSERT(mi->refs > 0, "%p: ref wrap\n", mi);
+	DEBUG_TRACE("%px: mapping ref %d\n", mi, mi->refs);
+	DEBUG_ASSERT(mi->refs > 0, "%px: ref wrap\n", mi);
 }
 
 /*
@@ -142,7 +141,7 @@ void ecm_db_mapping_data_stats_get(struct ecm_db_mapping_instance *mi, uint64_t 
 						uint64_t *from_data_total_dropped, uint64_t *to_data_total_dropped,
 						uint64_t *from_packet_total_dropped, uint64_t *to_packet_total_dropped)
 {
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 	spin_lock_bh(&ecm_db_lock);
 	if (from_data_total) {
 		*from_data_total = mi->from_data_total;
@@ -197,9 +196,9 @@ int ecm_db_mapping_state_get(struct ecm_state_file_instance *sfi, struct ecm_db_
 	uint64_t from_packet_total_dropped;
 	uint64_t to_packet_total_dropped;
 #endif
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 
-	DEBUG_TRACE("Prep mapping msg for %p\n", mi);
+	DEBUG_TRACE("Prep mapping msg for %px\n", mi);
 
 	/*
 	 * Create a small xml stats element for our mapping.
@@ -306,7 +305,7 @@ EXPORT_SYMBOL(ecm_db_mapping_state_get);
  */
 void ecm_db_mapping_adress_get(struct ecm_db_mapping_instance *mi, ip_addr_t addr)
 {
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 	ECM_IP_ADDR_COPY(addr, mi->host->address);
 }
 EXPORT_SYMBOL(ecm_db_mapping_adress_get);
@@ -317,7 +316,7 @@ EXPORT_SYMBOL(ecm_db_mapping_adress_get);
  */
 int ecm_db_mapping_port_get(struct ecm_db_mapping_instance *mi)
 {
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 	return mi->port;
 }
 EXPORT_SYMBOL(ecm_db_mapping_port_get);
@@ -346,7 +345,7 @@ EXPORT_SYMBOL(ecm_db_mappings_get_and_ref_first);
 struct ecm_db_mapping_instance *ecm_db_mapping_get_and_ref_next(struct ecm_db_mapping_instance *mi)
 {
 	struct ecm_db_mapping_instance *min;
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 	spin_lock_bh(&ecm_db_lock);
 	min = mi->next;
 	if (min) {
@@ -366,12 +365,12 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 #if (DEBUG_LEVEL >= 1)
 	int dir;
 #endif
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed\n", mi);
 
 	spin_lock_bh(&ecm_db_lock);
 	mi->refs--;
-	DEBUG_TRACE("%p: mapping deref %d\n", mi, mi->refs);
-	DEBUG_ASSERT(mi->refs >= 0, "%p: ref wrap\n", mi);
+	DEBUG_TRACE("%px: mapping deref %d\n", mi, mi->refs);
+	DEBUG_ASSERT(mi->refs >= 0, "%px: ref wrap\n", mi);
 
 	if (mi->refs > 0) {
 		int refs = mi->refs;
@@ -381,10 +380,10 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 
 #if (DEBUG_LEVEL >= 1)
 	for (dir = 0; dir < ECM_DB_OBJ_DIR_MAX; dir++) {
-		DEBUG_ASSERT(!mi->tcp_count[dir] && !mi->udp_count[dir] && !mi->conn_count[dir], "%p: %s not zero: %d, %d, %d\n",
+		DEBUG_ASSERT(!mi->tcp_count[dir] && !mi->udp_count[dir] && !mi->conn_count[dir], "%px: %s not zero: %d, %d, %d\n",
 			     mi, ecm_db_obj_dir_strings[dir], mi->tcp_count[dir], mi->udp_count[dir], mi->conn_count[dir]);
 #ifdef ECM_DB_XREF_ENABLE
-		DEBUG_ASSERT(!mi->connections[dir], "%p: %s not null: %p\n", mi, ecm_db_obj_dir_strings[dir], mi->connections[dir]);
+		DEBUG_ASSERT(!mi->connections[dir], "%px: %s not null: %px\n", mi, ecm_db_obj_dir_strings[dir], mi->connections[dir]);
 #endif
 	}
 #endif
@@ -400,7 +399,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		 * Remove from the global list
 		 */
 		if (!mi->prev) {
-			DEBUG_ASSERT(ecm_db_mappings == mi, "%p: mapping table bad\n", mi);
+			DEBUG_ASSERT(ecm_db_mappings == mi, "%px: mapping table bad\n", mi);
 			ecm_db_mappings = mi->next;
 		} else {
 			mi->prev->next = mi->next;
@@ -415,7 +414,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		 * Unlink it from the mapping hash table
 		 */
 		if (!mi->hash_prev) {
-			DEBUG_ASSERT(ecm_db_mapping_table[mi->hash_index] == mi, "%p: hash table bad\n", mi);
+			DEBUG_ASSERT(ecm_db_mapping_table[mi->hash_index] == mi, "%px: hash table bad\n", mi);
 			ecm_db_mapping_table[mi->hash_index] = mi->hash_next;
 		} else {
 			mi->hash_prev->hash_next = mi->hash_next;
@@ -426,14 +425,14 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		mi->hash_next = NULL;
 		mi->hash_prev = NULL;
 		ecm_db_mapping_table_lengths[mi->hash_index]--;
-		DEBUG_ASSERT(ecm_db_mapping_table_lengths[mi->hash_index] >= 0, "%p: invalid table len %d\n", mi, ecm_db_mapping_table_lengths[mi->hash_index]);
+		DEBUG_ASSERT(ecm_db_mapping_table_lengths[mi->hash_index] >= 0, "%px: invalid table len %d\n", mi, ecm_db_mapping_table_lengths[mi->hash_index]);
 
 #ifdef ECM_DB_XREF_ENABLE
 		/*
 		 * Unlink it from the host mapping list
 		 */
 		if (!mi->mapping_prev) {
-			DEBUG_ASSERT(mi->host->mappings == mi, "%p: mapping table bad\n", mi);
+			DEBUG_ASSERT(mi->host->mappings == mi, "%px: mapping table bad\n", mi);
 			mi->host->mappings = mi->mapping_next;
 		} else {
 			mi->mapping_prev->mapping_next = mi->mapping_next;
@@ -451,7 +450,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 		/*
 		 * Throw removed event to listeners
 		 */
-		DEBUG_TRACE("%p: Throw mapping removed event\n", mi);
+		DEBUG_TRACE("%px: Throw mapping removed event\n", mi);
 		li = ecm_db_listeners_get_and_ref_first();
 		while (li) {
 			struct ecm_db_listener_instance *lin;
@@ -493,7 +492,7 @@ int ecm_db_mapping_deref(struct ecm_db_mapping_instance *mi)
 	 */
 	spin_lock_bh(&ecm_db_lock);
 	ecm_db_mapping_count--;
-	DEBUG_ASSERT(ecm_db_mapping_count >= 0, "%p: mapping count wrap\n", mi);
+	DEBUG_ASSERT(ecm_db_mapping_count >= 0, "%px: mapping count wrap\n", mi);
 	spin_unlock_bh(&ecm_db_lock);
 
 	return 0;
@@ -536,7 +535,7 @@ struct ecm_db_mapping_instance *ecm_db_mapping_find_and_ref(ip_addr_t address, i
 
 		_ecm_db_mapping_ref(mi);
 		spin_unlock_bh(&ecm_db_lock);
-		DEBUG_TRACE("Mapping found %p\n", mi);
+		DEBUG_TRACE("Mapping found %px\n", mi);
 		return mi;
 	}
 	spin_unlock_bh(&ecm_db_lock);
@@ -554,7 +553,7 @@ struct ecm_db_connection_instance *ecm_db_mapping_connections_get_and_ref_first(
 {
 	struct ecm_db_connection_instance *ci;
 
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed", mi);
 
 	spin_lock_bh(&ecm_db_lock);
 	ci = mi->connections[dir];
@@ -573,7 +572,7 @@ EXPORT_SYMBOL(ecm_db_mapping_connections_get_and_ref_first);
  */
 struct ecm_db_host_instance *ecm_db_mapping_host_get_and_ref(struct ecm_db_mapping_instance *mi)
 {
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed\n", mi);
 
 	spin_lock_bh(&ecm_db_lock);
 	_ecm_db_host_ref(mi->host);
@@ -590,7 +589,7 @@ int ecm_db_mapping_connections_total_count_get(struct ecm_db_mapping_instance *m
 {
 	int count;
 
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed\n", mi);
 
 	spin_lock_bh(&ecm_db_lock);
 	count = mi->conn_count[ECM_DB_OBJ_DIR_FROM] +
@@ -598,7 +597,7 @@ int ecm_db_mapping_connections_total_count_get(struct ecm_db_mapping_instance *m
 		mi->conn_count[ECM_DB_OBJ_DIR_FROM_NAT] +
 		mi->conn_count[ECM_DB_OBJ_DIR_TO_NAT];
 
-	DEBUG_ASSERT(count >= 0, "%p: Count overflow from: %d, to: %d, nat_from: %d, nat_to: %d\n",
+	DEBUG_ASSERT(count >= 0, "%px: Count overflow from: %d, to: %d, nat_from: %d, nat_to: %d\n",
 		     mi, mi->conn_count[ECM_DB_OBJ_DIR_FROM], mi->conn_count[ECM_DB_OBJ_DIR_TO],
 		     mi->conn_count[ECM_DB_OBJ_DIR_FROM_NAT], mi->conn_count[ECM_DB_OBJ_DIR_TO_NAT]);
 	spin_unlock_bh(&ecm_db_lock);
@@ -619,19 +618,19 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	struct ecm_db_listener_instance *li;
 
 	spin_lock_bh(&ecm_db_lock);
-	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%p: magic failed\n", mi);
-	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%p: magic failed\n", hi);
-	DEBUG_ASSERT(!(mi->flags & ECM_DB_MAPPING_FLAGS_INSERTED), "%p: inserted\n", mi);
-	DEBUG_ASSERT((hi->flags & ECM_DB_HOST_FLAGS_INSERTED), "%p: not inserted\n", hi);
+	DEBUG_CHECK_MAGIC(mi, ECM_DB_MAPPING_INSTANCE_MAGIC, "%px: magic failed\n", mi);
+	DEBUG_CHECK_MAGIC(hi, ECM_DB_HOST_INSTANCE_MAGIC, "%px: magic failed\n", hi);
+	DEBUG_ASSERT(!(mi->flags & ECM_DB_MAPPING_FLAGS_INSERTED), "%px: inserted\n", mi);
+	DEBUG_ASSERT((hi->flags & ECM_DB_HOST_FLAGS_INSERTED), "%px: not inserted\n", hi);
 	DEBUG_ASSERT(!mi->tcp_count[ECM_DB_OBJ_DIR_FROM] && !mi->tcp_count[ECM_DB_OBJ_DIR_TO] &&
 		     !mi->udp_count[ECM_DB_OBJ_DIR_FROM] && !mi->udp_count[ECM_DB_OBJ_DIR_TO],
-		     "%p: protocol count errors\n", mi);
+		     "%px: protocol count errors\n", mi);
 #ifdef ECM_DB_XREF_ENABLE
-	DEBUG_ASSERT(mi->connections[ECM_DB_OBJ_DIR_FROM] == NULL, "%p: connections not null\n", mi);
-	DEBUG_ASSERT(mi->connections[ECM_DB_OBJ_DIR_TO] == NULL, "%p: connections not null\n", mi);
+	DEBUG_ASSERT(mi->connections[ECM_DB_OBJ_DIR_FROM] == NULL, "%px: connections not null\n", mi);
+	DEBUG_ASSERT(mi->connections[ECM_DB_OBJ_DIR_TO] == NULL, "%px: connections not null\n", mi);
 	DEBUG_ASSERT(!mi->conn_count[ECM_DB_OBJ_DIR_FROM] && !mi->conn_count[ECM_DB_OBJ_DIR_TO] &&
 		     !mi->conn_count[ECM_DB_OBJ_DIR_FROM_NAT] && !mi->conn_count[ECM_DB_OBJ_DIR_TO_NAT],
-		     "%p: connection count errors\n", mi);
+		     "%px: connection count errors\n", mi);
 #endif
 	spin_unlock_bh(&ecm_db_lock);
 
@@ -685,7 +684,7 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	}
 	ecm_db_mapping_table[hash_index] = mi;
 	ecm_db_mapping_table_lengths[hash_index]++;
-	DEBUG_ASSERT(ecm_db_mapping_table_lengths[hash_index] > 0, "%p: invalid table len %d\n", hi, ecm_db_mapping_table_lengths[hash_index]);
+	DEBUG_ASSERT(ecm_db_mapping_table_lengths[hash_index] > 0, "%px: invalid table len %d\n", hi, ecm_db_mapping_table_lengths[hash_index]);
 
 #ifdef ECM_DB_XREF_ENABLE
 	/*
@@ -704,7 +703,7 @@ void ecm_db_mapping_add(struct ecm_db_mapping_instance *mi, struct ecm_db_host_i
 	/*
 	 * Throw add event to the listeners
 	 */
-	DEBUG_TRACE("%p: Throw mapping added event\n", mi);
+	DEBUG_TRACE("%px: Throw mapping added event\n", mi);
 	li = ecm_db_listeners_get_and_ref_first();
 	while (li) {
 		struct ecm_db_listener_instance *lin;
@@ -797,7 +796,7 @@ struct ecm_db_mapping_instance *ecm_db_mapping_alloc(void)
 	ecm_db_mapping_count++;
 	spin_unlock_bh(&ecm_db_lock);
 
-	DEBUG_TRACE("Mapping created %p\n", mi);
+	DEBUG_TRACE("Mapping created %px\n", mi);
 	return mi;
 }
 EXPORT_SYMBOL(ecm_db_mapping_alloc);

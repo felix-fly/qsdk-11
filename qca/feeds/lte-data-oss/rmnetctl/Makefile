@@ -25,7 +25,7 @@ define Package/rmnetctl/Description
  Data Services Open Source Software
 endef
 
-TARGET_CFLAGS += \
+TARGET_CFLAGS += -Werror -Wall\
 	-I$(LINUX_DIR)/user_headers/include
 
 define Build/InstallDev

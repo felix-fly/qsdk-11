@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -12,13 +12,13 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-
+/*qca808x_start*/
 #include "sw.h"
 #include "hsl.h"
 #include "hsl_dev.h"
 #include "sd.h"
 #include "scomphy_reg_access.h"
-
+#include "hsl_phy.h"
 
 #if defined(API_LOCK)
 static aos_lock_t mdio_lock;
@@ -76,9 +76,53 @@ scomphy_phyi2c_set(a_uint32_t dev_id, a_uint32_t phy_addr,
 
 	return rv;
 }
+/*qca808x_end*/
+sw_error_t
+scomphy_reg_get(a_uint32_t dev_id, a_uint32_t reg_addr,
+	a_uint8_t *val, a_uint32_t len)
+{
+	sw_error_t rv;
+
+	rv = sd_reg_hdr_get(dev_id, reg_addr, val, len);
+
+	return rv;
+}
 
 sw_error_t
-scomphy_reg_access_init(a_uint32_t dev_id, hsl_access_mode mode)
+scomphy_reg_set(a_uint32_t dev_id, a_uint32_t reg_addr,
+	a_uint8_t *val, a_uint32_t len)
+{
+	sw_error_t rv;
+
+	rv = sd_reg_hdr_set(dev_id, reg_addr, val, len);
+
+	return rv;
+}
+
+sw_error_t
+scomphy_uniphy_reg_get(a_uint32_t dev_id, a_uint32_t index,
+	a_uint32_t reg_addr, a_uint8_t *val, a_uint32_t len)
+{
+	sw_error_t rv;
+
+	rv = sd_reg_uniphy_get(dev_id, index, reg_addr, val, len);
+
+	return rv;
+}
+
+sw_error_t
+scomphy_uniphy_reg_set(a_uint32_t dev_id, a_uint32_t index,
+	a_uint32_t reg_addr, a_uint8_t *val, a_uint32_t len)
+{
+	sw_error_t rv;
+
+	rv = sd_reg_uniphy_set(dev_id, index, reg_addr, val, len);
+
+	return rv;
+}
+/*qca808x_start*/
+sw_error_t
+scomphy_reg_access_init(a_uint32_t dev_id, ssdk_init_cfg *cfg)
 {
 	hsl_api_t *p_api;
 
@@ -89,6 +133,15 @@ scomphy_reg_access_init(a_uint32_t dev_id, hsl_access_mode mode)
 	p_api->phy_set = scomphy_phy_set;
 	p_api->phy_i2c_get = scomphy_phy_i2c_get;
 	p_api->phy_i2c_set = scomphy_phyi2c_set;
-
+/*qca808x_end*/
+	if(cfg->phy_id == MP_GEPHY)
+	{
+		p_api->reg_get = scomphy_reg_get;
+		p_api->reg_set = scomphy_reg_set;
+		p_api->uniphy_reg_get = scomphy_uniphy_reg_get;
+		p_api->uniphy_reg_set = scomphy_uniphy_reg_set;
+	}
+/*qca808x_start*/
 	return SW_OK;
 }
+/*qca808x_end*/

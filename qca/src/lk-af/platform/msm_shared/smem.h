@@ -565,4 +565,114 @@ struct version_entry
 	char oem_version_string[OEM_VERSION_STRING_LENGTH];
 };
 
+#ifdef CONFIG_SMEM_VER12
+
+#define SMEM_COMMON_HOST	0xFFFE
+#define CONFIG_QCA_SMEM_BASE 	0x4AA00000
+#define SZ_4K   		0x00001000
+#define MAX_ERRNO		4095
+
+#define IS_ERR_VALUE(x) unlikely((x) >= (unsigned long)-MAX_ERRNO)
+
+static inline void *ERR_PTR(long error)
+{
+	return (void *) error;
+}
+
+static inline long PTR_ERR(const void *ptr)
+{
+	return (long) ptr;
+}
+
+static inline long IS_ERR(const void *ptr)
+{
+	return IS_ERR_VALUE((unsigned long)ptr);
+}
+
+enum {
+	smem_enu_sucess,
+	smem_enu_failed,
+	smem_enu_no_init
+};
+
+/**
+ * struct smem_ptable_entry - one entry in the @smem_ptable list
+ * @offset:	offset, within the main shared memory region, of the partition
+ * @size:	size of the partition
+ * @flags:	flags for the partition (currently unused)
+ * @host0:	first processor/host with access to this partition
+ * @host1:	second processor/host with access to this partition
+ * @reserved:	reserved entries for later use
+ */
+struct smem_ptable_entry {
+	unsigned int offset;
+	unsigned int size;
+	unsigned int flags;
+	unsigned short host0;
+	unsigned short host1;
+	unsigned int reserved[8];
+};
+
+/**
+ * struct smem_private_ptable - partition table for the private partitions
+ * @magic:      magic number, must be SMEM_PTABLE_MAGIC
+ * @version:    version of the partition table
+ * @num_entries: number of partitions in the table
+ * @reserved:   for now reserved entries
+ * @entry:      list of @smem_ptable_entry for the @num_entries partitions
+ */
+struct smem_private_ptable {
+	unsigned char magic[4];
+	unsigned int version;
+	unsigned int num_entries;
+	unsigned int reserved[5];
+	struct smem_ptable_entry entry[];
+};
+
+/**
+ * struct smem_private_entry - header of each item in the private partition
+ * @canary:     magic number, must be SMEM_PRIVATE_CANARY
+ * @item:       identifying number of the smem item
+ * @size:       size of the data, including padding bytes
+ * @padding_data: number of bytes of padding of data
+ * @padding_hdr: number of bytes of padding between the header and the data
+ * @reserved:   for now reserved entry
+ */
+struct smem_private_entry {
+	unsigned short canary; /* bytes are the same so no swapping needed */
+	unsigned short item;
+	unsigned int size; /* includes padding bytes */
+	unsigned short padding_data;
+	unsigned short padding_hdr;
+	unsigned int reserved;
+};
+
+#define SMEM_PRIVATE_CANARY	0xa5a5
+
+static const unsigned char SMEM_PTABLE_MAGIC[] = { 0x24, 0x54, 0x4f, 0x43 }; /* "$TOC" */
+/**
+ * struct smem_partition_header - header of the partitions
+ * @magic:	magic number, must be SMEM_PART_MAGIC
+ * @host0:	first processor/host with access to this partition
+ * @host1:	second processor/host with access to this partition
+ * @size:	size of the partition
+ * @offset_free_uncached: offset to the first free byte of uncached memory in
+ *		this partition
+ * @offset_free_cached: offset to the first free byte of cached memory in this
+ *		partition
+ * @reserved:	for now reserved entries
+ */
+struct smem_partition_header {
+	unsigned char magic[4];
+	unsigned short host0;
+	unsigned short host1;
+	unsigned int size;
+	unsigned int offset_free_uncached;
+	unsigned int offset_free_cached;
+	unsigned int reserved[3];
+};
+
+static const unsigned char SMEM_PART_MAGIC[] = { 0x24, 0x50, 0x52, 0x54 };		/*$PRT*/
+#endif
+
 #endif				/* __PLATFORM_MSM_SHARED_SMEM_H */

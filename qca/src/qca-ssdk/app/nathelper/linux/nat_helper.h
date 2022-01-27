@@ -18,7 +18,9 @@
 
 #include "sw.h"
 
-#define NAPT_TABLE_SIZE 1024
+#define NAPT_TABLE_BITS 10
+#define NAPT_TABLE_SIZE (1 << NAPT_TABLE_BITS)
+//#define NAPT_TABLE_SIZE 1024
 
 #define S17_WAN_PORT nat_helper_wan_port_get()
 

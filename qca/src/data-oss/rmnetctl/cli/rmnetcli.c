@@ -2,7 +2,7 @@
 
 			R M N E T C L I . C
 
-Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+Copyright (c) 2013-2015, 2018, 2020 The Linux Foundation. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -187,6 +187,13 @@ static void rmnet_api_usage(void)
 	printf(_5TABS" must be less than");
 	printf(_5TABS" 15 chars. Returns");
 	printf(_5TABS" the status code\n\n");
+	printf("rmnetcli newvndname <dev_id> <name_prefix>   Creates");
+	printf(_5TABS" virtual network device node.");
+	printf(_5TABS" dev_id is an int");
+	printf(_5TABS" less than 32. Name");
+	printf(_5TABS" must be less than");
+	printf(_5TABS" 15 chars. Returns");
+	printf(_5TABS" the status code\n\n");
 	printf("rmnetcli getvndname <dev_id>              Get name of");
 	printf(_5TABS" network device node from id\n\n");
 	printf("rmnetcli freevnd <dev_id>              Removes virtual");
@@ -201,6 +208,58 @@ static void rmnet_api_usage(void)
 	printf(_2TABS" <mdm_flow_hndl>         handle - tc flow handle");
 	printf(_2TABS" <tc_flow_hndl>          mapping for a virtual network");
 	printf(_2TABS" device node\n\n");
+	printf("**************************\n");
+	printf("RmNet RTM_NETLINK API Usage:\n\n");
+	printf("rmnetcli -n newlink  <dev_id>            Add a vnd w/ newlink");
+	printf(_2TABS" <vnd>                   string - vnd device_name");
+	printf(_2TABS" <vnd id>                int - new vnd id");
+	printf(_2TABS" [flags]                 int - starting flag config\n\n");
+	printf("rmnetcli -n changelink  <dev_id>         Change a vnd's flags");
+	printf(_2TABS" <vnd>                   string - vnd device_name");
+	printf(_2TABS" <vnd id>                int - new vnd id");
+	printf(_2TABS" <flags>                 int - new flag config\n\n");
+	printf("rmnetcli -n getlink <dev_name>           Get device config\n\n");
+	printf("rmnetcli -n dellink <dev_name>           Delete a vnd");
+	printf(_2TABS"                         by inputting dev name\n\n");
+	printf("rmnetcli -n bridgelink  <dev_name>       Bridge a vnd and a dev");
+	printf(_2TABS" <vnd id>                by specifying dev id and vnd id\n\n");
+	printf("rmnetcli -n uplinkparam <dev_name>   set uplink aggregation parameters");
+	printf(_2TABS" <vnd id>                string - vnd device_name");
+	printf(_2TABS" <packet count>          int - maximum packet count");
+	printf(_2TABS" <byte count>            int - maximum byte count");
+	printf(_2TABS" <time limit>            int - maximum time limit");
+	printf(_2TABS" <features>              int - aggregation features\n\n");
+	printf("rmnetcli -n flowactivate <real dev>  activate a flow\n");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <bearer_id>             int - bearer id\n\n");
+	printf(_2TABS" <flow id>               int - flow id\n\n");
+	printf(_2TABS" <ip type>               int - ip type\n\n");
+	printf(_2TABS" <handle>                int - flow handle\n\n");
+	printf("rmnetcli -n flowdel      <real dev> delete a flow\n");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <bearer_id>              int - bearer id\n\n");
+	printf(_2TABS" <flow id>               int - flow id\n\n");
+	printf(_2TABS" <ip type>               int - ip type\n\n");
+	printf("rmnetcli -n flowcontrol  <real dev>");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <bearer_id>             int - bearer id\n\n");
+	printf(_2TABS" <seq>                   int - sequence\n\n");
+	printf(_2TABS" <grant size>            int - grant size\n\n");
+	printf(_2TABS" <ack>                   int - ack\n\n");
+	printf("rmnetcli -n systemup      <real dev>\n");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <instance>              int - bearer id\n\n");
+	printf(_2TABS" <eptype>                int - ep type\n\n");
+	printf(_2TABS" <iface_id>              int - iface id\n\n");
+	printf(_2TABS" <flags>                 int - flags\n\n");
+	printf("rmnetcli -n systemdown    <real dev> <vnd name> <instance>\n\n ");
+	printf("rmnetcli -n qmiscale      <real dev> set ACK scale factor\n\n");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <scale>                 int - scale factor\n\n");
+	printf("rmnetcli -n wdafreq       <real dev> set powersave poll freq\n\n");
+	printf(_2TABS" <vnd_name>              string - vnd device name\n\n");
+	printf(_2TABS" <freq>                  int - frequency\n\n");
+
 }
 
 static void print_rmnetctl_lib_errors(uint16_t error_number)
@@ -232,8 +291,11 @@ static void print_rmnet_api_status(int return_code, uint16_t error_number)
 	else if (return_code == RMNETCTL_LIB_ERR) {
 		printf("LIBRARY ");
 		print_rmnetctl_lib_errors(error_number);
-	} else if (return_code == RMNETCTL_KERNEL_ERR)
-		printf("KERNEL %s", rmnetctl_error_code_text[error_number]);
+	} else if (return_code == RMNETCTL_KERNEL_ERR) {
+		if (error_number < RMNETCTL_API_ERR_ENUM_LENGTH)
+			printf("KERNEL ERROR: System or rmnet error %d\n",
+			       error_number);
+	}
 	else if (return_code == RMNETCTL_INVALID_ARG)
 		printf("INVALID_ARG\n");
 }
@@ -258,6 +320,8 @@ static int rmnet_api_call(int argc, char *argv[])
 	struct rmnetctl_hndl_s *handle = NULL;
 	uint16_t error_number = RMNETCTL_CFG_FAILURE_NO_COMMAND;
 	int return_code = RMNETCTL_LIB_ERR;
+	int is_new_api = 0;
+
 	if ((!argc) || (!*argv)) {
 		print_rmnet_api_status(RMNETCTL_LIB_ERR,
 		RMNETCTL_CFG_FAILURE_NO_COMMAND);
@@ -268,10 +332,197 @@ static int rmnet_api_call(int argc, char *argv[])
 		RMNETCTL_CFG_SUCCESS_HELP_COMMAND);
 		return RMNETCTL_LIB_ERR;
 	}
-	return_code = rmnetctl_init(&handle, &error_number);
-	if (return_code!= RMNETCTL_SUCCESS) {
-		print_rmnet_api_status(return_code, error_number);
-		return RMNETCTL_LIB_ERR;
+
+	if (!strcmp(*argv, "-n")) {
+		is_new_api = 1;
+		return_code = rtrmnet_ctl_init(&handle, &error_number);
+		if (return_code != RMNETCTL_SUCCESS) {
+			print_rmnet_api_status(return_code, error_number);
+			return RMNETCTL_LIB_ERR;
+		}
+		error_number = RMNETCTL_CFG_FAILURE_NO_COMMAND;
+		return_code = RMNETCTL_LIB_ERR;
+		argv++;
+		argc--;
+		if ((!argc) || (!*argv)) {
+			print_rmnet_api_status(RMNETCTL_LIB_ERR,
+			RMNETCTL_CFG_FAILURE_NO_COMMAND);
+			return RMNETCTL_LIB_ERR;
+		}
+		if (!strcmp(*argv, "newlink")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+
+			uint8_t offload = 0;
+			uint32_t flags = 0;
+			/* If optional flag was used pass it on*/
+			if (argv[4])
+				flags = _STRTOI32(argv[4]);
+
+			if (argv[5])
+				offload = _STRTOUI8(argv[5]);
+
+			return_code = rtrmnet_ctl_newvnd(handle, argv[1],
+							 argv[2],
+							 &error_number,
+							 _STRTOI32(argv[3]),
+							 flags,
+							 offload);
+		} else if (!strcmp(*argv, "changelink")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+
+			return_code = rtrmnet_ctl_changevnd(handle, argv[1],
+							    argv[2],
+							    &error_number,
+							    _STRTOI32(argv[3]),
+							    _STRTOI32(argv[4]),
+							    _STRTOUI8(argv[5]));
+		} else if (!strcmp(*argv, "getlink")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			uint32_t flags = 0;
+			uint16_t mux_id = 0;
+			uint8_t agg_count = 0;
+			uint16_t agg_size = 0;
+			uint32_t agg_time = 0;
+			uint8_t features = 0;
+			uint8_t offload = 0;
+
+			return_code = rtrmnet_ctl_getvnd(handle, argv[1],
+							 &error_number,
+							 &mux_id, &flags,
+							 &agg_count, &agg_size,
+							 &agg_time, &features,
+							 &offload);
+			if (return_code == RMNETCTL_API_SUCCESS) {
+				printf("Configuration for device %s:\n", argv[1]);
+				printf("\tMux id: %d\n", mux_id);
+				printf("\tData format: 0x%04x\n", flags);
+				printf("\tUplink Aggregation parameters:\n");
+				printf("\t\tPacket limit: %d\n", agg_count);
+				printf("\t\tByte limit: %d\n", agg_size);
+				printf("\t\tTime limit (ns): %d\n", agg_time);
+				printf("\t\tFeatures : 0x%02x\n", features);
+				printf("\tOffload : 0x%02x\n", offload);
+			}
+		} else if (!strcmp(*argv, "dellink")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+				return_code = rtrmnet_ctl_delvnd(handle, argv[1],
+								 &error_number);
+		} else if (!strcmp(*argv, "bridge")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			return_code = rtrmnet_ctl_bridgevnd(handle, argv[1],
+							    argv[2],
+							    &error_number);
+		} else if (!strcmp(*argv, "uplinkparam")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+			_RMNETCLI_CHECKNULL(argv[6]);
+
+			return_code = rtrmnet_set_uplink_aggregation_params(
+				handle, argv[1], argv[2], _STRTOUI8(argv[3]),
+				_STRTOUI16(argv[4]), _STRTOUI32(argv[5]),
+				_STRTOUI8(argv[6]), &error_number);
+		}
+		else if (!strcmp(*argv, "flowactivate")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+			_RMNETCLI_CHECKNULL(argv[6]);
+
+			return_code = rtrmnet_activate_flow(handle, argv[1], argv[2],
+							    _STRTOUI8(argv[3]),
+							    _STRTOI32(argv[4]),
+							    _STRTOUI32(argv[5]),
+							    _STRTOUI32(argv[6]),
+							    &error_number);
+
+		} else if (!strcmp(*argv, "flowdel")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+			return_code = rtrmnet_delete_flow(handle, argv[1], argv[2],
+							_STRTOUI8(argv[3]),
+							_STRTOUI32(argv[4]),
+							_STRTOI32(argv[5]),
+							&error_number);
+		} else if (!strcmp(*argv, "flowcontrol")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+			_RMNETCLI_CHECKNULL(argv[6]);
+
+
+			return_code = rtrmnet_control_flow(handle, argv[1], argv[2],
+							    _STRTOUI8(argv[3]),
+							    _STRTOUI32(argv[4]),
+							    _STRTOUI16(argv[5]),
+							    _STRTOUI8(argv[6]),
+							    &error_number);
+		} else if (!strcmp(*argv, "systemup")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+			_RMNETCLI_CHECKNULL(argv[4]);
+			_RMNETCLI_CHECKNULL(argv[5]);
+			_RMNETCLI_CHECKNULL(argv[6]);
+
+
+			return_code = rtrmnet_flow_state_up(handle, argv[1], argv[2],
+							    _STRTOUI32(argv[3]),
+							    _STRTOUI32(argv[4]),
+							    _STRTOUI32(argv[5]),
+							    _STRTOUI32(argv[6]),
+							    &error_number);
+		} else if (!strcmp(*argv, "systemdown")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+
+			return_code = rtrmnet_flow_state_down(handle, argv[1], argv[2],
+							    _STRTOUI32(argv[3]),
+							    &error_number);
+		} else if (!strcmp(*argv, "qmiscale")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+
+			return_code = rtrmnet_set_qmi_scale(handle, argv[1], argv[2],
+							    _STRTOUI32(argv[3]),
+							    &error_number);
+		} else if (!strcmp(*argv, "wdafreq")) {
+			_RMNETCLI_CHECKNULL(argv[1]);
+			_RMNETCLI_CHECKNULL(argv[2]);
+			_RMNETCLI_CHECKNULL(argv[3]);
+
+			return_code = rtrmnet_set_wda_freq(handle, argv[1], argv[2],
+							   _STRTOUI32(argv[3]),
+							   &error_number);
+		}
+
+
+		goto end;
+	} else {
+		return_code = rmnetctl_init(&handle, &error_number);
+		if (return_code != RMNETCTL_SUCCESS) {
+			print_rmnet_api_status(return_code, error_number);
+			return RMNETCTL_LIB_ERR;
+		}
+
 	}
 	error_number = RMNETCTL_CFG_FAILURE_NO_COMMAND;
 	return_code = RMNETCTL_LIB_ERR;
@@ -311,6 +562,11 @@ static int rmnet_api_call(int argc, char *argv[])
 		_RMNETCLI_CHECKNULL(argv[2]);
 		return_code = rmnet_new_vnd_prefix(handle,
 		_STRTOUI32(argv[1]), &error_number, RMNETCTL_NEW_VND, argv[2]);
+	} else if (!strcmp(*argv, "newvndname")) {
+		_RMNETCLI_CHECKNULL(argv[1]);
+		_RMNETCLI_CHECKNULL(argv[2]);
+		return_code = rmnet_new_vnd_name(handle,
+		_STRTOUI32(argv[1]), &error_number, argv[2]);
 	} else if (!strcmp(*argv, "newvnd")) {
 		_RMNETCLI_CHECKNULL(argv[1]);
 		return_code = rmnet_new_vnd(handle,
@@ -388,8 +644,12 @@ static int rmnet_api_call(int argc, char *argv[])
 		return_code = rmnet_unset_logical_ep_config(handle,
 		_STRTOI32(argv[1]), argv[2], &error_number);
 	}
+end:
 	print_rmnet_api_status(return_code, error_number);
-	rmnetctl_cleanup(handle);
+	if (is_new_api)
+		rtrmnet_ctl_deinit(handle);
+	else
+		rmnetctl_cleanup(handle);
 	return return_code;
 }
 

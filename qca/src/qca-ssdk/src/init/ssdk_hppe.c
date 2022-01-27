@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2014-2019, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -38,17 +38,18 @@ static sw_error_t qca_hppe_fdb_hw_init(a_uint32_t dev_id)
 	SW_RTN_ON_NULL(p_api->adpt_port_bridge_txmac_set);
 
 	for(port = SSDK_PHYSICAL_PORT0; port <= SSDK_PHYSICAL_PORT7; port++) {
-		fal_fdb_port_learning_ctrl_set(dev_id, port, A_TRUE, FAL_MAC_FRWRD);
-		fal_fdb_port_stamove_ctrl_set(dev_id, port, A_TRUE, FAL_MAC_FRWRD);
+		if(port == SSDK_PHYSICAL_PORT0) {
+			fal_fdb_port_learning_ctrl_set(dev_id, port, A_FALSE, FAL_MAC_FRWRD);
+			fal_fdb_port_stamove_ctrl_set(dev_id, port, A_FALSE, FAL_MAC_FRWRD);
+		} else {
+			fal_fdb_port_learning_ctrl_set(dev_id, port, A_TRUE, FAL_MAC_FRWRD);
+			fal_fdb_port_stamove_ctrl_set(dev_id, port, A_TRUE, FAL_MAC_FRWRD);
+		}
 		fal_portvlan_member_update(dev_id, port, 0x7f);
 		if (port == SSDK_PHYSICAL_PORT0 || port == SSDK_PHYSICAL_PORT7) {
 			p_api->adpt_port_bridge_txmac_set(dev_id, port, A_TRUE);
 		} else {
-#ifdef HAWKEYE_CHIP
 			p_api->adpt_port_bridge_txmac_set(dev_id, port, A_FALSE);
-#else
-			p_api->adpt_port_bridge_txmac_set(dev_id, port, A_TRUE);
-#endif
 		}
 		fal_port_promisc_mode_set(dev_id, port, A_TRUE);
 	}
@@ -92,59 +93,6 @@ static sw_error_t qca_hppe_ctlpkt_hw_init(a_uint32_t dev_id)
 }
 #endif
 
-#ifndef HAWKEYE_CHIP
-static sw_error_t
-qca_hppe_fpga_xgmac_gpio_enable(a_uint32_t dev_id)
-{
-	a_uint32_t val;
-	void __iomem *ppe_gpio_base;
-
-	ppe_gpio_base = ioremap_nocache(0x01008000, 0x100);
-	if (!ppe_gpio_base) {
-		printk("can't get gpio address!\n");
-		return -1;
-	}
-	/* RUMI specific GPIO configuration for enabling XGMAC */
-	writel(0x201, ppe_gpio_base + 0);
-	writel(0x2, ppe_gpio_base + 4);
-	iounmap(ppe_gpio_base);
-	printk("set gpio to enable XGMAC successfully!\n");
-
-	msleep(100);
-
-	val = 0;
-	qca_switch_reg_write(dev_id, 0x000008, (a_uint8_t *)&val, 4);
-
-	return SW_OK;
-}
-static sw_error_t
-qca_hppe_fpga_ports_enable(a_uint32_t dev_id)
-{
-	a_uint32_t i = 0;
-	a_uint32_t val, addr = 0x4000;
-	a_uint32_t port_max = SSDK_PHYSICAL_PORT7;
-	a_uint32_t xgmac_max = 2;
-
-	if(adpt_hppe_chip_revision_get(dev_id) == CPPE_REVISION) {
-		port_max = SSDK_PHYSICAL_PORT6;
-		xgmac_max = 1;
-	}
-
-	for(i = SSDK_PHYSICAL_PORT1; i < port_max; i++) {
-		fal_port_rxfc_status_set(dev_id, i, A_TRUE);
-		fal_port_txfc_status_set(dev_id, i, A_TRUE);
-		fal_port_txmac_status_set (dev_id, i, A_TRUE);
-		fal_port_rxmac_status_set (dev_id, i, A_TRUE);
-	}
-	for (i = 0; i < xgmac_max; i ++) {
-		val = 0x00000081;
-		qca_switch_reg_write(dev_id, 0x00003008 + (addr * i), (a_uint8_t *)&val, 4);
-	}
-
-	return SW_OK;
-}
-#endif
-
 #if defined(IN_PORTCONTROL)
 static sw_error_t
 qca_hppe_portctrl_hw_init(a_uint32_t dev_id)
@@ -158,15 +106,9 @@ qca_hppe_portctrl_hw_init(a_uint32_t dev_id)
 	if(adpt_hppe_chip_revision_get(dev_id) == CPPE_REVISION) {
 		SSDK_INFO("Cypress PPE port initializing\n");
 		port_max = SSDK_PHYSICAL_PORT6;
-#ifndef HAWKEYE_CHIP
-		qca_cppe_fpga_xgmac_clock_enable(dev_id);
-#endif
 	} else {
 		SSDK_INFO("Hawkeye PPE port initializing\n");
 		port_max = SSDK_PHYSICAL_PORT7;
-#ifndef HAWKEYE_CHIP
-		qca_hppe_fpga_xgmac_gpio_enable(dev_id);
-#endif
 	}
 	for(i = SSDK_PHYSICAL_PORT1; i < port_max; i++) {
 		qca_hppe_port_mac_type_set(dev_id, i, PORT_GMAC_TYPE);
@@ -206,12 +148,17 @@ static sw_error_t
 qca_hppe_policer_hw_init(a_uint32_t dev_id)
 {
 	a_uint32_t i = 0;
+	fal_policer_frame_type_t frame_type;
 
 	fal_policer_timeslot_set(dev_id, HPPE_POLICER_TIMESLOT_DFT);
 
 	for (i = SSDK_PHYSICAL_PORT0; i <= SSDK_PHYSICAL_PORT7; i++) {
 		fal_port_policer_compensation_byte_set(dev_id, i, 4);
 	}
+
+	/* bypass policer for dropped frame */
+	frame_type = FAL_FRAME_DROPPED;
+	fal_policer_bypass_en_set(dev_id, frame_type, A_TRUE);
 
 	return SW_OK;
 }
@@ -818,10 +765,10 @@ qca_hppe_qm_hw_init(a_uint32_t dev_id)
 	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 8, 0);
 
 	queue_dst.service_code = 3;
-	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 0);
+	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 8);
 
 	queue_dst.service_code = 4;
-	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 0);
+	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 8);
 
 	queue_dst.service_code = 5;
 	fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 0, 0);
@@ -856,7 +803,7 @@ qca_hppe_qm_hw_init(a_uint32_t dev_id)
 		if (i == 2 || i == 6) {
 			fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 8, 0);
 		} else if (i == 3 || i == 4) {
-			fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 0);
+			fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 128, 8);
 		} else {
 			fal_ucast_queue_base_profile_set(dev_id, &queue_dst, 4, 0);
 		}
@@ -1025,6 +972,7 @@ sw_error_t qca_hppe_acl_byp_intf_mac_learn(a_uint32_t dev_id)
 	a_uint32_t index = 0, num;
 	fal_acl_rule_t rule = { 0 };
 	a_uint8_t* mac;
+	a_uint32_t port_bmp = qca_ssdk_port_bmp_get(dev_id);
 
 	num = ssdk_intf_mac_num_get();
 	if(num == 0){
@@ -1052,7 +1000,7 @@ sw_error_t qca_hppe_acl_byp_intf_mac_learn(a_uint32_t dev_id)
 		fal_acl_rule_add(dev_id, LIST_ID_BYP_FDB_LRN, index, 1, &rule);
 	}
 	fal_acl_list_bind(dev_id, LIST_ID_BYP_FDB_LRN, FAL_ACL_DIREC_IN,
-				FAL_ACL_BIND_PORTBITMAP, 0x7c);
+				FAL_ACL_BIND_PORTBITMAP, port_bmp);
 
 	return SW_OK;
 }
@@ -1087,8 +1035,8 @@ sw_error_t qca_hppe_acl_remark_ptp_servcode(a_uint32_t dev_id) {
 			LIST_PRI_TAG_SERVICE_CODE_PTP);
 	SW_RTN_ON_ERROR(ret);
 
-	/* Set up UDF0 profile */
-	ret = fal_acl_udf_profile_set(dev_id, FAL_ACL_UDF_NON_IP, 0, FAL_ACL_UDF_TYPE_L3, 0);
+	/* Set up UDF2 profile */
+	ret = fal_acl_udf_profile_set(dev_id, FAL_ACL_UDF_NON_IP, 2, FAL_ACL_UDF_TYPE_L3, 0);
 	SW_RTN_ON_ERROR(ret);
 
 	/* Tag service code for PTP packet */
@@ -1106,11 +1054,10 @@ sw_error_t qca_hppe_acl_remark_ptp_servcode(a_uint32_t dev_id) {
 	FAL_FIELD_FLG_SET(entry.field_flg, FAL_ACL_FIELD_MAC_ETHTYPE);
 
 	for (msg_type = PTP_MSG_SYNC; msg_type <= PTP_MSG_PRESP; msg_type++) {
-		/* L2 UDF0 for msg type */
-		entry.udf0_op = FAL_ACL_FIELD_MASK;
-		entry.udf0_val = (msg_type << 0x8);
-		entry.udf0_mask = 0x0f00;
-		FAL_FIELD_FLG_SET(entry.field_flg, FAL_ACL_FIELD_UDF0);
+		/* L2 UDF2 for msg type */
+		entry.udf2_val = (msg_type << 0x8);
+		entry.udf2_mask = 0x0f00;
+		FAL_FIELD_FLG_SET(entry.field_flg, FAL_ACL_FIELD_UDF2);
 
 		/* Add PTP L2 rule to ACL list */
 		ret = fal_acl_rule_add(dev_id, LIST_ID_L2_TAG_SERVICE_CODE_PTP,
@@ -1120,7 +1067,7 @@ sw_error_t qca_hppe_acl_remark_ptp_servcode(a_uint32_t dev_id) {
 
 	/* Unset L2 PTP ethernet type 0x88f7 */
 	index = 0;
-	FAL_FIELD_FLG_CLR(entry.field_flg, FAL_ACL_FIELD_UDF0);
+	FAL_FIELD_FLG_CLR(entry.field_flg, FAL_ACL_FIELD_UDF2);
 	FAL_FIELD_FLG_CLR(entry.field_flg, FAL_ACL_FIELD_MAC_ETHTYPE);
 
 	/* Create PTP ACL L4 list */
@@ -1200,10 +1147,10 @@ qca_hppe_interface_mode_init(a_uint32_t dev_id, a_uint32_t mode0, a_uint32_t mod
 	sw_error_t rv = SW_OK;
 	fal_port_t port_id;
 	a_uint32_t port_max = SSDK_PHYSICAL_PORT7;
+	a_uint32_t index = 0, mode[3] = {mode0, mode1, mode2};
 
 	SW_RTN_ON_NULL(p_api = adpt_api_ptr_get(dev_id));
 	SW_RTN_ON_NULL(p_api->adpt_port_mux_mac_type_set);
-#ifdef HAWKEYE_CHIP
 	SW_RTN_ON_NULL(p_api->adpt_uniphy_mode_set);
 
 
@@ -1218,7 +1165,11 @@ qca_hppe_interface_mode_init(a_uint32_t dev_id, a_uint32_t mode0, a_uint32_t mod
 			SSDK_UNIPHY_INSTANCE2, mode2);
 		SW_RTN_ON_ERROR(rv);
 	}
-#endif
+	for (index = SSDK_UNIPHY_INSTANCE0; index <= SSDK_UNIPHY_INSTANCE2; index ++) {
+		if (mode[index] == PORT_WRAPPER_MAX) {
+			ssdk_gcc_uniphy_sys_set(dev_id, index, A_FALSE);
+		}
+	}
 
 	if(adpt_hppe_chip_revision_get(dev_id) == CPPE_REVISION) {
 		port_max = SSDK_PHYSICAL_PORT6;
@@ -1263,10 +1214,10 @@ qca_hppe_flow_hw_init(a_uint32_t dev_id)
 sw_error_t qca_hppe_hw_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 {
 	sw_error_t rv = SW_OK;
-#ifdef HAWKEYE_CHIP
+
 	/* reset ppe */
 	ssdk_ppe_reset_init();
-#endif
+
 	rv = qca_switch_init(dev_id);
 	SW_RTN_ON_ERROR(rv);
 
@@ -1328,9 +1279,6 @@ sw_error_t qca_hppe_hw_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 #if defined(IN_CTRLPKT)
 	rv = qca_hppe_ctlpkt_hw_init(dev_id);
 	SW_RTN_ON_ERROR(rv);
-#endif
-#ifndef HAWKEYE_CHIP
-	rv = qca_hppe_fpga_ports_enable(dev_id);
 #endif
 
 	return rv;

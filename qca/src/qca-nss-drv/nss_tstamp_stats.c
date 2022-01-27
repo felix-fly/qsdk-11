@@ -27,21 +27,21 @@ DEFINE_SPINLOCK(nss_tstamp_stats_lock);
  * nss_tstamp_stats_str
  *	TSTAMP stats strings
  */
-static int8_t *nss_tstamp_stats_str[NSS_TSTAMP_STATS_MAX] = {
-	"rx_packets",
-	"rx_bytes",
-	"tx_packets",
-	"tx_bytes",
-	"rx_queue_0_dropped",
-	"rx_queue_1_dropped",
-	"rx_queue_2_dropped",
-	"rx_queue_3_dropped",
-	"boomeranged",
-	"dropped_fail_enqueue",
-	"dropped_fail_alloc",
-	"dropped_fail_copy",
-	"dropped_no_interface",
-	"dropped_no_headroom",
+struct nss_stats_info nss_tstamp_stats_str[NSS_TSTAMP_STATS_MAX] = {
+	{"rx_packets"			, NSS_STATS_TYPE_COMMON},
+	{"rx_bytes"			, NSS_STATS_TYPE_COMMON},
+	{"tx_packets"			, NSS_STATS_TYPE_COMMON},
+	{"tx_bytes"			, NSS_STATS_TYPE_COMMON},
+	{"rx_queue_0_dropped"		, NSS_STATS_TYPE_DROP},
+	{"rx_queue_1_dropped"		, NSS_STATS_TYPE_DROP},
+	{"rx_queue_2_dropped"		, NSS_STATS_TYPE_DROP},
+	{"rx_queue_3_dropped"		, NSS_STATS_TYPE_DROP},
+	{"boomeranged"			, NSS_STATS_TYPE_SPECIAL},
+	{"dropped_fail_enqueue"		, NSS_STATS_TYPE_DROP},
+	{"dropped_fail_alloc"		, NSS_STATS_TYPE_DROP},
+	{"dropped_fail_copy"		, NSS_STATS_TYPE_DROP},
+	{"dropped_no_interface"		, NSS_STATS_TYPE_DROP},
+	{"dropped_no_headroom"		, NSS_STATS_TYPE_DROP}
 };
 
 /*
@@ -80,9 +80,7 @@ static ssize_t nss_tstamp_stats_read(struct file *fp, char __user *ubuf, size_t 
 		kfree(lbuf);
 		return -ENOMEM;
 	}
-
-	size_wr = scnprintf(lbuf, size_al, "tstamp stats start:\n\n");
-
+	size_wr += nss_stats_banner(lbuf, size_wr, size_al, "tstamp", NSS_STATS_SINGLE_CORE);
 	/*
 	 * TSTAMP statistics
 	 */
@@ -98,14 +96,13 @@ static ssize_t nss_tstamp_stats_read(struct file *fp, char __user *ubuf, size_t 
 			stats_shadow[i] = nss_tstamp_stats[num][i];
 		}
 		spin_unlock_bh(&nss_tstamp_stats_lock);
-
-		for (i = 0; i < NSS_TSTAMP_STATS_MAX; i++) {
-			size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-					"%s = %llu\n", nss_tstamp_stats_str[i], stats_shadow[i]);
-		}
+		size_wr += nss_stats_print("tstamp", NULL, NSS_STATS_SINGLE_INSTANCE
+						, nss_tstamp_stats_str
+						, stats_shadow
+						, NSS_TSTAMP_STATS_MAX
+						, lbuf, size_wr, size_al);
 	}
 
-	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "\ntstamp stats end\n\n");
 	bytes_read = simple_read_from_buffer(ubuf, sz, ppos, lbuf, strlen(lbuf));
 	kfree(lbuf);
 	kfree(stats_shadow);

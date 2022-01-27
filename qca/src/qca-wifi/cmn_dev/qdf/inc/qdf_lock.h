@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -44,8 +44,13 @@
 
 /* Max hold time in micro seconds, 0 to disable detection*/
 #define QDF_MAX_HOLD_TIME_ALOWED_SPINLOCK_IRQ         10000
-#define QDF_MAX_HOLD_TIME_ALOWED_SPINLOCK_BH        1000000
 #define QDF_MAX_HOLD_TIME_ALOWED_SPINLOCK                 0
+
+#if QDF_LOCK_STATS
+#define QDF_MAX_HOLD_TIME_ALOWED_SPINLOCK_BH        2000000
+#else
+#define QDF_MAX_HOLD_TIME_ALOWED_SPINLOCK_BH        1000000
+#endif
 
 #if !QDF_LOCK_STATS
 struct lock_stats {};
@@ -85,13 +90,13 @@ do { \
 	uint64_t BEFORE_LOCK_time; \
 	uint64_t AFTER_LOCK_time;  \
 	bool BEFORE_LOCK_is_locked = was_locked; \
-	BEFORE_LOCK_time = qdf_get_log_timestamp(); \
+	BEFORE_LOCK_time = qdf_get_log_timestamp_lightweight(); \
 	do {} while (0)
 
 
 #define AFTER_LOCK(lock, func) \
 	lock->stats.acquired_by = func; \
-	AFTER_LOCK_time = qdf_get_log_timestamp(); \
+	AFTER_LOCK_time = qdf_get_log_timestamp_lightweight(); \
 	lock->stats.acquired++; \
 	lock->stats.last_acquired = AFTER_LOCK_time; \
 	if (BEFORE_LOCK_is_locked) { \
@@ -116,11 +121,11 @@ do { \
 do { \
 	uint64_t BEFORE_LOCK_time; \
 	uint64_t AFTER_LOCK_time;  \
-	BEFORE_LOCK_time = qdf_get_log_timestamp(); \
+	BEFORE_LOCK_time = qdf_get_log_timestamp_lightweight(); \
 	do {} while (0)
 
 #define AFTER_TRYLOCK(lock, trylock_return, func) \
-	AFTER_LOCK_time = qdf_get_log_timestamp(); \
+	AFTER_LOCK_time = qdf_get_log_timestamp_lightweight(); \
 	if (trylock_return) { \
 		lock->stats.acquired++; \
 		lock->stats.last_acquired = AFTER_LOCK_time; \
@@ -133,8 +138,15 @@ do { \
 /* max_hold_time in US */
 #define BEFORE_UNLOCK(lock, max_hold_time) \
 do {\
-	uint64_t held_time = qdf_get_log_timestamp() - \
-		lock->stats.last_acquired; \
+	uint64_t BEFORE_UNLOCK_time;  \
+	uint64_t held_time;  \
+	BEFORE_UNLOCK_time = qdf_get_log_timestamp_lightweight(); \
+\
+	if (unlikely(BEFORE_UNLOCK_time < lock->stats.last_acquired)) \
+		held_time = 0; \
+	else \
+		held_time = BEFORE_UNLOCK_time - lock->stats.last_acquired; \
+\
 	lock->stats.held_time += held_time; \
 \
 	if (held_time > lock->stats.max_held_time) \
@@ -482,7 +494,55 @@ static inline int qdf_semaphore_acquire_intr(qdf_semaphore_t *m)
 	return __qdf_semaphore_acquire_intr(m);
 }
 
-QDF_STATUS qdf_wake_lock_create(qdf_wake_lock_t *lock, const char *name);
+#ifdef WLAN_WAKE_LOCK_DEBUG
+/**
+ * qdf_wake_lock_check_for_leaks() - assert no wake lock leaks
+ *
+ * Return: None
+ */
+void qdf_wake_lock_check_for_leaks(void);
+
+/**
+ * qdf_wake_lock_feature_init() - global init logic for wake lock
+ *
+ * Return: None
+ */
+void qdf_wake_lock_feature_init(void);
+
+/**
+ * qdf_wake_lock_feature_deinit() - global de-init logic for wake lock
+ *
+ * Return: None
+ */
+void qdf_wake_lock_feature_deinit(void);
+#else
+static inline void qdf_wake_lock_check_for_leaks(void) { }
+static inline void qdf_wake_lock_feature_init(void) { }
+static inline void qdf_wake_lock_feature_deinit(void) { }
+#endif /* WLAN_WAKE_LOCK_DEBUG */
+
+/**
+ * __qdf_wake_lock_create() - initialize a wake lock
+ * @lock: The wake lock to initialize
+ * @name: Name of wake lock
+ * @func: caller function
+ * @line: caller line
+ * Return:
+ * QDF status success: if wake lock is initialized
+ * QDF status failure: if wake lock was not initialized
+ */
+QDF_STATUS __qdf_wake_lock_create(qdf_wake_lock_t *lock, const char *name,
+				  const char *func, uint32_t line);
+
+/**
+ * qdf_wake_lock_create() - initialized a wakeup source lock
+ * @lock: the wakeup source lock to initialize
+ * @name: the name of wakeup source lock
+ *
+ * Return: QDF_STATUS
+ */
+#define qdf_wake_lock_create(lock, name) \
+	__qdf_wake_lock_create(lock, name, __func__, __LINE__)
 
 QDF_STATUS qdf_wake_lock_acquire(qdf_wake_lock_t *lock, uint32_t reason);
 
@@ -492,7 +552,27 @@ QDF_STATUS qdf_wake_lock_timeout_acquire(qdf_wake_lock_t *lock,
 
 QDF_STATUS qdf_wake_lock_release(qdf_wake_lock_t *lock, uint32_t reason);
 
-QDF_STATUS qdf_wake_lock_destroy(qdf_wake_lock_t *lock);
+/**
+ * __qdf_wake_lock_destroy() - destroy a wake lock
+ * @lock: The wake lock to destroy
+ * @func: caller function
+ * @line: caller line
+ *
+ * Return: None
+ */
+void __qdf_wake_lock_destroy(qdf_wake_lock_t *lock,
+			     const char *func, uint32_t line);
+
+/**
+ * qdf_wake_lock_destroy() - deinitialize a wakeup source lock
+ * @lock: the wakeup source lock to de-initialize
+ *
+ * Return: None
+ */
+#define qdf_wake_lock_destroy(lock) \
+	__qdf_wake_lock_destroy(lock, __func__, __LINE__)
+
+void qdf_pm_system_wakeup(void);
 
 QDF_STATUS qdf_runtime_pm_get(void);
 QDF_STATUS qdf_runtime_pm_put(void);

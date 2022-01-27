@@ -22,12 +22,8 @@
 		sw_gpio {
 			gpio3 {
 				gpio = <59>;
-				func = <0>;
-				pull = <GPIO_NO_PULL>;
-				drvstr = <GPIO_2MA>;
 				oe = <GPIO_OE_ENABLE>;
 				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
 				pu_res = <GPIO_PULL_RES2>;
 			};
 		};

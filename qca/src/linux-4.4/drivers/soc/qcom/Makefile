@@ -14,6 +14,7 @@ obj-$(CONFIG_MSM_IPC_ROUTER_GLINK_XPRT)	+=	ipc_router_glink_xprt.o
 obj-$(CONFIG_IPC_ROUTER)	+=	ipc_router/
 obj-$(CONFIG_MSM_QMI_INTERFACE)	+=	qmi_interface.o
 obj-$(CONFIG_MSM_RPM_GLINK)	+=	rpm-glink.o
+obj-$(CONFIG_MSM_RPM_RPMSG)	+=	rpm-rpmsg.o
 obj-$(CONFIG_MSM_RPM_LOG)	+=	rpm_log.o
 obj-$(CONFIG_QCOM_RESTART_REASON) += restart_reason.o
 obj-$(CONFIG_MSM_IPC_ROUTER_MHI_XPRT) += ipc_router_mhi_xprt.o
@@ -34,11 +35,21 @@ ifdef CONFIG_IPQ_SUBSYSTEM_RESTART
 	obj-y += subsystem_notif.o
 	obj-y += subsystem_restart.o
 	obj-y += ramdump.o
-	obj-$(CONFIG_IPQ_SUBSYSTEM_RESTART_TEST) += testssr.o
 endif
 
+	obj-$(CONFIG_IPQ_SUBSYSTEM_RESTART_TEST) += testssr.o
+
+obj-$(CONFIG_SOC_BUS)  +=      socinfo.o
 obj-$(CONFIG_QCOM_TZ_LOG) += tz_log.o
 obj-$(CONFIG_QCOM_MDT_LOADER)	+= mdt_loader.o
 obj-$(CONFIG_QCOM_GLINK_SSR)	+= qcom_glink_ssr.o
 obj-$(CONFIG_QCOM_QMI_HELPERS)	+= qmi_helpers.o
+obj-$(CONFIG_QCOM_QMI_RMNET)	+= qmi_rmnet.o
+obj-$(CONFIG_QCOM_QMI_DFC)	+= dfc_qmi.o dfc_qmap.o
+obj-$(CONFIG_QCOM_QMI_POWER_COLLAPSE) += wda_qmi.o
+obj-$(CONFIG_RMNET_CTL) += rmnet_ctl/
+obj-$(CONFIG_QTI_ADSPRPC_LOADER) += adsp-loader.o
 qmi_helpers-y	+= qmi_encdec.o qcom_qmi_interface.o
+obj-$(CONFIG_QTI_BT_TTY) += bt/
+obj-$(CONFIG_QTI_EUD) += eud.o
+obj-$(CONFIG_QGIC2_MSI) += qgic2m.o

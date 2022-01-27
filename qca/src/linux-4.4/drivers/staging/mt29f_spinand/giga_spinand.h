@@ -30,6 +30,8 @@ void winbond_set_defaults(struct spi_device *spi_nand);
 
 void macronix_set_defaults(struct spi_device *spi_nand);
 
+void fidelix_set_defaults(struct spi_device *spi_nand);
+
 void gigadevice_read_cmd(struct spinand_cmd *cmd, u32 page_id);
 
 void gigadevice_read_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
@@ -41,6 +43,8 @@ void gigadevice_write_cmd(struct spinand_cmd *cmd, u32 column);
 void gigadevice_write_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
 
 void gigadevice_erase_blk(struct spinand_cmd *cmd, u32 page_id);
+
+void fidelix_erase_blk(struct spinand_cmd *cmd, u32 page_id);
 
 int gigadevice_parse_id(struct spi_device *spi_nand, struct spinand_ops *ops,
 			u8 *nand_id, u8 *id);
@@ -74,6 +78,9 @@ int winbond_parse_id(struct spi_device *spi_nand, struct spinand_ops *ops,
 int winbond_die_select(struct spi_device *spi_nand,
 		       struct spinand_ops *dev_ops, u8 die_id);
 
+int fidelix_die_select(struct spi_device *spi_nand,
+		       struct spinand_ops *dev_ops, u8 die_id);
+
 void toshiba_read_cmd(struct spinand_cmd *cmd, u32 page_id);
 
 void toshiba_read_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
@@ -82,9 +89,20 @@ void toshiba_write_cmd(struct spinand_cmd *cmd, u32 page_id);
 
 void toshiba_write_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
 
+void fidelix_read_cmd(struct spinand_cmd *cmd, u32 page_id);
+
+void fidelix_read_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
+
+void fidelix_write_cmd(struct spinand_cmd *cmd, u32 page_id);
+
+void fidelix_write_data(struct spinand_cmd *cmd, u16 column, u32 page_id);
+
 void toshiba_erase_blk(struct spinand_cmd *cmd, u32 page_id);
 
 int toshiba_parse_id(struct spi_device *spi_nand, struct spinand_ops *ops,
+		     u8 *nand_id, u8 *id);
+
+int fidelix_parse_id(struct spi_device *spi_nand, struct spinand_ops *ops,
 		     u8 *nand_id, u8 *id);
 
 int toshiba_verify_ecc(u8 status);
@@ -94,4 +112,16 @@ int toshiba_verify_ecc(u8 status);
 
 /* Toshiba Specific defines */
 #define TOSHIBA_NORM_RW_MASK	0x1F
+
+/* Fidelix Specific defines */
+
+/* Introduce the 6th bit in the page address and insert the plane ID */
+#define INSERT_PLANE_CMD_BIT(x, plane)	(((x << 1) & 0xFFFFFF80) | (x & 0x3F) \
+								| (plane << 6))
+#define FIDELIX_PAGES_PER_PLANE		0x10000
+#define SET_CMD_PLANE_BIT(plane)	(plane << 4)
+#define GET_PLANE_ID(page)		(page / FIDELIX_PAGES_PER_PLANE)
+
+#define FIDELIX_NORM_RW_MASK	0x0F
+
 #endif /* __GIGA_SPI_NAND_H */

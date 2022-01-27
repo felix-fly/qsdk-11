@@ -14,16 +14,7 @@ Signed-off-by: John Crispin <john@phrozen.org>
 
 --- a/src/drivers/nl80211_copy.h
 +++ b/src/drivers/nl80211_copy.h
-@@ -2796,6 +2796,8 @@ enum nl80211_attrs {
- 
- 	NL80211_ATTR_TWT_RESPONDER,
- 
-+	NL80211_ATTR_HE_OBSS_PD,
-+
- 	/* add attributes here, update the policy in nl80211.c */
- 
- 	__NL80211_ATTR_AFTER_LAST,
-@@ -4231,6 +4233,10 @@ enum nl80211_chan_width {
+@@ -4285,6 +4285,10 @@ enum nl80211_chan_width {
  	NL80211_CHAN_WIDTH_160,
  	NL80211_CHAN_WIDTH_5,
  	NL80211_CHAN_WIDTH_10,
@@ -34,37 +25,14 @@ Signed-off-by: John Crispin <john@phrozen.org>
  };
  
  /**
-@@ -6484,4 +6490,26 @@ enum nl80211_peer_measurement_ftm_resp {
- 	NL80211_PMSR_FTM_RESP_ATTR_MAX = NUM_NL80211_PMSR_FTM_RESP_ATTR - 1
- };
- 
-+/**
-+ * enum nl80211_he_spr - spatial reuse attributes
-+ * @__NL80211_HE_OBSS_PD_ATTR_INVALID: Invalid
-+ *
-+ * @NL80211_ATTR_HE_OBSS_PD_MIN_OFFSET: the OBSS PD minimum tx power offset.
-+ * @NL80211_ATTR_HE_OBSS_PD_MAX_OFFSET: the OBSS PD maximum tx power offset.
-+ *
-+ * @__NL80211_HE_OBSS_PD_ATTR_LAST: Internal
-+ * @NL80211_HE_OBSS_PD_ATTR_MAX: highest spiatl reuse attribute.
-+ */
-+enum nl80211_he_spr_attributes {
-+	__NL80211_HE_OBSS_PD_ATTR_INVALID,
-+
-+	NL80211_ATTR_HE_OBSS_PD_MIN_OFFSET,
-+	NL80211_ATTR_HE_OBSS_PD_MAX_OFFSET,
-+
-+	/* keep last */
-+	__NL80211_ATTR_HE_OBSS_PD_LAST,
-+	NL80211_HE_OBSS_PD_ATTR_MAX = __NL80211_ATTR_HE_OBSS_PD_LAST - 1,
-+};
-+
-+
- #endif /* __LINUX_NL80211_H */
 --- a/src/ap/dfs.c
 +++ b/src/ap/dfs.c
-@@ -912,11 +912,13 @@ static int hostapd_dfs_testmode_set_beac
+@@ -920,13 +920,17 @@ static int hostapd_dfs_testmode_set_beac
+ 				      iface->conf->hw_mode,
+ 				      iface->freq,
  				      iface->conf->channel,
++				      iface->conf->enable_edmg,
++				      iface->conf->edmg_channel,
  				      iface->conf->ieee80211n,
  				      iface->conf->ieee80211ac,
 +				      iface->conf->ieee80211ax,

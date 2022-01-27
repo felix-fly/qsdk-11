@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -26,6 +26,7 @@
 #include "nss_tx_rx_common.h"
 #include "nss_data_plane.h"
 #include "nss_capwap.h"
+#include "nss_strings.h"
 
 #include <nss_hal.h>
 
@@ -306,7 +307,9 @@ static int nss_get_freq_table_handler(struct ctl_table *ctl, int write, void __u
 
 	i = 0;
 	while (i < NSS_FREQ_MAX_SCALE) {
-		printk("%d Hz ", nss_runtime_samples.freq_scale[i].frequency);
+		if (nss_runtime_samples.freq_scale[i].frequency != NSS_FREQ_SCALE_NA) {
+			printk("%d Hz ", nss_runtime_samples.freq_scale[i].frequency);
+		}
 		i++;
 	}
 	printk("\n");
@@ -657,9 +660,9 @@ static int __init nss_init(void)
 	}
 #endif
 #if defined(NSS_HAL_IPQ807x_SUPPORT)
-	if (of_machine_is_compatible("qcom,ipq807x")) {
+	if (of_machine_is_compatible("qcom,ipq807x") || of_machine_is_compatible("qcom,ipq8074")) {
 		nss_top_main.hal_ops = &nss_hal_ipq807x_ops;
-		nss_top_main.data_plane_ops = &nss_data_plane_edma_ops;
+		nss_top_main.data_plane_ops = &nss_data_plane_ops;
 #if defined(NSS_MEM_PROFILE_LOW)
 		nss_top_main.num_nss = 1;
 #else
@@ -670,7 +673,14 @@ static int __init nss_init(void)
 #if defined(NSS_HAL_IPQ60XX_SUPPORT)
 	if (of_machine_is_compatible("qcom,ipq6018")) {
 		nss_top_main.hal_ops = &nss_hal_ipq60xx_ops;
-		nss_top_main.data_plane_ops = &nss_data_plane_edma_ops;
+		nss_top_main.data_plane_ops = &nss_data_plane_ops;
+		nss_top_main.num_nss = 1;
+	}
+#endif
+#if defined(NSS_HAL_IPQ50XX_SUPPORT)
+	if (of_machine_is_compatible("qcom,ipq5018")) {
+		nss_top_main.hal_ops = &nss_hal_ipq50xx_ops;
+		nss_top_main.data_plane_ops = &nss_data_plane_ops;
 		nss_top_main.num_nss = 1;
 	}
 #endif
@@ -717,6 +727,11 @@ static int __init nss_init(void)
 	nss_stats_init();
 
 	/*
+	 * Enable NSS statistics names.
+	 */
+	nss_strings_init();
+
+	/*
 	 * Register sysctl table.
 	 */
 	nss_dev_header = register_sysctl_table(nss_root);
@@ -725,7 +740,9 @@ static int __init nss_init(void)
 	 * Registering sysctl for ipv4/6 specific config.
 	 */
 	nss_ipv4_register_sysctl();
+#ifdef NSS_DRV_IPV6_ENABLE
 	nss_ipv6_register_sysctl();
+#endif
 
 	/*
 	 * Registering sysctl for n2h specific config.
@@ -741,10 +758,17 @@ static int __init nss_init(void)
 	 */
 	nss_rps_register_sysctl();
 
+#ifdef NSS_DRV_C2C_ENABLE
 	/*
 	 * Registering sysctl for c2c_tx specific config.
 	 */
 	nss_c2c_tx_register_sysctl();
+#endif
+
+	/*
+	 * Registering sysctl for for printing non zero stats.
+	 */
+	nss_stats_register_sysctl();
 
 	/*
 	 * Register sysctl for project config
@@ -802,37 +826,58 @@ static int __init nss_init(void)
 	nss_coredump_notify_register();
 	nss_coredump_init_delay_work();
 
+#ifdef NSS_DRV_CAPWAP_ENABLE
 	/*
 	 * Init capwap
 	 */
 	nss_capwap_init();
+#endif
 
+#ifdef NSS_DRV_QRFS_ENABLE
 	/*
 	 * Init QRFS
 	 */
 	nss_qrfs_init();
+#endif
 
+#ifdef NSS_DRV_C2C_ENABLE
 	/*
 	 * Init c2c_tx
 	 */
 	nss_c2c_tx_init();
+#endif
 
+#ifdef NSS_DRV_PVXLAN_ENABLE
 	/*
 	 * Init pvxlan
 	 */
 	nss_pvxlan_init();
+#endif
 
+#ifdef NSS_DRV_CLMAP_ENABLE
 	/*
 	 * Init clmap
 	 */
 	nss_clmap_init();
+#endif
 
 	/*
 	 * INIT ppe on supported platform
 	 */
-	if (of_machine_is_compatible("qcom,ipq807x") || of_machine_is_compatible("qcom,ipq6018")) {
-		nss_ppe_init();
-	}
+#ifdef NSS_DRV_PPE_ENABLE
+	nss_ppe_init();
+#endif
+
+#ifdef NSS_DRV_DMA_ENABLE
+	nss_dma_init();
+#endif
+
+	/*
+	 * Init Wi-Fi mesh
+	 */
+#ifdef NSS_DRV_WIFI_MESH_ENABLE
+	nss_wifi_mesh_init();
+#endif
 
 	/*
 	 * Register platform_driver
@@ -861,10 +906,12 @@ static void __exit nss_cleanup(void)
 	 */
 	nss_rps_unregister_sysctl();
 
+#ifdef NSS_DRV_C2C_ENABLE
 	/*
 	 * Unregister c2c_tx specific sysctl
 	 */
 	nss_c2c_tx_unregister_sysctl();
+#endif
 
 	/*
 	 * Unregister pppoe specific sysctl
@@ -872,16 +919,15 @@ static void __exit nss_cleanup(void)
 	nss_pppoe_unregister_sysctl();
 
 	/*
-	 * Unregister ipv4/6 specific sysctl
+	 * Unregister ipv4/6 specific sysctl and free allocated to connection tables
 	 */
 	nss_ipv4_unregister_sysctl();
-	nss_ipv6_unregister_sysctl();
-
-	/*
-	 * Free Memory allocated for connection tables
-	 */
 	nss_ipv4_free_conn_tables();
+
+#ifdef NSS_DRV_IPV6_ENABLE
+	nss_ipv6_unregister_sysctl();
 	nss_ipv6_free_conn_tables();
+#endif
 
 	nss_project_unregister_sysctl();
 	nss_data_plane_destroy_delay_work();
@@ -889,9 +935,9 @@ static void __exit nss_cleanup(void)
 	/*
 	 * cleanup ppe on supported platform
 	 */
-	if (of_machine_is_compatible("qcom,ipq807x") || of_machine_is_compatible("qcom,ipq6018")) {
-		nss_ppe_free();
-	}
+#ifdef NSS_DRV_PPE_ENABLE
+	nss_ppe_free();
+#endif
 
 	platform_driver_unregister(&nss_driver);
 }

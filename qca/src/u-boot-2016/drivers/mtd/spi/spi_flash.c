@@ -24,6 +24,11 @@
 #define CMD_S25FSXX_BE	0x60
 #endif
 
+#if defined CONFIG_SPI_FLASH_CYPRESS
+#define CYPRESS_JEDEC_ID	0x012018
+#define CYPRESS_EXT_JEDEC_ID	0x4d01
+#endif
+
 DECLARE_GLOBAL_DATA_PTR;
 
 static void spi_flash_addr(struct spi_flash *flash, u32 addr, u8 *cmd)
@@ -380,6 +385,22 @@ int spi_flash_cmd_erase_ops(struct spi_flash *flash, u32 offset, size_t len)
 	while (len) {
 		erase_addr = offset;
 
+#ifdef CONFIG_SPI_FLASH_CYPRESS
+		if ((flash->jedec == CYPRESS_JEDEC_ID) &&
+			(flash->ext_jedec ==  CYPRESS_EXT_JEDEC_ID)){
+			if (offset <= (SZ_32K - SZ_4K)){
+				cmd[0] = CMD_ERASE_4K;
+				erase_size = SZ_4K;
+			}else {
+				cmd[0] = CMD_ERASE_64K;
+				if (offset < SZ_64K){
+					erase_size = SZ_32K;
+				}else {
+					erase_size = SZ_64K;
+				}
+			}
+		}
+#endif
 #ifdef CONFIG_SF_DUAL_FLASH
 		if (flash->dual_flash > SF_SINGLE_FLASH)
 			spi_flash_dual(flash, &erase_addr);
@@ -1120,6 +1141,8 @@ try_with_dummy_byte:
 
 	/* Assign spi data */
 	flash->name = params->name;
+	flash->jedec = params->jedec;
+	flash->ext_jedec = params->ext_jedec;
 	flash->memory_map = spi->memory_map;
 	flash->dual_flash = flash->spi->option;
 

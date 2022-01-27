@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -989,7 +989,7 @@ static void cmd_data_print_ctrlpkt_func_ctrl(fal_func_ctrl_t *p)
 static void cmd_data_print_policer_func_ctrl(fal_func_ctrl_t *p)
 {
 	a_uint32_t func = 0;
-	char *func_name[FUNC_ADPT_POLICER_GLOBAL_COUNTER_GET+1] ={
+	char *func_name[FUNC_ADPT_POLICER_BYPASS_EN_GET+1] ={
 		"FUNC_ADPT_ACL_POLICER_COUNTER_GET",
 		"FUNC_ADPT_PORT_POLICER_COUNTER_GET",
 		"FUNC_ADPT_PORT_COMPENSATION_BYTE_GET",
@@ -1001,10 +1001,12 @@ static void cmd_data_print_policer_func_ctrl(fal_func_ctrl_t *p)
 		"FUNC_ADPT_PORT_COMPENSATION_BYTE_SET",
 		"FUNC_ADPT_POLICER_TIME_SLOT_SET",
 		"FUNC_ADPT_POLICER_GLOBAL_COUNTER_GET",
+		"FUNC_ADPT_POLICER_BYPASS_EN_SET",
+		"FUNC_ADPT_POLICER_BYPASS_EN_GET",
 
 	};
 
-	for(func = FUNC_ADPT_ACL_POLICER_COUNTER_GET; func <= FUNC_ADPT_POLICER_GLOBAL_COUNTER_GET; func++)
+	for(func = FUNC_ADPT_ACL_POLICER_COUNTER_GET; func <= FUNC_ADPT_POLICER_BYPASS_EN_GET; func++)
 	{
 		if(p->bitmap[0] & (1<<func))
 		{

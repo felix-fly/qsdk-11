@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2017, 2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -55,9 +55,18 @@ static struct nla_policy nss_wred_policy[TCA_NSSWRED_MAX + 1] = {
  * nss_wred_enqueue()
  *	Enqueue API for nsswred qdisc
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 static int nss_wred_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+#else
+static int nss_wred_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+				struct sk_buff **to_free)
+#endif
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	return nss_qdisc_enqueue(skb, sch);
+#else
+	return nss_qdisc_enqueue(skb, sch, to_free);
+#endif
 }
 
 /*
@@ -69,6 +78,7 @@ static struct sk_buff *nss_wred_dequeue(struct Qdisc *sch)
 	return nss_qdisc_dequeue(sch);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 /*
  * nss_wred_drop()
  *	Drops a packet from HLOS queue.
@@ -78,6 +88,7 @@ static unsigned int nss_wred_drop(struct Qdisc *sch)
 	nss_qdisc_info("nsswred dropping");
 	return nss_qdisc_drop(sch);
 }
+#endif
 
 /*
  * nss_wred_reset()
@@ -111,7 +122,11 @@ static void nss_wred_destroy(struct Qdisc *sch)
  * nss_wred_ppe_change()
  *	Function call to configure the nssred parameters for ppe qdisc.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 static int nss_wred_ppe_change(struct Qdisc *sch, struct nlattr *opt)
+#else
+static int nss_wred_ppe_change(struct Qdisc *sch, struct nlattr *opt, struct netlink_ext_ack *extack)
+#endif
 {
 	struct nss_wred_sched_data *q = qdisc_priv(sch);
 	struct nss_qdisc *nq = &q->nq;
@@ -159,8 +174,12 @@ fail:
 	/*
 	 * Fallback to nss qdisc if PPE Qdisc configuration failed at init time.
 	 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 	if (nss_ppe_fallback_to_nss(&q->nq, opt) < 0) {
-		nss_qdisc_warning("nss_wred %x fallback to nss failed\n", sch->handle);
+#else
+	if (nss_ppe_fallback_to_nss(&q->nq, opt, extack) < 0) {
+#endif
+	nss_qdisc_warning("nss_wred %x fallback to nss failed\n", sch->handle);
 		return -EINVAL;
 	}
 	return 0;
@@ -171,9 +190,15 @@ fail:
  * nss_wred_change()
  *	Function call to configure the nsswred parameters
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 static int nss_wred_change(struct Qdisc *sch, struct nlattr *opt)
+#else
+static int nss_wred_change(struct Qdisc *sch, struct nlattr *opt,
+				struct netlink_ext_ack *extack)
+#endif
 {
 	struct nss_wred_sched_data *q = qdisc_priv(sch);
+	struct nlattr *tb[TCA_NSSWRED_MAX + 1];
 	struct tc_nsswred_qopt *qopt;
 	struct nss_if_msg nim;
 
@@ -181,7 +206,11 @@ static int nss_wred_change(struct Qdisc *sch, struct nlattr *opt)
 		return -EINVAL;
 	}
 
-	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, tb, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS);
+#else
+	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, tb, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS, extack);
+#endif
 	if (!qopt) {
 		return -EINVAL;
 	}
@@ -253,8 +282,12 @@ static int nss_wred_change(struct Qdisc *sch, struct nlattr *opt)
 
 #if defined(NSS_QDISC_PPE_SUPPORT)
 	if (q->nq.mode == NSS_QDISC_MODE_PPE) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 		if (nss_wred_ppe_change(sch, opt) < 0) {
-			nss_qdisc_warning("nss_wred %p params validate and save failed\n", sch);
+#else
+		if (nss_wred_ppe_change(sch, opt, extack) < 0) {
+#endif
+			nss_qdisc_warning("nss_wred %px params validate and save failed\n", sch);
 			return -EINVAL;
 		}
 		return 0;
@@ -298,16 +331,28 @@ static int nss_wred_change(struct Qdisc *sch, struct nlattr *opt)
  * nss_wred_init()
  *	Init the nsswred qdisc
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 static int nss_wred_init(struct Qdisc *sch, struct nlattr *opt)
 {
+	struct netlink_ext_ack *extack = NULL;
+#else
+static int nss_wred_init(struct Qdisc *sch, struct nlattr *opt,
+				struct netlink_ext_ack *extack)
+{
+#endif
 	struct nss_qdisc *nq = qdisc_priv(sch);
+	struct nlattr *tb[TCA_NSSWRED_MAX + 1];
 	struct tc_nsswred_qopt *qopt;
 
 	if (opt == NULL) {
 		return -EINVAL;
 	}
 
-	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, tb, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS);
+#else
+	qopt = nss_qdisc_qopt_get(opt, nss_wred_policy, tb, TCA_NSSWRED_MAX, TCA_NSSWRED_PARMS, extack);
+#endif
 	if (!qopt) {
 		return -EINVAL;
 	}
@@ -315,11 +360,17 @@ static int nss_wred_init(struct Qdisc *sch, struct nlattr *opt)
 	nss_qdisc_info("Initializing Wred - type %d\n", NSS_SHAPER_NODE_TYPE_WRED);
 	nss_wred_reset(sch);
 
-	if (nss_qdisc_init(sch, nq, NSS_SHAPER_NODE_TYPE_WRED, 0, qopt->accel_mode) < 0)
+	if (nss_qdisc_init(sch, nq, NSS_SHAPER_NODE_TYPE_WRED, 0, qopt->accel_mode, extack) < 0)
+	{
 		return -EINVAL;
+	}
 
 	nss_qdisc_info("NSS wred initialized - handle %x parent %x\n", sch->handle, sch->parent);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 	if (nss_wred_change(sch, opt) < 0) {
+#else
+	if (nss_wred_change(sch, opt, extack) < 0) {
+#endif
 		nss_qdisc_destroy(nq);
 		return -EINVAL;
 	}
@@ -374,7 +425,7 @@ static int nss_wred_dump(struct Qdisc *sch, struct sk_buff *skb)
 	opt.set_default = q->set_default;
 	opt.accel_mode = nss_qdisc_accel_mode_get(&q->nq);
 
-	opts = nla_nest_start(skb, TCA_OPTIONS);
+	opts = nss_qdisc_nla_nest_start(skb, TCA_OPTIONS);
 	if (opts == NULL || nla_put(skb, TCA_NSSWRED_PARMS, sizeof(opt), &opt)) {
 		goto nla_put_failure;
 	}
@@ -405,7 +456,9 @@ struct Qdisc_ops nss_red_qdisc_ops __read_mostly = {
 	.enqueue	=	nss_wred_enqueue,
 	.dequeue	=	nss_wred_dequeue,
 	.peek		=	nss_wred_peek,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	.drop		=	nss_wred_drop,
+#endif
 	.init		=	nss_wred_init,
 	.reset		=	nss_wred_reset,
 	.destroy	=	nss_wred_destroy,
@@ -423,7 +476,9 @@ struct Qdisc_ops nss_wred_qdisc_ops __read_mostly = {
 	.enqueue	=	nss_wred_enqueue,
 	.dequeue	=	nss_wred_dequeue,
 	.peek		=	nss_wred_peek,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	.drop		=	nss_wred_drop,
+#endif
 	.init		=	nss_wred_init,
 	.reset		=	nss_wred_reset,
 	.destroy	=	nss_wred_destroy,

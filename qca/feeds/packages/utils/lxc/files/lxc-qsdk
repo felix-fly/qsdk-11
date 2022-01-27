@@ -32,7 +32,6 @@ eval set -- "$OPT"
 
 usage()
 {
-	
 echo " \"$1\" -h|--help -p|--p=<path>"
 return 0
 }
@@ -41,19 +40,19 @@ return 0
 while true
 do
     case "$1" in
-        -h|--help)	usage $0 && exit 0;;
-	-p|--path)      path=$2; shift 2;;
-        --rootfs)       rootfs=$2; shift 2;;
-        -n|--name)      name=$2; shift 2;;
-       --)             shift 1; break ;;
-        *)              break ;;
+        -h|--help)    usage $0 && exit 0;;
+        -p|--path)    path=$2; shift 2;;
+        --rootfs)     rootfs=$2; shift 2;;
+        -n|--name)    name=$2; shift 2;;
+       --)            shift 1; break ;;
+        *)            break ;;
     esac
 done
 
 
 rootfs=$path/rootfs
 
-mkdir -p $rootfs && cd $rootfs && tar -xzf $(uci_get lxc.@common[0].image)
-grep -q "^lxc.rootfs" $path/config 2>/dev/null || echo "lxc.rootfs = $rootfs" >> $path/config
-grep -q "^lxc.haltsignal" $path/config 2>/dev/null || echo "lxc.haltsignal= SIGUSR1"  >> $path/config
+mkdir -p $rootfs && cd $rootfs && tar -xzf $(uci_get lxc-auto.@common[0].image)
+grep -q "^lxc.rootfs.path" $path/config 2>/dev/null || echo "lxc.rootfs.path = $rootfs" >> $path/config
+grep -q "^lxc.signal.halt" $path/config 2>/dev/null || echo "lxc.signal.halt= SIGUSR1"  >> $path/config
 grep -q "^lxc.include" $path/config 2>/dev/null || echo "lxc.include =/usr/share/lxc/config/openwrt.common.conf" >> $path/config

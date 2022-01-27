@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014, 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -57,6 +57,8 @@ struct htc_init_info {
 	void (*target_initial_wakeup_cb)(void *cb_ctx);
 	void *target_psoc;
 	uint32_t cfg_wmi_credit_cnt;
+	/* HTC Pipe Ready Timeout in msecs */
+	uint32_t htc_ready_timeout_ms;
 };
 
 /* Struct for HTC layer packet stats*/
@@ -68,6 +70,8 @@ struct ol_ath_htc_stats {
 
 /* To resume HTT Tx queue during runtime resume */
 typedef void (*HTC_EP_RESUME_TX_QUEUE)(void *);
+
+typedef int (*HTC_EP_PADDING_CREDIT_UPDATE) (void *, int);
 
 /* per service connection send completion */
 typedef void (*HTC_EP_SEND_PKT_COMPLETE)(void *, HTC_PACKET *);
@@ -175,6 +179,8 @@ struct htc_ep_callbacks {
 	HTC_EP_SEND_PKT_COMP_MULTIPLE EpTxCompleteMultiple;
 
 	HTC_EP_RESUME_TX_QUEUE ep_resume_tx_queue;
+
+	HTC_EP_PADDING_CREDIT_UPDATE ep_padding_credit_update;
 	/* if EpRecvAllocThresh is non-NULL, HTC will compare the
 	 * threshold value to the current recv packet length and invoke
 	 * the EpRecvAllocThresh callback to acquire a packet buffer
@@ -382,6 +388,26 @@ struct htc_endpoint_stats {
 	uint32_t RxAllocThreshBytes;
 };
 
+/**
+ * htc_link_vote_user_id - user ids for each link vote type
+ * @HTC_LINK_VOTE_INVALID_MIN_USER_ID: min user id
+ * @HTC_LINK_VOTE_SAP_USER_ID: sap user id
+ * @HTC_LINK_VOTE_GO_USER_ID: go user id
+ * @HTC_LINK_VOTE_NDP_USER_ID: ndp user id
+ * @HTC_LINK_VOTE_SAP_DFS_USER_ID: sap dfs user id
+ * @HTC_LINK_VOTE_STA_USER_ID: sta user id
+ * @HTC_LINK_VOTE_INVALID_MAX_USER_ID: max user id
+ */
+enum htc_link_vote_user_id {
+	HTC_LINK_VOTE_INVALID_MIN_USER_ID = 0,
+	HTC_LINK_VOTE_SAP_USER_ID = 1,
+	HTC_LINK_VOTE_GO_USER_ID = 2,
+	HTC_LINK_VOTE_NDP_USER_ID = 3,
+	HTC_LINK_VOTE_SAP_DFS_USER_ID = 4,
+	HTC_LINK_VOTE_STA_USER_ID = 5,
+	HTC_LINK_VOTE_INVALID_MAX_USER_ID
+};
+
 /* ------ Function Prototypes ------ */
 /**
  * htc_create - Create an instance of HTC over the underlying HIF device
@@ -476,6 +502,15 @@ QDF_STATUS htc_connect_service(HTC_HANDLE HTCHandle,
  * Return: None
  */
 void htc_dump(HTC_HANDLE HTCHandle, uint8_t CmdId, bool start);
+
+/**
+ * htc_ce_taklet_debug_dump - Dump ce tasklet rings debug data
+ * @HTCHandle - HTC handle
+ *
+ * Debug logs will be printed.
+ * Return: None
+ */
+void htc_ce_tasklet_debug_dump(HTC_HANDLE htc_handle);
 
 /**
  * htc_send_pkt - Send an HTC packet
@@ -642,6 +677,15 @@ bool htc_is_endpoint_active(HTC_HANDLE HTCHandle,
 			      HTC_ENDPOINT_ID Endpoint);
 
 /**
+ * htc_set_pkt_dbg - Set up debug flag for HTC packets
+ * @HTCHandle - HTC handle
+ * @dbg_flag - enable or disable flag
+ *
+ * Return: none
+ */
+void htc_set_pkt_dbg(HTC_HANDLE handle, A_BOOL dbg_flag);
+
+/**
  * htc_set_nodrop_pkt - Set up nodrop pkt flag for mboxping nodrop pkt
  * @HTCHandle - HTC handle
  * @isNodropPkt - indicates whether it is nodrop pkt
@@ -734,8 +778,7 @@ void htc_global_credit_flow_enable(void);
 
 /* Disable ASPM : Disable PCIe low power */
 bool htc_can_suspend_link(HTC_HANDLE HTCHandle);
-void htc_vote_link_down(HTC_HANDLE HTCHandle);
-void htc_vote_link_up(HTC_HANDLE HTCHandle);
+
 #ifdef IPA_OFFLOAD
 void htc_ipa_get_ce_resource(HTC_HANDLE htc_handle,
 			     qdf_shared_mem_t **ce_sr,
@@ -768,9 +811,72 @@ void htc_clear_bundle_stats(HTC_HANDLE HTCHandle);
 #ifdef FEATURE_RUNTIME_PM
 int htc_pm_runtime_get(HTC_HANDLE htc_handle);
 int htc_pm_runtime_put(HTC_HANDLE htc_handle);
+
+/**
+ * htc_dec_return_runtime_cnt: Decrement htc runtime count
+ * @htc: HTC handle
+ *
+ * Return: value of runtime count after decrement
+ */
+int32_t htc_dec_return_runtime_cnt(HTC_HANDLE htc);
 #else
 static inline int htc_pm_runtime_get(HTC_HANDLE htc_handle) { return 0; }
 static inline int htc_pm_runtime_put(HTC_HANDLE htc_handle) { return 0; }
+
+static inline
+int32_t htc_dec_return_runtime_cnt(HTC_HANDLE htc)
+{
+	return -1;
+}
+#endif
+
+#ifdef WLAN_DEBUG_LINK_VOTE
+/**
+ * htc_log_link_user_votes - API to log link user votes
+ *
+ * API to log the link user votes
+ *
+ * Return: void
+ */
+void htc_log_link_user_votes(void);
+
+/**
+ * htc_vote_link_down - API to vote for link down
+ * @htc_handle: HTC handle
+ * @id: PCIe link vote user id
+ *
+ * API for upper layers to call HIF to vote for link down
+ *
+ * Return: void
+ */
+void htc_vote_link_down(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id);
+
+/**
+ * htc_vote_link_up - API to vote for link up
+ * @htc_handle: HTC Handle
+ * @id: PCIe link vote user id
+ *
+ * API for upper layers to call HIF to vote for link up
+ *
+ * Return: void
+ */
+void htc_vote_link_up(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id);
+
+#else
+static inline
+void htc_log_link_user_votes(void)
+{
+}
+
+static inline
+void htc_vote_link_down(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
+}
+
+static inline
+void htc_vote_link_up(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
+}
 #endif
 
 /**
@@ -822,6 +928,21 @@ void htc_print_credit_history(HTC_HANDLE htc, uint32_t count,
 			      qdf_abstract_print *print, void *print_priv)
 {
 	print(print_priv, "HTC Credit History Feature is disabled");
+}
+#endif
+
+#ifdef SYSTEM_PM_CHECK
+/**
+ * htc_system_resume() - Send out any pending WMI/HTT
+ *  messages pending in htc queues on system resume.
+ * @htc: HTC handle
+ *
+ * Return: None
+ */
+void htc_system_resume(HTC_HANDLE htc);
+#else
+static inline void htc_system_resume(HTC_HANDLE htc)
+{
 }
 #endif
 #endif /* _HTC_API_H_ */

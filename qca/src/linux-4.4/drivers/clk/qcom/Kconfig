@@ -44,6 +44,29 @@ config IPQ_ADCC_4019
 	  Audio clocks TXM, RXM, TXB and RXB depend on ADCC. ADCC also is used for
 	  selecting the pad's as the source for the ADSS [audio subsystem] clocks.
 
+config IPQ_APSS_5018
+	tristate "IPQ5018 APSS Clock Controller"
+	select IPQ_GCC_5018
+	depends on COMMON_CLK_QCOM
+	help
+	  Support for APSS clock controller on ipq6018 devices.
+	  Say Y if you want to use APSS clocks such as CPU.
+
+config IPQ_GCC_5018
+	tristate "IPQ5018 Global Clock Controller"
+	depends on COMMON_CLK_QCOM
+	help
+	  Support for global clock controller on ipq5018 devices.
+	  Say Y if you want to use peripheral devices such as UART, SPI,
+	  i2c, USB, SD/eMMC, etc. Select this for the root clock
+	  of ipq5018.
+
+config CLK_TEST_5018
+	tristate "IPQ5018 Clock Test Debug Module"
+	depends on IPQ_GCC_5018
+	help
+	  Support for clock testing on ipq5018 devices.
+
 config IPQ_APSS_6018
 	tristate "IPQ6018 APSS Clock Controller"
 	select IPQ_GCC_6018

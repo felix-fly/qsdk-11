@@ -195,6 +195,19 @@ struct vxlan_dev {
 					 VXLAN_F_REMCSUM_NOPARTIAL |	\
 					 VXLAN_F_COLLECT_METADATA)
 
+/*
+ * Application data for fdb notifier event
+ */
+struct vxlan_fdb_event {
+	struct net_device *dev;
+	struct vxlan_rdst *rdst;
+	u8 eth_addr[ETH_ALEN];
+};
+
+extern void vxlan_fdb_register_notify(struct notifier_block *nb);
+extern void vxlan_fdb_unregister_notify(struct notifier_block *nb);
+extern void vxlan_fdb_update_mac(struct vxlan_dev *vxlan, const u8 *mac);
+
 struct net_device *vxlan_dev_create(struct net *net, const char *name,
 				    u8 name_assign_type, struct vxlan_config *conf);
 
@@ -249,6 +262,31 @@ static inline void vxlan_get_rx_port(struct net_device *netdev)
 {
 }
 #endif
+
+/*
+ * vxlan_get_vni()
+ *	Returns vni of corresponding tunnel
+ */
+static inline u32 vxlan_get_vni(struct vxlan_dev *vxlan_tun)
+{
+	return vxlan_tun->cfg.vni;
+}
+
+/*
+ * netif_is_vxlan()
+ *	Check if it is a VxLAN netdevice.
+ */
+static inline bool netif_is_vxlan(const struct net_device *dev)
+{
+	if (!dev)
+		return false;
+
+	if ((dev->dev.type) &&
+		!strncmp(dev->dev.type->name, "vxlan", sizeof("vxlan"))) {
+		return true;
+	}
+	return false;
+}
 
 static inline unsigned short vxlan_get_sk_family(struct vxlan_sock *vs)
 {

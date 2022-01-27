@@ -13,7 +13,8 @@ from parser_util import register_parser, RamParser
 from print_out import print_out_str
 import sys
 
-@register_parser('--pmic-reg', 'Print the pmic register info')
+# Disabled pmic-reg extraction for all the chipsets
+# @register_parser('--pmic-reg', 'Print the pmic register info')
 
 class PMIC(RamParser):
     def parse(self):

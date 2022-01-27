@@ -55,6 +55,10 @@ class RunQueues(RamParser):
         se_offset = self.ramdump.field_offset('struct task_struct', 'se')
         cfs_nr_running_offset = self.ramdump.field_offset(
             'struct cfs_rq', 'nr_running')
+        if cfs_nr_running_offset < 0:
+            print_out_str("cfs_rq not available")
+            return
+
         my_q_offset = self.ramdump.field_offset('struct sched_entity', 'my_q')
 
         if se_addr == 0 or se_addr is None or my_q_offset == 0 or my_q_offset is None:
@@ -128,6 +132,10 @@ class RunQueues(RamParser):
         active_offset = self.ramdump.field_offset('struct rt_rq', 'active')
         queue_offset = self.ramdump.field_offset(
             'struct rt_prio_array', 'queue')
+        if queue_offset < 0:
+            print_out_str("rt_prio_array not available")
+            return
+
         rt_offset = self.ramdump.field_offset('struct task_struct', 'rt')
 
         array_addr = rt_rq_addr + active_offset
@@ -173,7 +181,7 @@ class RunQueues(RamParser):
             incr = 8
         else:
             incr = 4
-        for i in range(stack_addr, stack_addr + 0x2000, incr):
+        for i in range(stack_addr, stack_addr + self.ramdump.thread_size, incr):
             callstack_addr = self.ramdump.read_word(i)
             if (text_start_addr <= callstack_addr < text_end_addr) or \
                (0xbf000000 <= callstack_addr < 0xbfe00000) or (self.ramdump.isELF64() and (0xffffffbffc000000 <= callstack_addr < 0xffffffbffe000000)):
@@ -196,7 +204,7 @@ class RunQueues(RamParser):
                     print_out_str('<0x{0:x}>:{1} [0x{2:x}]'.format(i, symname, callstack_addr))
 
     def stack_dump_trace(self, svc_r13_core):
-        stext = self.ramdump.addr_lookup('stext')
+        stext = self.ramdump.addr_lookup('_stext')
         etext = self.ramdump.addr_lookup('_etext')
         stack_offset = self.ramdump.field_offset('struct task_struct', 'stack')
         if(self.ramdump.isELF64()):
@@ -212,7 +220,7 @@ class RunQueues(RamParser):
             incr = 8
         else:
             incr = 4
-        for i in range(svc_r13_core, svc_r13_core + 0x2000, incr):
+        for i in range(svc_r13_core, svc_r13_core + self.ramdump.thread_size, incr):
              stack_addr = self.ramdump.read_word(i)
              if stack_addr is None:
                  continue

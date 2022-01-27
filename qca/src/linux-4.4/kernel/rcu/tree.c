@@ -392,6 +392,9 @@ module_param(blimit, long, 0444);
 module_param(qhimark, long, 0444);
 module_param(qlowmark, long, 0444);
 
+int rcu_cpu_stall_panic __read_mostly; /* 1 = panic when cpu stall. */
+module_param(rcu_cpu_stall_panic, int, 0644);
+
 static ulong jiffies_till_first_fqs = ULONG_MAX;
 static ulong jiffies_till_next_fqs = ULONG_MAX;
 
@@ -1327,6 +1330,8 @@ static void print_cpu_stall(struct rcu_state *rsp)
 
 	rcu_dump_cpu_stacks(rsp);
 
+	if (rcu_cpu_stall_panic)
+		panic("print_cpu_stall");
 	raw_spin_lock_irqsave(&rnp->lock, flags);
 	if (ULONG_CMP_GE(jiffies, READ_ONCE(rsp->jiffies_stall)))
 		WRITE_ONCE(rsp->jiffies_stall,

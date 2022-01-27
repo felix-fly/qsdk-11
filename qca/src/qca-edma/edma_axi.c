@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014 - 2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -188,6 +188,7 @@ static u32 edma_rss_acl_queue_map __read_mostly = EDMA_DEFAULT_RSS_ACL_QUEUE_MAP
 static int edma_weight_assigned_to_q __read_mostly;
 static int edma_queue_to_virtual_q __read_mostly;
 static bool edma_enable_rstp  __read_mostly;
+static bool edma_enable_jumbo_multi_segment  __read_mostly;
 static int edma_athr_hdr_eth_type __read_mostly;
 
 static int page_mode;
@@ -262,7 +263,7 @@ void edma_read_append_stats(struct edma_common_info *edma_cinfo)
 	int i;
 	u32 stat;
 
-	spin_lock(&edma_cinfo->stats_lock);
+	spin_lock_bh(&edma_cinfo->stats_lock);
 	p = (u64 *)&(edma_cinfo->edma_ethstats);
 
 	for (i = 0; i < EDMA_MAX_TRANSMIT_QUEUE; i++) {
@@ -289,7 +290,7 @@ void edma_read_append_stats(struct edma_common_info *edma_cinfo)
 		p++;
 	}
 
-	spin_unlock(&edma_cinfo->stats_lock);
+	spin_unlock_bh(&edma_cinfo->stats_lock);
 }
 
 static void edma_statistics_timer(unsigned long data)
@@ -936,6 +937,19 @@ static int edma_disable_rss_func(struct ctl_table *table, int write,
 	return ret;
 }
 
+static int edma_jumbo_multi_segment(struct ctl_table *table, int write,
+				   void __user *buffer, size_t *lenp,
+				   loff_t *ppos)
+{
+	int ret;
+
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (write)
+		edma_set_jumbo_multi_segment(edma_enable_jumbo_multi_segment);
+
+	return ret;
+}
+
 static int edma_rss_acl_queue_map_handler(struct ctl_table *table, int write,
 				   void __user *buffer, size_t *lenp,
 				   loff_t *ppos)
@@ -1231,6 +1245,13 @@ static struct ctl_table edma_table[] = {
 		.mode           = 0644,
 		.proc_handler   = edma_rss_acl_queue_map_handler,
 	},
+	{
+		.procname       = "jumbo_multi_segment",
+		.data           = &edma_enable_jumbo_multi_segment,
+		.maxlen         = sizeof(int),
+		.mode           = 0644,
+		.proc_handler   = edma_jumbo_multi_segment,
+	},
 	{}
 };
 
@@ -1358,11 +1379,11 @@ static int edma_axi_probe(struct platform_device *pdev)
 	}
 
 	if (of_property_read_bool(np, "qcom,tx-ring-count"))
-		of_property_read_u32(np, "qcom,tx-ring-count",
+		of_property_read_u16(np, "qcom,tx-ring-count",
 			&edma_cinfo->tx_ring_count);
 
 	if (of_property_read_bool(np, "qcom,rx-ring-count"))
-		of_property_read_u32(np, "qcom,rx-ring-count",
+		of_property_read_u16(np, "qcom,rx-ring-count",
 				     &edma_cinfo->rx_ring_count);
 
 	/* Set tx completion affinity map for the edma script */

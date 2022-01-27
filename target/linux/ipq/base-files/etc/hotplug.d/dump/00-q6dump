@@ -1,6 +1,6 @@
 #!/bin/sh
 : '
- Copyright (c) 2017, The Linux Foundation. All rights reserved.
+ Copyright (c) 2017, 2021 The Linux Foundation. All rights reserved.
 
  Permission to use, copy, modify, and/or distribute this software for any
  purpose with or without fee is hereby granted, provided that the above
@@ -33,6 +33,24 @@ if [ -e /dev/$DEVICENAME ] && [ "$ACTION" = add ]; then
 		printf "%s\n" "$DEVICENAME dump collection failed in $SERVER" \
 								> /dev/console
 	fi
-	cd -
+	cd /proc/ath_pktlog
+	for radio in wifi0 wifi1 wifi2 wifi3 wifi4
+	do
+		ssr_hit=0
+		if [ -e /proc/sys/ath_pktlog/$radio ]; then
+			ssr_hit=$(cat /proc/sys/ath_pktlog/$radio/ssr_hit)
+			if [ $ssr_hit -eq 1 ]; then
+				echo 0 > /proc/sys/ath_pktlog/$radio/ssr_hit
+				$(tftp -l $radio -r pktlog_$radio.dat -p $SERVER 2>&1)
+				if [ $? -eq 0 ]; then
+					printf "%s\n" "$radio pktlog collected in $SERVER" \
+						> /dev/console
+				else
+					printf "%s\n" "$radio pktlog collect failed in $SERVER" \
+						> /dev/console
+				fi
+			fi
+		fi
+	done
+	cd /
 fi
-

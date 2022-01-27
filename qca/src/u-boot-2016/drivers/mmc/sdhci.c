@@ -672,8 +672,11 @@ int add_sdhci(struct sdhci_host *host, u32 max_clk, u32 min_clk)
 
 	if (host->quirks & SDHCI_QUIRK_BROKEN_VOLTAGE)
 		host->cfg.voltages |= host->voltages;
-
-	host->cfg.host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz | MMC_MODE_8BIT;
+#ifdef CONFIG_MMC_FORCE_CAP_4BIT_BUSWIDTH
+        host->cfg.host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz | MMC_MODE_4BIT;
+#else
+        host->cfg.host_caps = MMC_MODE_HS | MMC_MODE_HS_52MHz | MMC_MODE_8BIT;
+#endif
 	if (SDHCI_GET_VERSION(host) >= SDHCI_SPEC_300) {
 		if (caps & SDHCI_CAN_DO_8BIT)
 			host->cfg.host_caps |= MMC_MODE_8BIT;

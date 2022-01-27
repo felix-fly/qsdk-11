@@ -1510,6 +1510,11 @@ void update_mac_addrs(void *fdt)
 	free(mac);
 }
 
+void update_usb_mode(void *fdt)
+{
+	return;
+}
+
 void fdt_fixup_version(void *fdt)
 {
 	int offset, ret;
@@ -1530,8 +1535,4 @@ void fdt_fixup_version(void *fdt)
 	}
 
 	return;
-}
-int update_uuid(char *bootargs)
-{
-	return 0;
 }

@@ -2,7 +2,7 @@
  * drivers/mmc/host/sdhci-msm.c - Qualcomm MSM SDHCI Platform
  * driver source file
  *
- * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2016, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -174,7 +174,7 @@
 #define SDHCI_BASE_SDCLK_FREQ		0xc800
 #define SDHCI_TIMEOUT_CLK_FREQ		0xb2
 
-#define SDHC_EMU_MAX_CLOCKS	4
+#define SDHC_EMU_MAX_CLOCKS	5
 
 struct sdhci_msm_offset {
 	u32 CORE_MCI_DATA_CNT;
@@ -3101,8 +3101,6 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			goto vreg_deinit;
 		}
 		writel_relaxed(readl_relaxed(tlmm_mem) | 0x2, tlmm_mem);
-		dev_dbg(&pdev->dev, "tlmm reg %pa value 0x%08x\n",
-				&tlmm_memres->start, readl_relaxed(tlmm_mem));
 	}
 
 	/*
@@ -3132,6 +3130,9 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	host->caps1 = SDHCI_SUPPORT_SDR104 | SDHCI_SUPPORT_SDR50 |
 			SDHCI_SUPPORT_DDR50;
 	host->quirks  |= SDHCI_QUIRK_MISSING_CAPS;
+
+	if (msm_host->emulation)
+		host->quirks2 |= SDHCI_QUIRK2_BROKEN_HS200;
 
 	/*
 	 * Set the PAD_PWR_SWTICH_EN bit so that the PAD_PWR_SWITCH bit can

@@ -187,7 +187,11 @@ void hyfi_br_notify(int group, int event, const void *ptr)
 			if (hf_br == NULL)
 				return;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+			mc_fdb_change(hf_br, fdb->key.addr.addr, event);
+#else
 			mc_fdb_change(hf_br, fdb->addr.addr, event);
+#endif
 		}
 		break;
 
@@ -200,7 +204,7 @@ int __init hyfi_notify_init(void)
 {
 	int ret;
 	ret = register_netdevice_notifier(&hyfi_device_notifier);
-    rcu_assign_pointer(br_notify_hook, hyfi_br_notify);
+	rcu_assign_pointer(br_notify_hook, hyfi_br_notify);
 
 	if (ret) {
 		DEBUG_ERROR("hyfi: Failed to register to netdevice notifier\n" );

@@ -28,6 +28,8 @@
 #include <linux/dma-mapping.h>
 #include <linux/qcom_scm.h>
 #include <linux/slab.h>
+#include <linux/regmap.h>
+#include <linux/mfd/syscon.h>
 
 #define USB_CALIBRATION_CMD	0x10
 #define USB3PHY_SPARE_1		0x7FC
@@ -39,7 +41,14 @@
 #define OTP_MASK		(0x7F << 5)
 #define MMD1_REG_AUTOLOAD_MASK	(0x1 << 7)
 #define SPARE_1_BIT14_MASK	(0x1 << 14)
+#define SSCG_CTRL_REG_1		0x9c
+#define SSCG_CTRL_REG_2		0xa0
+#define SSCG_CTRL_REG_3		0xa4
+#define SSCG_CTRL_REG_4		0xa8
+#define SSCG_CTRL_REG_5		0xac
+#define SSCG_CTRL_REG_6		0xb0
 
+#define PHY_AUTOLOAD_PERIOD	35
 struct qca_uni_ss_phy {
 	struct phy phy;
 	struct device *dev;
@@ -49,6 +58,8 @@ struct qca_uni_ss_phy {
 	struct reset_control *por_rst;
 
 	unsigned int host;
+	struct clk *pipe_clk;
+	struct clk *phy_cfg_ahb_clk;
 };
 
 struct qf_read {
@@ -86,11 +97,12 @@ static void qca_uni_ss_write(void __iomem *base, u32 offset, u32 val)
 static int qca_uni_ss_phy_shutdown(struct phy *x)
 {
 	struct qca_uni_ss_phy *phy = phy_get_drvdata(x);
+	int ret = 0;
 
 	/* assert SS PHY POR reset */
 	reset_control_assert(phy->por_rst);
 
-	return 0;
+	return ret;
 }
 
 /* Function to read the value from OTP through scm call */
@@ -173,21 +185,54 @@ int qca_uni_ss_phy_usb_los_calibration(void __iomem *base)
 	return 0;
 }
 
+static void phy_autoload(void)
+{
+	int temp = 0;
+
+	while (temp < PHY_AUTOLOAD_PERIOD) {
+		udelay(1);
+		temp += 1;
+	}
+}
+
 static int qca_uni_ss_phy_init(struct phy *x)
 {
 	int ret;
 	struct qca_uni_ss_phy *phy = phy_get_drvdata(x);
+	const char *compat_name;
 
-	/* assert SS PHY POR reset */
-	reset_control_assert(phy->por_rst);
+	ret = of_property_read_string(phy->dev->of_node, "compatible",
+					&compat_name);
+	if (ret) {
+		dev_err(phy->dev, "couldn't compatible string: %d\n", ret);
+		return ret;
+	}
 
-	msleep(100);
-
-	/* deassert SS PHY POR reset */
-	reset_control_deassert(phy->por_rst);
-
-	/* USB LOS Calibration */
-	ret = qca_uni_ss_phy_usb_los_calibration(phy->base);
+	if (!strcmp(compat_name, "qca,ipq5018-uni-ssphy")) {
+		/* assert SS PHY POR reset */
+		reset_control_assert(phy->por_rst);
+		usleep_range(1, 5);
+		/* deassert SS PHY POR reset */
+		reset_control_deassert(phy->por_rst);
+		clk_prepare_enable(phy->phy_cfg_ahb_clk);
+		clk_prepare_enable(phy->pipe_clk);
+		phy_autoload();
+		/*set frequency initial value*/
+		writel(0x1cb9, phy->base + SSCG_CTRL_REG_4);
+		writel(0x023a, phy->base + SSCG_CTRL_REG_5);
+		/*set spectrum spread count*/
+		writel(0xd360, phy->base + SSCG_CTRL_REG_3);
+		/*set fstep*/
+		writel(0x1, phy->base + SSCG_CTRL_REG_1);
+		writel(0xeb, phy->base + SSCG_CTRL_REG_2);
+	} else  { /* USB LOS Calibration */
+		/* assert SS PHY POR reset */
+		reset_control_assert(phy->por_rst);
+		msleep(100);
+		/* deassert SS PHY POR reset */
+		reset_control_deassert(phy->por_rst);
+		ret = qca_uni_ss_phy_usb_los_calibration(phy->base);
+	}
 
 	return ret;
 }
@@ -197,28 +242,51 @@ static int qca_uni_ss_get_resources(struct platform_device *pdev,
 {
 	struct resource *res;
 	struct device_node *np = NULL;
+	const char *compat_name;
+	int ret;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	phy->base = devm_ioremap_resource(phy->dev, res);
 	if (IS_ERR(phy->base))
 		return PTR_ERR(phy->base);
 
+	np = of_node_get(pdev->dev.of_node);
+	ret = of_property_read_string(np, "compatible", &compat_name);
+	if (ret) {
+		dev_err(&pdev->dev, "couldn't compatible string: %d\n", ret);
+		return ret;
+	}
+
 	phy->por_rst = devm_reset_control_get(phy->dev, "por_rst");
 	if (IS_ERR(phy->por_rst))
 		return PTR_ERR(phy->por_rst);
 
-	np = of_node_get(pdev->dev.of_node);
-	if (of_property_read_u32(np, "qca,host", &phy->host)) {
-		pr_err("%s: error reading critical device node properties\n",
-				np->name);
-		return -EFAULT;
-	}
+	if (!strcmp(compat_name, "qca,ipq5018-uni-ssphy")) {
+		phy->pipe_clk = devm_clk_get(phy->dev, "pipe_clk");
+		if (IS_ERR(phy->pipe_clk)) {
+			dev_err(phy->dev, "can not get phy clock\n");
+			return PTR_ERR(phy->pipe_clk);
+		}
 
+		phy->phy_cfg_ahb_clk = devm_clk_get(phy->dev,
+					"phy_cfg_ahb_clk");
+		if (IS_ERR(phy->phy_cfg_ahb_clk)) {
+			dev_err(phy->dev, "can not get phy ahb clock\n");
+			return PTR_ERR(phy->phy_cfg_ahb_clk);
+		}
+	} else {
+		if (of_property_read_u32(np, "qca,host", &phy->host)) {
+			pr_err("%s: error reading critical device node properties\n",
+					np->name);
+			return -EFAULT;
+		}
+	}
 	return 0;
 }
 
 static const struct of_device_id qca_uni_ss_id_table[] = {
 	{ .compatible = "qca,uni-ssphy" },
+	{ .compatible = "qca,ipq5018-uni-ssphy"},
 	{ /* Sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, qca_uni_ss_id_table);

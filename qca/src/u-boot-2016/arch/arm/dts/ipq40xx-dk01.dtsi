@@ -36,7 +36,6 @@
 			gpio2 {
 				gpio = <61>;
 				func = <2>;
-				pull = <GPIO_NO_PULL>;
 				oe = <GPIO_OE_ENABLE>;
 			};
 		};
@@ -52,10 +51,7 @@
 				gpio = <52>;
 				func = <2>;
 				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
 				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
 				pu_res = <GPIO_PULL_RES2>;
 			};
 
@@ -63,21 +59,14 @@
 				gpio = <53>;
 				func = <2>;
 				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
 				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
 				pu_res = <GPIO_PULL_RES2>;
 			};
 
 			gpio3 {
 				gpio = <62>;
-				func = <0>;
-				pull = <GPIO_NO_PULL>;
-				drvstr = <GPIO_2MA>;
 				oe = <GPIO_OE_ENABLE>;
 				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
 				pu_res = <GPIO_PULL_RES2>;
 			};
 		};

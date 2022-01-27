@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2020-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -21,13 +21,13 @@ extern "C"
 #endif				/* __cplusplus */
 
 
-#define SFP_ANEG_DONE	0x20
-
-#define SFP_E2PROM_ADDR 0x50
-#define SFP_SPEED_ADDR  0xc
-#define SFP_SPEED_1000M 10
-#define SFP_SPEED_2500M 25
-#define SFP_SPEED_10000M 100
+#define SFP_ANEG_DONE          0x20
+#define SFP_E2PROM_ADDR        0x50
+#define SFP_SPEED_ADDR         0xc
+#define SFP_SPEED_1000M        10
+#define SFP_SPEED_2500M        25
+#define SFP_SPEED_5000M        50
+#define SFP_SPEED_10000M       100
 
 #define SFP_TO_SFP_SPEED(reg_data) ((reg_data >> 8) & 0xff)
 

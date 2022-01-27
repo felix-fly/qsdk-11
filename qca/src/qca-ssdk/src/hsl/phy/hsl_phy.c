@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, 2017-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -16,11 +16,15 @@
 #include "hsl_phy.h"
 #include "hsl.h"
 /*qca808x_end*/
+#include "ssdk_dts.h"
 #if defined(ISIS) ||defined(ISISC) ||defined(GARUDA)
 #include <f1_phy.h>
 #endif
 #if defined(ATHENA) ||defined(SHIVA) ||defined(HORUS)
 #include <f2_phy.h>
+#endif
+#ifdef MP
+#include "mpge_phy.h"
 #endif
 #ifdef IN_MALIBU_PHY
 #include <malibu_phy.h>
@@ -39,6 +43,7 @@
 #include <qca808x_phy.h>
 /*qca808x_end*/
 #endif
+#include <linux/of_gpio.h>
 /*qca808x_start*/
 #include "sw.h"
 #include "ssdk_plat.h"
@@ -81,6 +86,11 @@ phy_driver_instance_t ssdk_phy_driver[] =
 	#else
 	{SFP_PHY_CHIP, {0}, NULL, NULL, NULL},
 	#endif
+	#ifdef MP
+	{MPGE_PHY_CHIP, {0}, NULL, mpge_phy_init, NULL},
+	#else
+	{MPGE_PHY_CHIP, {0}, NULL, NULL, NULL},
+	#endif
 	#ifdef IN_QCA808X_PHY
 /*qca808x_start*/
 	{QCA808X_PHY_CHIP, {0}, NULL, qca808x_phy_init, qca808x_phy_exit},
@@ -117,6 +127,10 @@ hsl_phy_ops_t *hsl_phy_api_ops_get(a_uint32_t dev_id, a_uint32_t port_id)
 		return NULL;
 
 	phytype = phy_info[dev_id]->phy_type[port_id];
+	if(phytype == MAX_PHY_CHIP)
+	{
+		return NULL;
+	}
 
 	return ssdk_phy_driver[phytype].phy_ops;
 
@@ -135,32 +149,48 @@ sw_error_t phy_api_ops_init(phy_type_t phy_type)
 	}
 	return SW_OK;
 }
-
-a_bool_t hsl_port_is_sfp(a_uint32_t dev_id, a_uint32_t port_id, ssdk_init_cfg *cfg)
+/*qca808x_end*/
+a_bool_t hsl_port_is_sfp(a_uint32_t dev_id, a_uint32_t port_id)
 {
-	if ((cfg->chip_type == CHIP_HPPE) &&
-	    (((SSDK_PHYSICAL_PORT5 == port_id) &&
-			((cfg->mac_mode1 == PORT_WRAPPER_10GBASE_R) ||
-			(cfg->mac_mode1 == PORT_WRAPPER_SGMII_FIBER))) ||
+	a_bool_t sfp_port = 0;
+	a_uint32_t mode1, mode2;
+
+	sfp_port = ssdk_port_feature_get(dev_id, port_id, PHY_F_SFP);
+	if (sfp_port == A_TRUE) {
+		return A_TRUE;
+	}
+
+	mode1 = ssdk_dt_global_get_mac_mode(dev_id, SSDK_UNIPHY_INSTANCE1);
+	mode2 = ssdk_dt_global_get_mac_mode(dev_id, SSDK_UNIPHY_INSTANCE2);
+
+	if (((SSDK_PHYSICAL_PORT5 == port_id) &&
+			((mode1 == PORT_WRAPPER_10GBASE_R) ||
+			(mode1 == PORT_WRAPPER_SGMII_FIBER))) ||
 	    ((SSDK_PHYSICAL_PORT6 == port_id) &&
-			((cfg->mac_mode2 == PORT_WRAPPER_10GBASE_R) ||
-			(cfg->mac_mode2 == PORT_WRAPPER_SGMII_FIBER)))))
+			((mode2 == PORT_WRAPPER_10GBASE_R) ||
+			(mode2 == PORT_WRAPPER_SGMII_FIBER))))
 		return A_TRUE;
 	else
 		return A_FALSE;
 }
-
+/*qca808x_start*/
 a_uint32_t hsl_phyid_get(a_uint32_t dev_id,
 		a_uint32_t port_id, ssdk_init_cfg *cfg)
 {
 	a_uint16_t org_id = 0, rev_id = 0;
 	a_uint32_t reg_pad = 0, phy_id = 0;
 
-	if (hsl_port_is_sfp(dev_id, port_id, cfg))
+/*qca808x_end*/
+	if(ssdk_is_emulation(dev_id) && ssdk_emu_chip_ver_get(dev_id) == MP_GEPHY){
+		return MP_GEPHY;
+	}
+	if (hsl_port_is_sfp(dev_id, port_id)){
 		return SFP_PHY;
-
-	if (phy_info[dev_id]->phy_c45[port_id] == A_TRUE)
+	}
+/*qca808x_start*/
+	if (phy_info[dev_id]->phy_c45[port_id] == A_TRUE){
 		reg_pad = BIT(30) | BIT(16);
+	}
 
 #if defined(IN_PHY_I2C_MODE)
 	if (hsl_port_phy_access_type_get(dev_id, port_id) == PHY_I2C_ACCESS) {
@@ -225,8 +255,10 @@ phy_type_t hsl_phytype_get_by_phyid(a_uint32_t dev_id, a_uint32_t phy_id)
 		case SFP_PHY:
 			phytype = SFP_PHY_CHIP;
 			break;
+		case MP_GEPHY:
+			phytype = MPGE_PHY_CHIP;
+			break;
 /*qca808x_start*/
-		case QCA8081_PHY:
 		case QCA8081_PHY_V1_1:
 			phytype = QCA808X_PHY_CHIP;
 			break;
@@ -289,6 +321,11 @@ int ssdk_phy_driver_init(a_uint32_t dev_id, ssdk_init_cfg *cfg)
 	{
 		if (port_bmp[dev_id] & (0x1 << i))
 		{
+/*qca808x_end*/
+			if(ssdk_port_feature_get(dev_id, i, PHY_F_FORCE)) {
+				continue;
+			}
+/*qca808x_start*/
 			phy_id = hsl_phyid_get(dev_id, i, cfg);
 			phytype = hsl_phytype_get_by_phyid(dev_id, phy_id);
 			if (MAX_PHY_CHIP != phytype) {
@@ -359,6 +396,7 @@ int qca_ssdk_phy_info_init(a_uint32_t dev_id)
 
 	for (j = SSDK_PHYSICAL_PORT0; j < SW_MAX_NR_PORT; j ++)
 	{
+		phy_info[dev_id]->phy_type[j] = MAX_PHY_CHIP;
 		if(j == SSDK_PHYSICAL_PORT0)
 		{
 			phy_info[dev_id]->phy_address[j] = INVALID_PHY_ADDR;
@@ -538,6 +576,22 @@ hsl_port_phy_serdes_reset(a_uint32_t dev_id)
 	return SW_OK;
 }
 
+sw_error_t hsl_port_phy_hw_init(a_uint32_t dev_id, a_uint32_t port_id)
+{
+	phy_type_t phytype;
+
+	phytype = hsl_phy_type_get(dev_id, port_id);
+
+	if(ssdk_phy_driver[phytype].port_bmp[dev_id] != 0 &&
+			ssdk_phy_driver[phytype].init != NULL)
+	{
+		ssdk_phy_driver[phytype].init(dev_id,
+			ssdk_phy_driver[phytype].port_bmp[dev_id]);
+	}
+
+	return SW_OK;
+}
+
 a_uint32_t
 hsl_port_phyid_get(a_uint32_t dev_id, fal_port_t port_id)
 {
@@ -597,6 +651,170 @@ phy_type_t hsl_phy_type_get(a_uint32_t dev_id, a_uint32_t port_id)
 
 	return phy_info[dev_id]->phy_type[port_id];
 }
+
+a_uint32_t hsl_port_phy_reset_gpio_get(a_uint32_t dev_id, a_uint32_t port_id)
+{
+	return phy_info[dev_id]->phy_reset_gpio[port_id];
+}
+
+void hsl_port_phy_reset_gpio_set(a_uint32_t dev_id, a_uint32_t port_id,
+	a_uint32_t phy_reset_gpio)
+{
+	phy_info[dev_id]->phy_reset_gpio[port_id] = phy_reset_gpio;
+
+	return;
+}
+
+void hsl_port_phy_gpio_reset(a_uint32_t dev_id, a_uint32_t port_id)
+
+{
+	a_uint32_t gpio_num, ret = 0;
+
+	gpio_num = hsl_port_phy_reset_gpio_get(dev_id, port_id);
+
+	if(gpio_num == SSDK_INVALID_GPIO)
+	{
+		return;
+	}
+	ret = gpio_request(gpio_num, "phy_reset_gpio");
+	if(ret)
+	{
+		SSDK_ERROR("gpio request failed, ret:%d\n", ret);
+		return;
+	}
+	ret = gpio_direction_output(gpio_num, SSDK_GPIO_RESET);
+	if(ret)
+	{
+		SSDK_ERROR("when reset, gpio set failed, ret:%d\n",
+			ret);
+		return;
+	}
+	msleep(200);
+	gpio_set_value(gpio_num, SSDK_GPIO_RELEASE);
+	SSDK_INFO("GPIO%d reset PHY done\n", gpio_num);
+
+	gpio_free(gpio_num);
+
+	return;
+}
+
+void
+hsl_port_phy_dac_get(a_uint32_t dev_id, a_uint32_t port_id,
+	phy_dac_t *phy_dac)
+{
+	phy_dac->mdac = phy_info[dev_id]->phy_dac[port_id].mdac;
+	phy_dac->edac = phy_info[dev_id]->phy_dac[port_id].edac;
+
+	return;
+}
+
+void
+hsl_port_phy_dac_set(a_uint32_t dev_id, a_uint32_t port_id,
+	phy_dac_t phy_dac)
+{
+	phy_info[dev_id]->phy_dac[port_id].mdac = phy_dac.mdac;
+	phy_info[dev_id]->phy_dac[port_id].edac = phy_dac.edac;
+
+	return;
+}
+
+sw_error_t
+hsl_port_phydev_get(a_uint32_t dev_id, a_uint32_t port_id,
+	struct phy_device **phydev)
+{
+	struct qca_phy_priv *priv;
+	a_uint32_t phy_addr, pdev_addr;
+	const char *pdev_name;
+
+	priv = ssdk_phy_priv_data_get(dev_id);
+	SW_RTN_ON_NULL(priv);
+
+#if defined(IN_PHY_I2C_MODE)
+	if (hsl_port_phy_access_type_get(dev_id, port_id) == PHY_I2C_ACCESS)
+	{
+		phy_addr = qca_ssdk_port_to_phy_mdio_fake_addr(dev_id, port_id);
+	}
+	else
+#endif
+	{
+		phy_addr = qca_ssdk_port_to_phy_addr(dev_id, port_id);
+	}
+	SW_RTN_ON_NULL(phydev);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION (5, 0, 0))
+	*phydev = priv->miibus->phy_map[phy_addr];
+	SW_RTN_ON_NULL(*phydev);
+	pdev_addr = (*phydev)->addr;
+	pdev_name = dev_name(&((*phydev)->dev));
+#else
+	*phydev = mdiobus_get_phy(priv->miibus, phy_addr);
+	SW_RTN_ON_NULL(*phydev);
+	pdev_addr = (*phydev)->mdio.addr;
+	pdev_name = phydev_name(*phydev);
+#endif
+	if(*phydev == NULL)
+	{
+		SSDK_ERROR("port %d phydev is NULL\n", port_id);
+		return SW_NOT_INITIALIZED;
+	}
+	SSDK_DEBUG("phy[%d]: device %s, driver %s\n",
+		pdev_addr, pdev_name,
+		(*phydev)->drv ? (*phydev)->drv->name : "unknown");
+
+	return SW_OK;
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+static sw_error_t
+hsl_phy_adv_to_linkmode_adv(a_uint32_t autoadv, a_ulong_t *advertising)
+{
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_Pause_BIT,
+			advertising, autoadv & FAL_PHY_ADV_PAUSE);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT,
+			advertising, autoadv & FAL_PHY_ADV_ASY_PAUSE);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT,
+			advertising, autoadv & FAL_PHY_ADV_10T_HD);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_10T_FD);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+			advertising, autoadv & FAL_PHY_ADV_100TX_HD);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_100TX_FD);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_1000T_FD);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_2500T_FD);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_5000baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_5000T_FD);
+
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
+			advertising, autoadv & FAL_PHY_ADV_10000T_FD);
+
+	SSDK_DEBUG("autoadv:0x%x, advertising::0x%lx\n",
+		autoadv, *advertising);
+
+	return SW_OK;
+}
+
+sw_error_t
+hsl_port_phydev_adv_update(a_uint32_t dev_id, a_uint32_t port_id,
+	a_uint32_t autoadv)
+{
+	sw_error_t rv = SW_OK;
+	struct phy_device *phydev;
+
+	rv = hsl_port_phydev_get(dev_id, port_id, &phydev);
+	SW_RTN_ON_ERROR(rv);
+	rv = hsl_phy_adv_to_linkmode_adv(autoadv, phydev->advertising);
+
+	return rv;
+}
+#endif
+
 /*qca808x_start*/
 sw_error_t ssdk_phy_driver_cleanup(void)
 {

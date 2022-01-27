@@ -3000,13 +3000,13 @@ ppp_connect_channel(struct channel *pch, int unit)
 
 	ppp_proto = ppp_channel_get_protocol(pch->chan);
 	if (ppp_proto == PX_PROTO_PPTP) {
-		ppp->dev->priv_flags |= IFF_PPP_PPTP;
+		ppp->dev->priv_flags_ext |= IFF_EXT_PPP_PPTP;
 	} else if (ppp_proto == PX_PROTO_OL2TP) {
 		version = ppp_channel_get_proto_version(pch->chan);
 		if (version == 2)
-			ppp->dev->priv_flags |= IFF_PPP_L2TPV2;
+			ppp->dev->priv_flags_ext |= IFF_EXT_PPP_L2TPV2;
 		else if (version == 3)
-			ppp->dev->priv_flags |= IFF_PPP_L2TPV3;
+			ppp->dev->priv_flags_ext |= IFF_EXT_PPP_L2TPV3;
 	}
 	notify = 1;
 
@@ -3162,6 +3162,28 @@ void ppp_update_stats(struct net_device *dev, unsigned long rx_packets,
 		ppp->last_recv = jiffies;
 	ppp_recv_unlock(ppp);
 }
+
+/* Returns true if Compression is enabled on PPP device
+ */
+bool ppp_is_cp_enabled(struct net_device *dev)
+{
+	struct ppp *ppp;
+	bool flag = false;
+
+	if (!dev)
+		return false;
+
+	if (dev->type != ARPHRD_PPP)
+		return false;
+
+	ppp = netdev_priv(dev);
+	ppp_lock(ppp);
+	flag = !!(ppp->xstate & SC_COMP_RUN) || !!(ppp->rstate & SC_DECOMP_RUN);
+	ppp_unlock(ppp);
+
+	return flag;
+}
+EXPORT_SYMBOL(ppp_is_cp_enabled);
 
 /* Returns >0 if the device is a multilink PPP netdevice, 0 if not or < 0 if
  * the device is not PPP.

@@ -18,7 +18,7 @@ SCRATCH_ADDR     := 0x50000000
 DEFINES += MMC_BOOT_BAM=1
 
 MODULES += \
-	lib/zlib_inflate \
+	lib/zlib \
 	lib/ptable \
 	lib/libfdt
 

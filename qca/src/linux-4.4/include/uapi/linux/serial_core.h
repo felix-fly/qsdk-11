@@ -261,4 +261,7 @@
 /* STM32 USART */
 #define PORT_STM32	113
 
+/* QTI EUD UART */
+#define PORT_EUD_UART	114
+
 #endif /* _UAPILINUX_SERIAL_CORE_H */

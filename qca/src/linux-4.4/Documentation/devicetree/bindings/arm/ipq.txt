@@ -6,6 +6,7 @@ System on Chip
 Device tree must specify which SoC it uses, with one of the following
 compatible strings
 
+	"qcom,ipq5018"
 	"qcom,ipq6018"
 	"qcom,ipq807x"
 	"qcom,ipq8064"

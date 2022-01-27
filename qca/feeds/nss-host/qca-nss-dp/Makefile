@@ -10,9 +10,6 @@ include $(INCLUDE_DIR)/local-development.mk
 ifeq ($(DUMP)$(PKG_VERSION),)
   PKG_VERSION:=$(shell git ls-remote $(PKG_SOURCE_URL) $(PKG_BRANCH) | cut -b -7)
 endif
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
-PKG_SOURCE_VERSION:=$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -20,7 +17,8 @@ define KernelPackage/qca-nss-dp
   SECTION:=kernel
   CATEGORY:=Kernel modules
   SUBMENU:=Network Devices
-  DEPENDS:=@TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64||TARGET_ipq807x||TARGET_ipq807x_64||TARGET_ipq_ipq60xx||TARGET_ipq_ipq60xx_64 +kmod-qca-ssdk-nohnat
+  DEPENDS:=@TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64||TARGET_ipq807x||TARGET_ipq807x_64||TARGET_ipq_ipq60xx||TARGET_ipq_ipq60xx_64||TARGET_ipq60xx||TARGET_ipq60xx_64||TARGET_ipq_ipq50xx||TARGET_ipq_ipq50xx_64||TARGET_ipq50xx\
+		+kmod-qca-ssdk-nohnat
   TITLE:=Kernel driver for NSS data plane
   FILES:=$(PKG_BUILD_DIR)/qca-nss-dp.ko
   AUTOLOAD:=$(call AutoLoad,31,qca-nss-dp)
@@ -44,11 +42,23 @@ else
 subtarget:=$(CONFIG_TARGET_BOARD)
 endif
 
+NSS_DP_HAL_DIR:=$(PKG_BUILD_DIR)/hal
+ifneq (, $(findstring _64, $(subtarget)))
+hal_arch:=$(subst _64,,$(subtarget))
+else
+hal_arch:=$(subtarget)
+endif
+
+define Build/Configure
+	$(LN) $(NSS_DP_HAL_DIR)/arch/$(hal_arch)/nss_$(hal_arch).h \
+		$(PKG_BUILD_DIR)/exports/nss_dp_arch.h
+endef
+
 define Build/Compile
 	$(MAKE) -C "$(LINUX_DIR)" \
 		CROSS_COMPILE="$(TARGET_CROSS)" \
 		ARCH="$(LINUX_KARCH)" \
-		SUBDIRS="$(PKG_BUILD_DIR)" \
+		M="$(PKG_BUILD_DIR)" \
 		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" SoC="$(subtarget)" \
 		modules
 endef

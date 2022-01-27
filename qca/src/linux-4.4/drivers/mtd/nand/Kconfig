@@ -553,6 +553,20 @@ config MTD_NAND_QCOM
 	  Enables support for NAND flash chips on SoCs containing the EBI2 NAND
 	  controller. This controller is found on IPQ806x SoC.
 
+config MTD_NAND_SERIAL
+	bool "Support for SERIAL NAND in QPIC"
+	depends on MTD_NAND_QCOM
+	help
+	  Enables support for SERIAL NAND flash chips on SoCs containing the EBI2 NAND
+	  controller. This controller is found on IPQ501x SoC.
+
+config PAGE_SCOPE_MULTI_PAGE_READ
+	bool "Support for page scope and multi page read in QPIC"
+	depends on MTD_NAND_QCOM
+	help
+	  Enables support for page scope and multi page read support on SoCs
+          containing the EBI2 NAND controller. This controller is found on IPQ501x SoC.
+
 config MTD_NAND_RB4XX
 	tristate "NAND flash driver for RouterBoard 4xx series"
 	depends on MTD_NAND && ATH79_MACH_RB4XX

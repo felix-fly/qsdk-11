@@ -1,6 +1,6 @@
 /*
- **************************************************************************
- * Copyright (c) 2015-2016,2018-2019, The Linux Foundation. All rights reserved.
+ ***************************************************************************
+ * Copyright (c) 2015-2016,2018-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -11,361 +11,163 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- **************************************************************************
+ ***************************************************************************
  */
 
-/*
- * nss_nlgre_redir.c
- * 	NSS Netlink gre_redir Handler
- */
 #include <linux/version.h>
+#include <linux/etherdevice.h>
+#include <linux/if_ether.h>
 #include <net/genetlink.h>
 #include <nss_api_if.h>
-#include <nss_nlcmn_if.h>
 #include <nss_nl_if.h>
-#include <nss_nlgre_redir_if.h>
+#include "nss_nlcmn_if.h"
 #include "nss_nl.h"
+#include "nss_nlgre_redir_if.h"
+#include "nss_nlgre_redir_cmn.h"
 #include "nss_nlgre_redir.h"
-#include "nss_nlgre_redir_mgr.h"
 
 /*
- * Get max size of the array
+ * nss_nlgre_redir_destroy_tun()
+ * 	Destroys the gre_redir tunnel
  */
-#define NSS_NLGRE_REDIR_OPS_SZ ARRAY_SIZE(nss_nlgre_redir_ops)
-
-/*
- * nss_nlgre_redir_family
- * 	Gre_redir family definition
- */
-static struct genl_family nss_nlgre_redir_family = {
-	.id = GENL_ID_GENERATE,				/* Auto generate ID */
-	.name = NSS_NLGRE_REDIR_FAMILY,			/* family name string */
-	.hdrsize = sizeof(struct nss_nlgre_redir_rule),	/* NSS NETLINK gre_redir rule */
-	.version = NSS_NL_VER,				/* Set it to NSS_NLGRE_REDIR version */
-	.maxattr = NSS_NLGRE_REDIR_CMD_TYPE_MAX,	/* maximum commands supported */
-	.netnsok = true,
-	.pre_doit = NULL,
-	.post_doit = NULL,
-};
-
-/*
- * nss_nlgre_redir_mcgrp
- * 	Multicast group for sending message status & events
- */
-static const struct genl_multicast_group nss_nlgre_redir_mcgrp[] = {
-	{.name = NSS_NLGRE_REDIR_MCAST_GRP},
-};
-
-/*
- * nss_nlgre_redir_ops_create_tun()
- * 	Handler for tunnel create
- */
-static int nss_nlgre_redir_ops_create_tun(struct sk_buff *skb, struct genl_info *info)
+int nss_nlgre_redir_destroy_tun(struct net_device *dev)
 {
-	struct nss_nlgre_redir_rule *nl_rule;
-	struct nss_nlcmn *nl_cm;
-	int ret = 0;
+	int ret;
 
-	/*
-	 * Extract the message payload
-	 */
-	nl_cm = nss_nl_get_msg(&nss_nlgre_redir_family, info, NSS_NLGRE_REDIR_CMD_TYPE_CREATE_TUN);
-	if (!nl_cm) {
-		nss_nl_error("Unable to extract create tunnel data\n");
-		ret = -EINVAL;
-		goto fail;
-	}
-
-	/*
-	 * Message validation required before accepting the configuration
-	 */
-	nl_rule = container_of(nl_cm, struct nss_nlgre_redir_rule, cm);
-
-	/*
-	 * Create a gre tunnel
-	 */
-	ret = nss_nlgre_redir_mgr_create_tun(&nl_rule->msg.create);
-	if(ret == -1) {
-		nss_nl_error("Unable to create tunnel\n");
-		ret = -EAGAIN;
-		goto fail;
-	}
-
-	nss_nl_info("Successfully created gretun%d tunnel\n", ret);
-fail:
-	return ret;
-}
-
-/*
- * nss_nlgre_redir_ops_destroy_tun()
- * 	Handler destroy tunnel
- */
-static int nss_nlgre_redir_ops_destroy_tun(struct sk_buff *skb, struct genl_info *info)
-{
-	struct nss_nlgre_redir_rule *nl_rule;
-	struct net_device *dev;
-	struct nss_nlcmn *nl_cm;
-	int ret = 0;
-
-	/*
-	 * Extract the message payload
-	 */
-	nl_cm = nss_nl_get_msg(&nss_nlgre_redir_family, info, NSS_NLGRE_REDIR_CMD_TYPE_DESTROY_TUN);
-	if (!nl_cm) {
-		nss_nl_error("Unable to extract destroy tunnel data\n");
-		ret = -EINVAL;
-		goto fail;
-	}
-
-	/*
-	 * Message validation required before accepting the configuration
-	 */
-	nl_rule = container_of(nl_cm, struct nss_nlgre_redir_rule, cm);
-
-	/*
-	 * Get the dev reference
-	 */
-	dev = dev_get_by_name(&init_net, nl_rule->msg.destroy.netdev);
 	if (!dev) {
-		nss_nl_error("Invalid parameter: %s\n", nl_rule->msg.destroy.netdev);
-		ret = -ENODEV;
-		goto fail;
+		nss_nl_error("Dev is NULL\n");
+		return -EINVAL;
 	}
 
-	/*
-	 * Destroy the tunnel
-	 */
-	ret = nss_nlgre_redir_mgr_destroy_tun(dev);
-	if (ret == -1) {
-		nss_nl_error("Unable to destroy tunnel: %s\n", nl_rule->msg.destroy.netdev);
-		ret = -EAGAIN;
-		dev_put(dev);
-		goto fail;
+	ret = nss_nlgre_redir_cmn_destroy_tun(dev);
+	if (ret < 0) {
+		nss_nl_error("Could not destroy the tunnel\n");
+		return -EINVAL;
 	}
 
-	nss_nl_info("Successfully destroyed gretun = %s tunnel\n", nl_rule->msg.destroy.netdev);
-fail:
-	return ret;
+	nss_nl_info("Successfully destroyed the tunnel\n");
+	return 0;
 }
 
 /*
- * nss_nlgre_redir_ops_map()
- * 	Handler for map command
+ * nss_nlgre_redir_create_tun()
+ * 	Creates a gre_redir tunnel
  */
-static int nss_nlgre_redir_ops_map(struct sk_buff *skb, struct genl_info *info)
+int nss_nlgre_redir_create_tun(struct nss_nlgre_redir_create_tun *create_params)
 {
-	struct nss_nlgre_redir_rule *nl_rule;
-	struct nss_nlcmn *nl_cm;
-	uint32_t vap_nss_if, tun_type;
 	struct net_device *dev;
-	int ret = 0;
 
-	/*
-	 * extract the message payload
-	 */
-	nl_cm = nss_nl_get_msg(&nss_nlgre_redir_family, info, NSS_NLGRE_REDIR_CMD_TYPE_MAP);
-	if (!nl_cm) {
-		nss_nl_error("Unable to extract map interface data\n");
-		ret = -EINVAL;
-		goto fail;
+	if (!create_params) {
+		nss_nl_error("create_params is NULL\n");
+		return -EINVAL;
 	}
 
-	/*
-	 * Message validation required before accepting the configuration
-	 */
-	nl_rule = container_of(nl_cm, struct nss_nlgre_redir_rule, cm);
-
-	/*
-	 * Get the dev reference
-	 */
-	dev = dev_get_by_name(&init_net, nl_rule->msg.map.vap_nss_if);
+	dev = nss_nlgre_redir_cmn_create_tun(create_params->sip, create_params->dip, create_params->iptype);
 	if (!dev) {
-		nss_nl_error("Invalid parameter: vap_nss_if\n");
-		ret = -ENODEV;
-		goto fail;
+		nss_nl_error("Could not create tunnel\n");
+		return -EINVAL;
 	}
 
-	vap_nss_if = nss_cmn_get_interface_number_by_dev(dev);
-	dev_put(dev);
-	tun_type = nss_nlgre_redir_mgr_tunnel_type(nl_rule->msg.map.tun_type);
-
-	/*
-	 * map the interface
-	 */
-	ret = nss_nlgre_redir_mgr_interface_map(vap_nss_if, tun_type, &nl_rule->msg.map);
-	if(!ret) {
-		nss_nl_error("Unable to map nss interface\n");
-		ret = -EAGAIN;
-		goto fail;
-	}
-
-	nss_nl_info("Successfully mapped nss interface.\n");
-fail:
-	return ret;
+	nss_nl_info("Successfully created the tunnel = %s\n", dev->name);
+	return 0;
 }
 
 /*
- * nss_nlgre_redir_ops_unmap()
- * 	Handler for unmap command
+ * nss_nlgre_redir_map_interface()
+ * 	Maps the nss interface to the tunnel ID
  */
-static int nss_nlgre_redir_ops_unmap(struct sk_buff *skb, struct genl_info *info)
+int nss_nlgre_redir_map_interface(struct nss_nlgre_redir_map *map_params)
 {
-	struct nss_nlgre_redir_rule *nl_rule;
-	struct nss_nlcmn *nl_cm;
-	struct net_device *dev;
-	int32_t vap_nss_if;
-	int ret = 0;
+	struct nss_ctx_instance *nss_ctx;
+	uint32_t nexthop_nssif, vap_nss_if;
+	uint8_t tun_type;
+	int ret;
 
-	/*
-	 * extract the message payload
-	 */
-	nl_cm = nss_nl_get_msg(&nss_nlgre_redir_family, info, NSS_NLGRE_REDIR_CMD_TYPE_UNMAP);
-	if (!nl_cm) {
-		nss_nl_error("Unable to extract unmap data\n");
-		ret = -EINVAL;
-		goto fail;
+	if (!map_params) {
+		nss_nl_error("map params is NULL\n");
+		return -EINVAL;
 	}
 
-	/*
-	 * Message validation required before accepting the configuration
-	 */
-	nl_rule = container_of(nl_cm, struct nss_nlgre_redir_rule, cm);
+	nss_ctx = nss_gre_redir_get_context();
+	vap_nss_if = nss_nlgre_redir_cmn_get_dev_ifnum(map_params->vap_nss_if);
 
 	/*
-	 * Get the dev reference
+	 * Get tunnel type from tun_type string
 	 */
-	dev = dev_get_by_name(&init_net, nl_rule->msg.unmap.vap_nss_if);
-	if (!dev) {
-		nss_nl_error("Invalid parameter: dev_name\n");
-		ret = -ENODEV;
-		goto fail;
-	}
-
-	vap_nss_if = nss_cmn_get_interface_number_by_dev(dev);
-	dev_put(dev);
-
-	/*
-	 * Unmap the interface
-	 */
-	ret = nss_nlgre_redir_mgr_interface_unmap(vap_nss_if, &nl_rule->msg.unmap);
-	if(!ret) {
-		nss_nl_error("Unable to unmap nss interface\n");
-		ret = -EAGAIN;
-		goto fail;
-	}
-
-	nss_nl_info("Successfully unmapped the nss interface.\n");
-fail:
-	return ret;
-}
-
-/*
- * nss_nlgre_redir_ops_set_next()
- * 	Handler for set_next command
- */
-static int nss_nlgre_redir_ops_set_next(struct sk_buff *skb, struct genl_info *info)
-{
-	struct nss_nlgre_redir_rule *nl_rule;
-	struct nss_nlcmn *nl_cm;
-	int ret = 0;
-
-	/*
-	 * extract the message payload
-	 */
-	nl_cm = nss_nl_get_msg(&nss_nlgre_redir_family, info, NSS_NLGRE_REDIR_CMD_TYPE_SET_NEXT_HOP);
-	if (!nl_cm) {
-		nss_nl_error("Unable to extract set_next_hop data\n");
-		ret = -EINVAL;
-		goto fail;
-	}
-
-	/*
-	 * Message validation required before accepting the configuration
-	 */
-	nl_rule = container_of(nl_cm, struct nss_nlgre_redir_rule, cm);
-
-	ret = nss_nlgre_redir_mgr_set_next_hop(&nl_rule->msg.snext);
-	if (!ret) {
-		nss_nl_error("Unable to set next hop\n");
-		ret = -EAGAIN;
-		goto fail;
-	}
-
-	nss_nl_info("Successfully set the next hop\n");
-fail:
-	return ret;
-}
-
-/*
- * nss_nlgre_redir_get_ifnum()
- * 	Get the interface number corresponding to netdev
- */
-int nss_nlgre_redir_get_ifnum(struct net_device* dev, enum nss_dynamic_interface_type type)
-{
-	int ifnum;
-
-	/*
-	 * Get the interface number depending upon the dev and type
-	 */
-	ifnum = nss_cmn_get_interface_number_by_dev_and_type(dev, type);
-	if (ifnum < 0) {
-		nss_nl_error("%p: Failed to find interface number (dev:%s, type:%d)\n", dev, dev->name, type);
+	tun_type = nss_nlgre_redir_cmn_get_tun_type(map_params->tun_type);
+	switch(tun_type) {
+	case NSS_NLGRE_REDIR_TUN_TYPE_DTUN:
+	case NSS_NLGRE_REDIR_TUN_TYPE_TUN:
+		nexthop_nssif = vap_nss_if;
+		break;
+	case NSS_NLGRE_REDIR_TUN_TYPE_SPLIT:
+		nexthop_nssif = NSS_ETH_RX_INTERFACE;
+		break;
+	default:
+		nss_nl_error("%px: not a valid tunnel_type\n", nss_ctx);
 		return -1;
 	}
 
-	return ifnum;
+	/*
+	 * Map the nss interface
+	 */
+	ret = nss_nlgre_redir_cmn_map_interface(nexthop_nssif, 0, map_params);
+	if (ret == -1) {
+		nss_nl_error("%px: Unable to map nss interface\n", nss_ctx);
+		return -1;
+	}
+
+	nss_nl_info("Successfully mapped the nss interface to tunnel ID\n");
+	return 0;
 }
 
 /*
- * nss_nlgre_redir_ops
- * 	Operation table called by the generic netlink layer based on the command
+ * nss_nlgre_redir_set_next_hop()
+ * 	Sets the next hop of vap as wifi_offld_inner interface of gre_redir node
  */
-static struct genl_ops nss_nlgre_redir_ops[] = {
-	{.cmd = NSS_NLGRE_REDIR_CMD_TYPE_CREATE_TUN, .doit = nss_nlgre_redir_ops_create_tun,},
-	{.cmd = NSS_NLGRE_REDIR_CMD_TYPE_DESTROY_TUN, .doit = nss_nlgre_redir_ops_destroy_tun,},
-	{.cmd = NSS_NLGRE_REDIR_CMD_TYPE_MAP, .doit = nss_nlgre_redir_ops_map,},
-	{.cmd = NSS_NLGRE_REDIR_CMD_TYPE_UNMAP, .doit = nss_nlgre_redir_ops_unmap,},
-	{.cmd = NSS_NLGRE_REDIR_CMD_TYPE_SET_NEXT_HOP, .doit = nss_nlgre_redir_ops_set_next,},
-};
-
-/*
- * nss_nlgre_redir_init()
- * 	handler init
- */
-bool nss_nlgre_redir_init(void)
+int nss_nlgre_redir_set_next_hop(struct nss_nlgre_redir_set_next *set_next_params)
 {
-	int err;
-	nss_nl_info_always("Init NSS netlink gre_redir handler\n");
+	enum nss_nlgre_redir_cmn_mode_type mode;
+	struct nss_ctx_instance *nss_ctx;
+	struct net_device *next_dev;
+	uint32_t nexthop_ifnum;
+	int ret;
 
-	/*
-	 * register NETLINK ops with the family
-	 */
-	err = genl_register_family_with_ops_groups(&nss_nlgre_redir_family, nss_nlgre_redir_ops, nss_nlgre_redir_mcgrp);
-	if (err) {
-		nss_nl_info_always("Error: %d unable to register gre_redir family\n", err);
-		return false;
+	if (!set_next_params) {
+		nss_nl_error("set next params is NULL\n");
+		return -EINVAL;
 	}
 
-	return true;
-}
-
-/*
- * nss_nlgre_redir_exit()
- *	handler exit
- */
-bool nss_nlgre_redir_exit(void)
-{
-	int err;
-	nss_nl_info_always("Exit NSS netlink gre_redir handler\n");
-
-	/*
-	 * unregister the ops family
-	 */
-	err = genl_unregister_family(&nss_nlgre_redir_family);
-	if (err) {
-		nss_nl_info_always("Error: %d unable to unregister gre_redir NETLINK family\n", err);
-		return false;
+	nss_ctx = nss_gre_redir_get_context();
+	next_dev = dev_get_by_name(&init_net, set_next_params->next_dev_name);
+	if (!next_dev) {
+		nss_nl_error("%px: Unable to get the reference to dev %s\n", nss_ctx, set_next_params->next_dev_name);
+		return -1;
 	}
 
-	return true;
+	dev_put(next_dev);
+	mode = nss_nlgre_redir_cmn_mode_str_to_enum(set_next_params->mode);
+	switch(mode) {
+	case NSS_NLGRE_REDIR_CMN_MODE_TYPE_WIFI:
+		/*
+		 * Gets the wifi_offl_inner_ifnum interface number of gretun[index]
+		 */
+		nexthop_ifnum = nss_nlgre_redir_cmn_get_tun_ifnum(NSS_NLGRE_REDIR_CMN_MODE_TYPE_WIFI, next_dev);
+		break;
+	case NSS_NLGRE_REDIR_CMN_MODE_TYPE_SPLIT:
+		nexthop_ifnum = NSS_ETH_RX_INTERFACE;
+		break;
+	default:
+		nss_nl_error("%px: Unknown set next mode\n", nss_ctx);
+		return -1;
+	}
+
+	ret = nss_nlgre_redir_cmn_set_next_hop(nexthop_ifnum, set_next_params);
+	if (ret == -1) {
+		nss_nl_error("%px: Unable to set the next hop\n", nss_ctx);
+		return -1;
+	}
+
+	nss_nl_info("Successfully set the next hop\n");
+	return 0;
 }

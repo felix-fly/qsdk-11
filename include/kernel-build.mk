@@ -100,6 +100,12 @@ define BuildKernel
 	) > $$@
 
   $(STAMP_CONFIGURED): $(STAMP_PREPARED) $(LINUX_KCONFIG_LIST) $(TOPDIR)/.config
+	if [[ "$(CONFIG_FOSSID_SCAN)" == *'s'* ]]; then \
+		[[ -f "$(TOPDIR)/scripts/fossid.sh" ]] && \
+		$(TOPDIR)/scripts/fossid.sh --build_scan "$(BOARD)" "$(SUBTARGET)" \
+		"$(LINUX_DIR)" "$(BUILD_DIR)" "$(CONFIG_FOSSID_SCAN)" || \
+		echo "$(TOPDIR)/scripts/fossid.sh is missing"; \
+	fi
 	$(Kernel/Configure)
 	touch $$@
 
@@ -135,6 +141,7 @@ define BuildKernel
   clean: FORCE
 ifdef CONFIG_EXTERNAL_KERNEL_TREE
 	$(if $(wildcard $(LINUX_DIR)), \
+	find $(LINUX_DIR)/ -name '*.dtb' -type f -print | xargs rm -f; \
 	make -C $(LINUX_DIR) clean)
 else
 	rm -rf $(KERNEL_BUILD_DIR)

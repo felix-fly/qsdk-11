@@ -25,15 +25,21 @@
 #include <nss_core.h>
 
 /*
+ * Amount time in msec the synchronous message should wait for response
+ * from NSS before the timeout happens.
+ */
+#define NSS_TX_MSG_SYNC_DEFAULT_TIMEOUT_MSEC	(5000)
+
+/*
  * Per-message sync data
  *	Used as message app_data.
  */
 struct nss_tx_msg_sync_cmn_data {
-	struct completion complete;	/* Completion structure */
-	nss_tx_status_t status;		/* Tx status */
-	void *original_msg;		/* Address of the caller-build message */
-	uint32_t resp_offset;		/* Response offset in message payload */
-	uint32_t copy_len;		/* Length in bytes copied from the return message */
+	struct completion complete;		/* Completion structure */
+	nss_tx_status_t status;			/* Tx status */
+	void *original_msg;			/* Address of the caller-build message */
+	uint32_t resp_offset;			/* Response offset in message payload */
+	uint32_t copy_len;			/* Length in bytes copied from the return message */
 };
 
 /*

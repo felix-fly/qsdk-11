@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014 The Linux Foundation. All rights reserved.
+# Copyright (c) 2014, 20202-2021 The Linux Foundation. All rights reserved.
 # Permission to use, copy, modify, and/or distribute this software for
 # any purpose with or without fee is hereby granted, provided that the
 # above copyright notice and this permission notice appear in all copies.
@@ -25,9 +25,6 @@ ifeq ($(DUMP)$(PKG_VERSION),)
   PKG_VERSION:=g$(PKG_REV)
 endif
 
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
-PKG_SOURCE_VERSION:=$(PKG_REV)
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -68,12 +65,13 @@ Simple connection manager for the Shortcut forwarding engine.
 endef
 
 EXTRA_CFLAGS+=-DSFE_SUPPORT_IPV6
+PKG_EXTMOD_SUBDIRS=shortcut-fe
 
 define Build/Compile
 	$(MAKE) -C "$(LINUX_DIR)" \
 		CROSS_COMPILE="$(TARGET_CROSS)" \
 		ARCH="$(LINUX_KARCH)" \
-		SUBDIRS="$(PKG_BUILD_DIR)/shortcut-fe" \
+		M="$(PKG_BUILD_DIR)/shortcut-fe" \
 		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
 		SFE_SUPPORT_IPV6=1 \
 		modules

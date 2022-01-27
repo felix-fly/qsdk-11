@@ -2,6 +2,8 @@
 # Makefile for QCA Receiving Flow Steering.
 #
 
+ccflags-y += -Werror -Wall
+
 obj-m += qrfs.o
 
 qrfs-objs := \

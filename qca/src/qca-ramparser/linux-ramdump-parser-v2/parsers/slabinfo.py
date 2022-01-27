@@ -55,6 +55,13 @@ class kmem_cache(object):
         if self.inuse is None:
             return
 
+        if addr is None or g_offsetof.red_left_pad_offset is None:
+            self.red_left_pad = 0
+        else:
+            self.red_left_pad = ramdump.read_int(addr + g_offsetof.red_left_pad_offset)
+            if self.red_left_pad is None:
+                self.red_left_pad = 0
+
         self.addr = addr
         self.valid = True
 
@@ -77,6 +84,8 @@ class struct_member_offset(object):
             'struct kmem_cache', 'name')
         self.kmemcache_node = ramdump.field_offset(
             'struct kmem_cache', 'node')
+        self.red_left_pad_offset = ramdump.field_offset(
+             'struct kmem_cache', 'red_left_pad')
         self.kmemcache_cpu_page = ramdump.field_offset(
             'struct kmem_cache_cpu', 'page')
         self.kmemcpucache_cpu_slab = ramdump.field_offset(
@@ -91,8 +100,12 @@ class struct_member_offset(object):
                             'struct page', 'lru')
         self.page_flags = ramdump.field_offset(
                             'struct page', 'flags')
-        self.page_mapcount = ramdump.field_offset(
-                            'struct page', '_mapcount')
+        if (ramdump.kernel_version <= (4, 14)):
+            self.page_mapcount = ramdump.field_offset(
+                                'struct page', '_mapcount')
+        else:
+            self.page_mapcount = ramdump.field_offset(
+                                'struct page', 'counters')
         self.track_addrs = ramdump.field_offset(
                             'struct track', 'addrs')
         self.page_freelist = ramdump.field_offset(
@@ -138,9 +151,9 @@ class Slabinfo(RamParser):
     def get_track(self, ramdump, slab, obj, track_type):
         track_size = g_offsetof.sizeof_struct_track
         if slab.offset != 0:
-            p = obj + slab.offset + g_offsetof.sizeof_void_pointer
+            p = obj + slab.red_left_pad + slab.offset + g_offsetof.sizeof_void_pointer
         else:
-            p = obj + slab.inuse
+            p = obj + slab.red_left_pad + slab.inuse
         return p + track_type * track_size
 
     def print_track(self, ramdump, slab_name, slab, obj, track_type, out_file):
@@ -190,6 +203,37 @@ class Slabinfo(RamParser):
         for info in sorted_meminfo:
             m = sorted_meminfo[info]
             slabs_output_summary.write(str(m))
+
+        alloc_size = 0
+
+        network_alloc_size = 0
+        wifi_alloc_size = 0
+        nss_alloc_size = 0
+
+        slub_free_pending = 0
+
+        for info in sorted_meminfo:
+            m = sorted_meminfo[info]
+
+            if m.allocation_type == "SLUB Allocation [Free]":
+                slub_free_pending += m.total_size
+                continue
+
+            alloc_size += m.total_size
+
+            if m.category == "Networking":
+                if m.subcategory == "WiFi":
+                    wifi_alloc_size += m.total_size
+                if m.subcategory == "NSS":
+                    nss_alloc_size += m.total_size
+
+        network_alloc_size = wifi_alloc_size + nss_alloc_size
+
+        print_out_str("Total allocated size: {0} KB".format(alloc_size / 1024))
+
+        print_out_str("\tNetwork allocation: {0} KB".format(network_alloc_size / 1024))
+        print_out_str("\t\tWiFi allocation: {0} KB".format(wifi_alloc_size / 1024))
+        print_out_str("\t\tNSS allocation: {0} KB".format(nss_alloc_size / 1024))
 
     def print_slab_page_info(
                 self, ramdump, slab_name, slab_obj, slab_node, start,
@@ -329,8 +373,12 @@ class Slabinfo(RamParser):
         slabs_output_summary.close()
 
     def parse(self):
-        if not self.ramdump.CONFIG_SLUB_DEBUG or not self.ramdump.is_config_defined('CONFIG_STACKTRACE'):
+        if (len(self.ramdump.config) != 0) and (not self.ramdump.CONFIG_SLUB_DEBUG or not self.ramdump.is_config_defined('CONFIG_STACKTRACE')):
             print_out_str ("either slub_debug_on or stacktrace is not enabled")
+            return
+        cmdline = self.ramdump.get_command_line()
+        if cmdline.find("slub_debug=FZPU") == -1:
+            print_out_str ("slub_debug=FZPU is not present in command line. Boot args is not properly set")
             return
         slabname = None
         for arg in sys.argv:

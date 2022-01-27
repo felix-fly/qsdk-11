@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,11 +21,17 @@
 #include "qcom-ipq6018-memory.dtsi"
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/gpio/gpio.h>
+#include "qcom-ipq6018-mhi.dtsi"
 
 / {
 	model = "Qualcomm Technologies, Inc. IPQ6018";
 	compatible = "qcom,ipq6018";
-	qcom,msm-id = <0x192 0x0>;
+	qcom,board-id = <0x8 0x0>;
+	qcom,pmic-id = <0x0 0x0 0x0 0x0>;
+
+	srd_trace: srd_trace {
+		compatible = "srd";
+	};
 
 	soc: soc {
 		#address-cells = <0x1>;
@@ -104,6 +110,68 @@
 				     <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
+		};
+
+		adsprpc_mem: qcom,msm-adsprpc-mem {
+			compatible = "qcom,msm-adsprpc-mem-region";
+			status = "disabled";
+		};
+
+		fastrpc_cb: qcom,msm_fastrpc {
+			compatible = "qcom,msm-fastrpc-compute";
+			qcom,rpc-latency-us = <611>;
+			qcom,fastrpc-adsp-audio-pdr;
+			qcom,fastrpc-adsp-sensors-pdr;
+			qcom,fastrpc-legacy-remote-heap;
+			status = "disabled";
+
+			qcom,msm_fastrpc_compute_cb1 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1004>;
+			};
+
+			qcom,msm_fastrpc_compute_cb2 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1005>;
+			};
+
+			qcom,msm_fastrpc_compute_cb3 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1006>;
+			};
+
+			qcom,msm_fastrpc_compute_cb4 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1007>;
+			};
+
+			qcom,msm_fastrpc_compute_cb5 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1008>;
+			};
+
+			qcom,msm_fastrpc_compute_cb6 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x1009>;
+			};
+
+			qcom,msm_fastrpc_compute_cb7 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x100A>;
+			};
+
+			qcom,msm_fastrpc_compute_cb8 {
+				compatible = "qcom,msm-fastrpc-compute-cb";
+				label = "adsprpc-smd";
+				iommus = <&smmu500 0x100B>;
+			};
 		};
 
 		blsp1_uart5: serial@78b3000 {
@@ -410,6 +478,7 @@
 			       reg = <0x8A00000 0xcd00>;
 			       interrupts = <GIC_SPI 140 IRQ_TYPE_NONE>;
 			       usb-phy = <&qusb_phy_0>, <&ssphy_0>;
+			       snps,dis_ep_cache_eviction;
 			       tx-fifo-resize;
 			       snps,usb3-u1u2-disable;
 			       snps,nominal-elastic-buffer;
@@ -489,6 +558,7 @@
 			       reg = <0x7000000 0xcd00>;
 			       interrupts = <GIC_SPI 99 IRQ_TYPE_NONE>;
 			       usb-phy = <&qusb_phy_1>;
+			       snps,dis_ep_cache_eviction;
 			       tx-fifo-resize;
 			       snps,usb3-u1u2-disable;
 			       snps,nominal-elastic-buffer;
@@ -506,123 +576,104 @@
 			compatible = "qca,pcie-qmp-phy-gen3";
 			reg = <0x84000 0x1000>;
 			phy-type = "gen3";
-			qcom,qmp-pcie-phy-init-seq = <0x840 0x03 /*PCS_COM_POWER_DOWN_CONTROL */
-						      0x03C 0x18 /* PCIE_0_QSERDES_PLL_BIAS_EN_CLKBUFLR_EN */
-						      0x0A4 0x01 /* PCIE_0_QSERDES_PLL_BIAS_EN_CTRL_BY_PSM */
-						      0x16C 0x32 /* PCIE_0_QSERDES_PLL_CLK_SELECT */
-						      0x050 0x0F /* PCIE_0_QSERDES_PLL_PLL_IVCO */
-						      0x074 0x0F /* PCIE_0_QSERDES_PLL_BG_TRIM */
+			qcom,qmp-pcie-phy-init-seq = <0x840 0x03 /* PCS_COM_POWER_DOWN_CONTROL */
+						      0x01C 0x7D /* QSERDES_PLL_SSC_PER1 */
+						      0x020 0x01 /* QSERDES_PLL_SSC_PER2 */
+						      0x024 0x0A /* QSERDES_PLL_SSC_STEP_SIZE1_MODE0 */
+						      0x028 0x05 /* QSERDES_PLL_SSC_STEP_SIZE2_MODE0 */
+						      0x02C 0x08 /* QSERDES_PLL_SSC_STEP_SIZE1_MODE1 */
+						      0x030 0x04 /* QSERDES_PLL_SSC_STEP_SIZE2_MODE1 */
+						      0x03C 0x18 /* QSERDES_PLL_BIAS_EN_CLKBUFLR_EN */
+						      0x040 0x90 /* QSERDES_PLL_CLK_ENABLE1 */
+						      0x044 0x02 /* QSERDES_PLL_SYS_CLK_CTRL */
+						      0x048 0x07 /* QSERDES_PLL_SYSCLK_BUF_ENABLE */
+						      0x050 0x0F /* QSERDES_PLL_PLL_IVCO */
+						      0x054 0xD4 /* QSERDES_PLL_LOCK_CMP1_MODE0 */
+						      0x058 0x14 /* QSERDES_PLL_LOCK_CMP2_MODE0 */
+						      0x060 0xAA /* QSERDES_PLL_LOCK_CMP1_MODE1 */
+						      0x064 0x29 /* QSERDES_PLL_LOCK_CMP2_MODE1 */
+						      0x074 0x0F /* QSERDES_PLL_BG_TRIM */
 						      0xFFFFFFFF 0x01 /* 1ms delay */
-						      0x18C 0x06 /* PCIE_0_QSERDES_PLL_CMN_CONFIG */
-						      0x0C4 0x42 /* PCIE_0_QSERDES_PLL_LOCK_CMP_EN */
-						      0x0B0 0x20 /* PCIE_0_QSERDES_PLL_RESETSM_CNTRL */
-						      0x194 0x05 /* PCIE_0_QSERDES_PLL_SVS_MODE_CLK_SEL */
-						      0x120 0x04 /* PCIE_0_QSERDES_PLL_VCO_TUNE_MAP */
-						      0x13C 0xFF /* PCIE_0_QSERDES_PLL_VCO_TUNE_TIMER1 */
-						      0x140 0x3F /* PCIE_0_QSERDES_PLL_VCO_TUNE_TIMER2 */
-						      0x184 0x00  /* PCIE_0_QSERDES_PLL_CORE_CLK_EN */
-						      0x170 0x01 /* PCIE_0_QSERDES_PLL_HSCLK_SEL */
-						      0x0CC 0x68 /* PCIE_0_QSERDES_PLL_DEC_START_MODE0 */
-						      0x0E0 0x02 /* PCIE_0_QSERDES_PLL_DIV_FRAC_START3_MODE0 */
-						      0x0DC 0xAA /* PCIE_0_QSERDES_PLL_DIV_FRAC_START2_MODE0 */
-						      0x0D8 0xAB /* PCIE_0_QSERDES_PLL_DIV_FRAC_START1_MODE0 */
-						      0x058 0x14 /* PCIE_0_QSERDES_PLL_LOCK_CMP2_MODE0 */
-						      0x054 0xD4 /* PCIE_0_QSERDES_PLL_LOCK_CMP1_MODE0 */
-						      0x01C 0x09 /* PCIE_0_QSERDES_PLL_CP_CTRL_MODE0 */
-						      0x020 0x7D /* PCIE_0_QSERDES_PLL_SSC_PER1 */
-						      0x024 0x01 /* PCIE_0_QSERDES_PLL_SSC_PER2 */
-						      0x028 0x0A /* PCIE_0_QSERDES_PLL_SSC_STEP_SIZE1_MODE0 */
-						      0x080 0x05 /* PCIE_0_QSERDES_PLL_SSC_STEP_SIZE2_MODE0 */
-						      0x02C 0x08 /* PCIE_0_QSERDES_PLL_SSC_STEP_SIZE1_MODE1 */
-						      0x030 0x08 /* PCIE_0_QSERDES_PLL_SSC_STEP_SIZE2_MODE1 */
-						      0x088 0x16 /* PCIE_0_QSERDES_PLL_PLL_RCTRL_MODE0 */
-						      0x090 0x28 /* PCIE_0_QSERDES_PLL_PLL_CCTRL_MODE0 */
-						      0x104 0xA0 /* PCIE_0_QSERDES_PLL_INTEGLOOP_GAIN1_MODE0 */
-						      0x100 0xA0 /* PCIE_0_QSERDES_PLL_INTEGLOOP_GAIN0_MODE0 */
-						      0x128 0x02 /* PCIE_0_QSERDES_PLL_VCO_TUNE2_MODE0 */
-						      0x124 0x24 /* PCIE_0_QSERDES_PLL_VCO_TUNE1_MODE0 */
-						      0x17C 0x0A /* PCIE_0_QSERDES_PLL_CORECLK_DIV */
-						      0x16C 0x32 /* PCIE_0_QSERDES_PLL_CLK_SELECT */
-						      0x044 0x02 /* PCIE_0_QSERDES_PLL_SYS_CLK_CTRL */
-						      0x048 0x07 /* PCIE_0_QSERDES_PLL_SYSCLK_BUF_ENABLE */
-						      0x0A8 0x08 /* PCIE_0_QSERDES_PLL_SYSCLK_EN_SEL */
-						      0x00C 0x0A /* PCIE_0_QSERDES_PLL_BG_TIMER */
-						      0x0D0 0x53 /* PCIE_0_QSERDES_PLL_DEC_START_MODE1 */
-						      0x0EC 0x05 /* PCIE_0_QSERDES_PLL_DIV_FRAC_START3_MODE1 */
-						      0x0E8 0x55 /* PCIE_0_QSERDES_PLL_DIV_FRAC_START2_MODE1 */
-						      0x0E4 0x55 /* PCIE_0_QSERDES_PLL_DIV_FRAC_START2_MODE1 */
-						      0x064 0x29 /* PCIE_0_QSERDES_PLL_LOCK_CMP2_MODE1 */
-						      0X060 0xAA /* PCIE_0_QSERDES_PLL_LOCK_CMP1_MODE1 */
-						      0x084 0x09 /* PCIE_0_QSERDES_PLL_CP_CTRL_MODE1 */
-						      0x08C 0x16 /* PCIE_0_QSERDES_PLL_PLL_RCTRL_MODE1 */
-						      0x094 0x28 /* PCIE_0_QSERDES_PLL_PLL_CCTRL_MODE1 */
-						      0x10C 0x00 /* PCIE_0_QSERDES_PLL_INTEGLOOP_GAIN1_MODE1 */
-						      0x108 0xA0 /* PCIE_0_QSERDES_PLL_INTEGLOOP_GAIN0_MODE1 */
-						      0x130 0x03 /* PCIE_0_QSERDES_PLL_VCO_TUNE2_MODE1 */
-						      0x12C 0xB4 /* PCIE_0_QSERDES_PLL_VCO_TUNE1_MODE1 */
-						      0x1B4 0x08 /* PCIE_0_QSERDES_PLL_CORECLK_DIV_MODE1 */
-						      0x23C 0x02 /* PCIE_0_QSERDES_TX0_RES_CODE_LANE_OFFSET_TX */
-						      0x29C 0x12 /* PCIE_0_QSERDES_TX0_RCV_DETECT_LVL_2 */
-						      0x258 0x10 /* PCIE_0_QSERDES_TX0_HIGHZ_DRVR_EN */
-						      0x284 0x06 /* PCIE_0_QSERDES_TX0_LANE_MODE_1 */
-						      0x51C 0x03 /* PCIE_0_QSERDES_RX0_SIGDET_CNTRL */
-						      0x518 0x1C /* PCIE_0_QSERDES_RX0_SIGDET_ENABLES */
-						      0x524 0x14 /* PCIE_0_QSERDES_RX0_SIGDET_DEGLITCH_CNTRL */
-						      0x4EC 0x0E /* PCIE_0_QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL2 */
-						      0x4F0 0x04 /* PCIE_0_QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL3 */
-						      0x4F4 0x1B /* PCIE_0_QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL4 */
-						      0x5B4 0x04 /* PCIE_0_QSERDES_RX0_DFE_EN_TIMER */
-						      0x434 0x7F /* PCIE_0_QSERDES_RX0_UCDR_SO_SATURATION_AND_ENABLE */
-						      0x444 0x70 /* PCIE_0_QSERDES_RX0_UCDR_PI_CONTROLS */
-						      0x510 0x73 /* PCIE_0_QSERDES_RX0_RX_EQ_OFFSET_ADAPTOR_CNTRL1 */
-						      0x514 0x80 /* PCIE_0_QSERDES_RX0_RX_OFFSET_ADAPTOR_CNTRL2 */
-						      0x598 0x00 /* PCIE_0_QSERDES_RX0_RX_MODE_10_LOW */
-						      0x59C 0x02 /* PCIE_0_QSERDES_RX0_RX_MODE_10_HIGH */
-						      0x5A0 0xC8 /* PCIE_0_QSERDES_RX0_RX_MODE_10_HIGH2 */
-						      0x5A4 0x09 /* PCIE_0_QSERDES_RX0_RX_MODE_10_HIGH3 */
-						      0x5A8 0xB1 /* PCIE_0_QSERDES_RX0_RX_MODE_10_HIGH4 */
-						      0x584 0x00 /* PCIE_0_QSERDES_RX0_RX_MODE_01_LOW */
-						      0x588 0x02 /* PCIE_0_QSERDES_RX0_RX_MODE_01_HIGH */
-						      0x58C 0xC8 /* PCIE_0_QSERDES_RX0_RX_MODE_01_HIGH2 */
-						      0x590 0x09 /* PCIE_0_QSERDES_RX0_RX_MODE_01_HIGH3 */
-						      0x594 0xB1 /* PCIE_0_QSERDES_RX0_RX_MODE_01_HIGH4 */
-						      0x570 0xF0 /* PCIE_0_QSERDES_RX0_RX_MODE_00_LOW */
-						      0x574 0x02 /* PCIE_0_QSERDES_RX0_RX_MODE_00_HIGH */
-						      0x578 0x2F /* PCIE_0_QSERDES_RX0_RX_MODE_00_HIGH2 */
-						      0x57C 0xD3 /* PCIE_0_QSERDES_RX0_RX_MODE_00_HIGH3 */
-						      0x580 0x40 /* PCIE_0_QSERDES_RX0_RX_MODE_00_HIGH4 */
-						      0x4FC 0x00 /* PCIE_0_QSERDES_RX0_RX_IDAC_TSETTLE_HIGH */
-						      0x4F8 0xC0 /* PCIE_0_QSERDES_RX0_RX_IDAC_TSETTLE_LOW */
-						      0x89C 0x83 /* PCIE_0_PCS_COM_FLL_CNTRL2 */
-						      0x8A0 0x09 /* PCIE_0_PCS_COM_FLL_CNT_VAL_L */
-						      0x8A4 0xA2 /* PCIE_0_PCS_COM_FLL_CNT_VAL_H_TOL */
-						      0x8A8 0x40 /* PCIE_0_PCS_COM_FLL_MAN_CODE */
-						      0x898 0x01 /* PCIE_0_PCS_COM_FLL_CNTRL1 */
-						      0x9A8 0x00 /* PCIE_0_PCS_COM_P2U3_WAKEUP_DLY_TIME_AUXCLK_H */
-						      0x9A4 0x01 /* PCIE_0_PCS_COM_P2U3_WAKEUP_DLY_TIME_AUXCLK_L */
-						      0xC90 0x00 /* PCIE_0_PCS_PCIE_OSC_DTCT_ACTIONS */
-						      0xC44 0x00 /* PCIE_0_PCS_PCIE_L1P1_WAKEUP_DLY_TIME_AUXCLK_H */
-						      0xC40 0x01 /* PCIE_0_PCS_PCIE_L1P1_WAKEUP_DLY_TIME_AUXCLK_L */
-						      0xC4C 0x00 /* PCIE_0_PCS_PCIE_L1P2_WAKEUP_DLY_TIME_AUXCLK_H */
-						      0xC48 0x01 /* PCIE_0_PCS_PCIE_L1P2_WAKEUP_DLY_TIME_AUXCLK_L */
-						      0xCA0 0x11 /* PCIE_0_PCS_PCIE_EQ_CONFIG1 */
-						      0xCA4 0x0B /* PCIE_0_PCS_PCIE_EQ_CONFIG2 */
-						      0xC14 0x07 /* PCIE_0_PCS_PCIE_POWER_STATE_CONFIG4 */
-						      0xC5C 0x52 /* PCIE_0_PCS_PCIE_OSC_DTCT_CONFIG2 */
-						      0xC78 0x50 /* PCIE_0_PCS_PCIE_OSC_DTCT_MODE2_CONFIG2 */
-						      0xC80 0x1A /* PCIE_0_PCS_PCIE_OSC_DTCT_MODE2_CONFIG4 */
-						      0xC84 0x06 /* PCIE_0_PCS_PCIE_OSC_DTCT_MODE2_CONFIG5 */
-						      0x078 0x19 /* PCIE_0_QSERDES_PLL_CLK_EP_DIV_MODE0 */
-						      0x07C 0x28 /* PCIE_0_QSERDES_PLL_CLK_EP_DIV_MODE1 */
-						      0x040 0x90 /* PCIE_0_QSERDES_PLL_CLK_ENABLE1 */
-						      0x840 0x03 /* PCIE_0_PCS_COM_POWER_DOWN_CONTROL */
-						      0xC1C 0xC1 /* PCIE_0_PCS_PCIE_ENDPOINT_REFCLK_DRIVE */
-						      0x9D8 0x01 /* PCIE_0_PCS_COM_RX_DCC_CAL_CONFIG */
-						      0x9EC 0x01 /* PCIE_0_PCS_COM_EQ_CONFIG5 */
-						      0xC0C 0x0D /* PCIE_0_PCS_PCIE_POWER_STATE_CONFIG2 */
-						      0x988 0xAA /* PCIE_0_PCS_COM_RX_SIGDET_LVL */
-						      0x8DC 0x0D /* PCIE_0_PCS_COM_REFGEN_REQ_CONFIG1 */
-						      0x800 0x00 /* PCIE_0_PCS_COM_SW_RESET */
+						      0x080 0x09 /* QSERDES_PLL_CP_CTRL_MODE0 */
+						      0x084 0x09 /* QSERDES_PLL_CP_CTRL_MODE1 */
+						      0x088 0x16 /* QSERDES_PLL_PLL_RCTRL_MODE0 */
+						      0x08C 0x16 /* QSERDES_PLL_PLL_RCTRL_MODE1 */
+						      0x090 0x28 /* QSERDES_PLL_PLL_CCTRL_MODE0 */
+						      0x094 0x28 /* QSERDES_PLL_PLL_CCTRL_MODE1 */
+						      0x0A4 0x01 /* QSERDES_PLL_BIAS_EN_CTRL_BY_PSM */
+						      0x0A8 0x08 /* QSERDES_PLL_SYSCLK_EN_SEL */
+						      0x0B0 0x20 /* QSERDES_PLL_RESETSM_CNTRL */
+						      0x0C4 0x42 /* QSERDES_PLL_LOCK_CMP_EN */
+						      0x0CC 0x68 /* QSERDES_PLL_DEC_START_MODE0 */
+						      0x0D0 0x53 /* QSERDES_PLL_DEC_START_MODE1 */
+						      0x0D8 0xAB /* QSERDES_PLL_DIV_FRAC_START1_MODE0 */
+						      0x0DC 0xAA /* QSERDES_PLL_DIV_FRAC_START2_MODE0 */
+						      0x0E0 0x02 /* QSERDES_PLL_DIV_FRAC_START3_MODE0 */
+						      0x0E4 0x55 /* QSERDES_PLL_DIV_FRAC_START1_MODE1 */
+						      0x0E8 0x55 /* QSERDES_PLL_DIV_FRAC_START2_MODE1 */
+						      0x0EC 0x05 /* QSERDES_PLL_DIV_FRAC_START3_MODE1 */
+						      0x100 0xA0 /* QSERDES_PLL_INTEGLOOP_GAIN0_MODE0 */
+						      0x108 0xA0 /* QSERDES_PLL_INTEGLOOP_GAIN0_MODE1 */
+						      0x124 0x24 /* QSERDES_PLL_VCO_TUNE1_MODE0 */
+						      0x128 0x02 /* QSERDES_PLL_VCO_TUNE2_MODE0 */
+						      0x12C 0xB4 /* QSERDES_PLL_VCO_TUNE1_MODE1 */
+						      0x130 0x03 /* QSERDES_PLL_VCO_TUNE2_MODE1 */
+						      0x16C 0x32 /* QSERDES_PLL_CLK_SELECT */
+						      0x170 0x01 /* QSERDES_PLL_HSCLK_SEL */
+						      0x184 0x00 /* QSERDES_PLL_CORE_CLK_EN */
+						      0x18C 0x06 /* QSERDES_PLL_CMN_CONFIG */
+						      0x194 0x05 /* QSERDES_PLL_SVS_MODE_CLK_SEL */
+						      0x1B4 0x08 /* QSERDES_PLL_CORECLK_DIV_MODE1 */
+						      0x23C 0x02 /* QSERDES_TX0_RES_CODE_LANE_OFFSET_TX */
+						      0x284 0x06 /* QSERDES_TX0_LANE_MODE_1 */
+						      0x29C 0x12 /* QSERDES_TX0_RCV_DETECT_LVL_2 */
+						      0x408 0x0C /* QSERDES_RX0_UCDR_FO_GAIN */
+						      0x414 0x02 /* QSERDES_RX0_UCDR_SO_GAIN */
+						      0x434 0x7F /* QSERDES_RX0_UCDR_SO_SATURATION_AND_ENABLE */
+						      0x444 0x70 /* QSERDES_RX0_UCDR_PI_CONTROLS */
+						      0x4EC 0x61 /* QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL2 */
+						      0x4F0 0x04 /* QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL3 */
+						      0x4F4 0x1E /* QSERDES_RX0_RX_EQU_ADAPTOR_CNTRL4 */
+						      0x4F8 0xC0 /* QSERDES_RX0_RX_IDAC_TSETTLE_LOW */
+						      0x4FC 0x00 /* QSERDES_RX0_RX_IDAC_TSETTLE_HIGH */
+						      0x510 0x73 /* QSERDES_RX0_RX_EQ_OFFSET_ADAPTOR_CNTRL1 */
+						      0x514 0x80 /* QSERDES_RX0_RX_OFFSET_ADAPTOR_CNTRL2 */
+						      0x518 0x1C /* QSERDES_RX0_SIGDET_ENABLES */
+						      0x51C 0x03 /* QSERDES_RX0_SIGDET_CNTRL */
+						      0x524 0x14 /* QSERDES_RX0_SIGDET_DEGLITCH_CNTRL */
+						      0x570 0xF0 /* QSERDES_RX0_RX_MODE_00_LOW */
+						      0x574 0x01 /* QSERDES_RX0_RX_MODE_00_HIGH */
+						      0x578 0x2F /* QSERDES_RX0_RX_MODE_00_HIGH2 */
+						      0x57C 0xD3 /* QSERDES_RX0_RX_MODE_00_HIGH3 */
+						      0x580 0x40 /* QSERDES_RX0_RX_MODE_00_HIGH4 */
+						      0x584 0x01 /* QSERDES_RX0_RX_MODE_01_LOW */
+						      0x588 0x02 /* QSERDES_RX0_RX_MODE_01_HIGH */
+						      0x58C 0xC8 /* QSERDES_RX0_RX_MODE_01_HIGH2 */
+						      0x590 0x09 /* QSERDES_RX0_RX_MODE_01_HIGH3 */
+						      0x594 0xB1 /* QSERDES_RX0_RX_MODE_01_HIGH4 */
+						      0x598 0x00 /* QSERDES_RX0_RX_MODE_10_LOW */
+						      0x59C 0x02 /* QSERDES_RX0_RX_MODE_10_HIGH */
+						      0x5A0 0xC8 /* QSERDES_RX0_RX_MODE_10_HIGH2 */
+						      0x5A4 0x09 /* QSERDES_RX0_RX_MODE_10_HIGH3 */
+						      0x5A8 0xB1 /* QSERDES_RX0_RX_MODE_10_HIGH4 */
+						      0x5B4 0x04 /* QSERDES_RX0_DFE_EN_TIMER */
+						      0x898 0x01 /* PCS_COM_FLL_CNTRL1 */
+						      0x8DC 0x0D /* PCS_COM_REFGEN_REQ_CONFIG1 */
+						      0x96C 0x10 /* PCS_COM_G12S1_TXDEEMPH_M3P5DB */
+						      0x988 0xAA /* PCS_COM_RX_SIGDET_LVL */
+						      0x9A4 0x01 /* PCS_COM_P2U3_WAKEUP_DLY_TIME_AUXCLK_L */
+						      0x9D8 0x01 /* PCS_COM_RX_DCC_CAL_CONFIG */
+						      0x9EC 0x01 /* PCS_COM_EQ_CONFIG5 */
+						      0xC0C 0x0D /* PCS_PCIE_POWER_STATE_CONFIG2 */
+						      0xC14 0x07 /* PCS_PCIE_POWER_STATE_CONFIG4 */
+						      0xC1C 0xC1 /* PCS_PCIE_ENDPOINT_REFCLK_DRIVE */
+						      0xC40 0x01 /* PCS_PCIE_L1P1_WAKEUP_DLY_TIME_AUXCLK_L */
+						      0xC48 0x01 /* PCS_PCIE_L1P2_WAKEUP_DLY_TIME_AUXCLK_L */
+						      0xC90 0x00 /* PCS_PCIE_OSC_DTCT_ACTIONS */
+						      0xCA0 0x11 /* PCS_PCIE_EQ_CONFIG1 */
+						      0xCBC 0x00 /* PCS_PCIE_PRESET_P10_PRE */
+						      0xCE0 0x58 /* PCS_PCIE_PRESET_P10_POST */
+						      0x800 0x00 /* PCS_COM_SW_RESET */
 						      0x844 0x03>; /* PCIE_0_PCS_COM_START_CONTROL */
 
 			#phy-cells = <0>;
@@ -661,6 +712,7 @@
 
 			interrupts = <GIC_SPI 52 IRQ_TYPE_NONE>;
 			interrupt-names = "msi";
+
 			#interrupt-cells = <1>;
 			interrupt-map-mask = <0 0 0 0x7>;
 			interrupt-map = <0 0 0 1 &intc 0 75
@@ -705,12 +757,22 @@
 				      "axi_s_sticky";
 
 			perst-gpio = <&tlmm 60 1>;
+
 			status = "disabled";
+
+			pcie0_rp: pcie0_rp {
+				reg = <0 0 0 0 0>;
+			};
 		};
 
 		qcom,diag@0 {
 			compatible = "qcom,diag";
 			status = "ok";
+		};
+
+		gadget_diag: qcom,gadget_diag@0 {
+			compatible = "qcom,gadget-diag";
+			status = "disabled";
 		};
 
 		blsp_dma: dma@7884000 {
@@ -820,6 +882,29 @@
 			#hwlock-cells = <1>;
 		};
 
+		tcsr_q6_block: syscon@1945000 {
+			compatible = "syscon";
+			reg = <0x1945000 0xE000>;
+		};
+
+		apcs_glb: mailbox@b111000 {
+			compatible = "qcom,msm8996-apcs-hmss-global";
+			qcom,ipc = <&apcs 8 8>;
+			#mbox-cells = <1>;
+		};
+
+		apcs_lpass: mailboxlpass@b111000 {
+			compatible = "qcom,msm8996-apcs-hmss-global";
+			qcom,ipc = <&apcs 8 23>;
+			#mbox-cells = <1>;
+		};
+
+		apcs_rpm: mailboxrpm@b111000 {
+			compatible = "qcom,msm8996-apcs-hmss-global";
+			qcom,ipc = <&apcs 8 0>;
+			#mbox-cells = <1>;
+		};
+
 		smem: qcom,smem@4AA00000 {
 			compatible = "qcom,smem";
 			memory-region = <&smem_region>;
@@ -860,6 +945,20 @@
 			label = "rpm";
 			qcom,subsys-id = <6>;
 			status = "ok";
+		};
+
+		rpmsg_rpm: qcom,rpmsg-rpm@60000 {
+			compatible = "qcom,glink-rpm";
+			qcom,rpm-msg-ram = <&rpm_msg_ram>;
+			interrupts = <GIC_SPI 168 IRQ_TYPE_EDGE_RISING>;
+			label = "rpm";
+			qcom,subsys-id = <6>;
+			mboxes = <&apcs_rpm 8>;
+			status = "ok";
+			glink_edge {
+				qcom,glink-channels = "rpm_requests";
+				qcom,rpm-channel-type = <15>;
+			};
 		};
 
 		rpm_bus: qcom,rpm-glink {
@@ -978,7 +1077,8 @@
 					<&gcc GCC_Q6SS_PCLKDBG_CLK>,
 					<&gcc GCC_Q6_TSCTR_1TO2_CLK>,
 					<&gcc GCC_WCSS_CORE_TBU_CLK>,
-					<&gcc GCC_WCSS_Q6_TBU_CLK>;
+					<&gcc GCC_WCSS_Q6_TBU_CLK>,
+					<&gcc GCC_Q6_AHB_CLK>;
 			clock-names = "wcss_axi_m_clk",
 					"sys_noc_wcss_ahb_clk",
 					"q6_axim_clk",
@@ -986,7 +1086,8 @@
 					"q6ss_pclkdbg_clk",
 					"q6_tsctr_1to2_clk",
 					"wcss_core_tbu_clk",
-					"wcss_q6_tbu_clk";
+					"wcss_q6_tbu_clk",
+					"gcc_q6_ahb_clk";
 			qca,auto-restart;
 			qca,extended-intc;
 			qca,sec-reset-cmd = <0x18>;
@@ -1064,6 +1165,11 @@
 					"pcnoc_lpass_clk";
 		};
 
+		adsprpc_loader: qcom,adsprpc_loader {
+			compatible = "qti,adsprpc-loader";
+			status = "disabled";
+		};
+
 		glink_mpss_ssr: qcom,glink-ssr-modem {
 			compatible = "qcom,glink_ssr";
 			label = "q6v5-wcss";
@@ -1113,6 +1219,7 @@
 			clocks = <&gcc GCC_QPIC_CLK>,
 				<&gcc GCC_QPIC_AHB_CLK>;
 			clock-names = "core", "aon";
+			param-read-addr-cycle = <0x1>;
 
 			dmas = <&qpic_bam 0>,
 				<&qpic_bam 1>,
@@ -1280,7 +1387,8 @@
 			compatible = "qcom,nss";
 			interrupts = <0 402 0x1>, <0 401 0x1>, <0 400 0x1>,
 				     <0 399 0x1>, <0 398 0x1>, <0 397 0x1>,
-				     <0 396 0x1>, <0 395 0x1>, <0 394 0x1>;
+				     <0 396 0x1>, <0 395 0x1>, <0 394 0x1>,
+				     <0 393 0x1>;
 			reg = <0x39000000 0x1000>, <0x0b111000 0x1000>;
 			reg-names = "nphys", "qgic-phys";
 			clocks = <&gcc GCC_NSS_NOC_CLK>,
@@ -1316,7 +1424,7 @@
 				      "nss-utcm-clk", "nss-snoc-nssnoc-clk";
 			qcom,id = <0>;
 			qcom,num-queue = <4>;
-			qcom,num-irq = <9>;
+			qcom,num-irq = <10>;
 			qcom,num-pri = <4>;
 			qcom,load-addr = <0x40000000>;
 			qcom,low-frequency = <187200000>;
@@ -1344,11 +1452,15 @@
 			qcom,vlan-enabled;
 			qcom,capwap-enabled;
 			qcom,dtls-enabled;
+			qcom,tls-enabled;
 			qcom,crypto-enabled;
 			qcom,ipsec-enabled;
 			qcom,qvpn-enabled;
 			qcom,pvxlan-enabled;
 			qcom,clmap-enabled;
+			qcom,vxlan-enabled;
+			qcom,match-enabled;
+			qcom,mirror-enabled;
 		};
 
 		nss_crypto: qcom,nss_crypto {
@@ -1389,6 +1501,7 @@
 				qcom,sha512-hash;
 				qcom,md5-hmac;
 				qcom,sha160-hmac;
+				qcom,sha224-hmac;
 				qcom,sha256-hmac;
 				qcom,sha384-hmac;
 				qcom,sha512-hmac;
@@ -1486,6 +1599,97 @@
 			compatible = "qcom,qca-mdio", "qcom,ipq40xx-mdio";
 			reg = <0x90000 0x64>;
 			status = "disabled";
+		};
+
+		qcom_q6v5_wcss: qcom_q6v5_wcss@CD00000 {
+			compatible = "qcom,ipq60xx-wcss-pil";
+			firmware = "IPQ6018/q6_fw.mdt";
+			m3_firmware = "IPQ6018/m3_fw.mdt";
+			reg = <0xCD00000 0x4040>,
+					<0x4ab000 0x20>;
+			reg-names = "qdsp6",
+						"rmb";
+			qca,auto-restart;
+			qca,extended-intc;
+			qcom,wcss-aon-reset-quirk;
+
+			interrupts-extended = <&intc 0 325 1>,
+					<&wcss_smp2p_in 0 0>,
+					<&wcss_smp2p_in 1 0>,
+					<&wcss_smp2p_in 2 0>,
+					<&wcss_smp2p_in 3 0>;
+			interrupt-names = "wdog",
+					"fatal",
+					"ready",
+					"handover",
+					"stop-ack";
+
+			resets = <&gcc GCC_WCSSAON_RESET>,
+					<&gcc GCC_WCSS_BCR>,
+					<&gcc GCC_WCSS_Q6_BCR>;
+
+			reset-names = "wcss_aon_reset",
+					"wcss_reset",
+					"wcss_q6_reset";
+
+			qcom,halt-regs = <&tcsr_q6_block 0xA000 0xD000 0x0>;
+
+			qcom,smem-states = <&wcss_smp2p_out 0>,
+					<&wcss_smp2p_out 1>;
+
+			qcom,smem-state-names = "shutdown",
+								"stop";
+
+			memory-region = <&q6_region>, <&q6_etr_region>;
+
+			glink-edge {
+					interrupts = <GIC_SPI 321 IRQ_TYPE_EDGE_RISING>;
+					qcom,remote-pid = <1>;
+					mboxes = <&apcs_glb 8>;
+					global_timer = <0x4A5000>;
+
+				rpm_requests {
+					qcom,glink-channels = "IPCRTR";
+				};
+			};
+		};
+
+		qcom_q6v6_adsp: qcom_q6v6_adsp@AB00000 {
+			status = "disabled";
+			compatible = "qcom,ipq6018-adsp-pil";
+
+			interrupts-extended = <&intc 0 30 1>,
+					<&adsp_smp2p_in 0 0>,
+					<&adsp_smp2p_in 1 0>,
+					<&adsp_smp2p_in 2 0>,
+					<&adsp_smp2p_in 3 0>;
+			interrupt-names = "wdog",
+					"fatal",
+					"ready",
+					"handover",
+					"stop-ack";
+
+			qcom,smem-states = <&adsp_smp2p_out 0>,
+					<&adsp_smp2p_out 1>;
+
+			qcom,smem-state-names = "shutdown",
+						"stop";
+
+			glink-edge {
+				interrupts = <GIC_SPI 24 IRQ_TYPE_EDGE_RISING>;
+				qcom,remote-pid = <2>;
+				mboxes = <&apcs_lpass 8>;
+
+				rpm_requests {
+					qcom,glink-channels = "IPCRTR";
+				};
+
+				qcom,msm_fastrpc_rpmsg {
+					compatible = "qcom,msm-fastrpc-rpmsg";
+					qcom,glink-channels = "fastrpcglink-apps-dsp";
+					qcom,intents = <0x64 64>;
+				};
+			};
 		};
 
 		ess-switch@3a000000 {
@@ -1893,7 +2097,7 @@
 		};
 
 		wifi0: wifi@c000000 {
-			compatible = "qcom,cnss-qca6018";
+			compatible = "qcom,cnss-qca6018", "qcom,ipq6018-wifi";
 			reg = <0xc000000 0x1000000>;
 			qcom,hw-mode-id = <1>;
 		#ifdef __IPQ_MEM_PROFILE_256_MB__
@@ -1903,12 +2107,16 @@
 		#else
 			qcom,tgt-mem-mode = <0>;
 		#endif
-			qcom,bdf-addr = <0x4ABC0000 0x4ABC0000 0x4ABC0000>;
-			qcom,caldb-addr = <0x4B500000 0x4B500000 0x4B500000>;
+			qcom,bdf-addr = <0x4ABC0000 0x4ABC0000 0x4ABC0000
+					 0x0 0x0>;
+			qcom,caldb-addr = <0x4B500000 0x4B500000 0x4B500000
+					   0x0 0x0>;
+			qcom,caldb-size = <0x480000>;
+
+			qcom,rproc = <&qcom_q6v5_wcss>;
 			interrupts = <0 320 1>, /* o_wcss_apps_intr[0] =  */
 			<0 319 1>,
 			<0 318 1>,
-			<0 317 1>,
 			<0 316 1>,
 			<0 315 1>,
 			<0 314 1>,
@@ -1965,7 +2173,6 @@
 			interrupt-names = "misc-pulse1",
 			"misc-latch",
 			"sw-exception",
-			"watchdog",
 			"ce0",
 			"ce1",
 			"ce2",
@@ -2014,7 +2221,27 @@
 			"wbm2host-tx-completions-ring2",
 			"wbm2host-tx-completions-ring1",
 			"tcl2host-status-ring";
-			status = "ok";
+		status = "ok";
+		qcom,pta-num = <0>;
+		qcom,coex-mode = <0x2>;
+		qcom,bt-active-time = <0x18>;
+		qcom,bt-priority-time = <0x12>;
+		qcom,coex-algo = <0x2>;
+		qcom,pta-priority = <0x80800505>;
+		};
+
+		wifi1: wifi1@f00000 {
+			compatible  = "qcom,cnss-qcn9000";
+			qrtr_node_id = <0x20>;
+			qca,auto-restart;
+			status = "disabled";
+		};
+
+		wifi2: wifi2@f00000 {
+			compatible  = "qcom,cnss-qcn9000";
+			qrtr_node_id = <0x21>;
+			qca,auto-restart;
+			status = "disabled";
 		};
 
 		msm_imem: qcom,msm-imem@8600000 {
@@ -2051,6 +2278,7 @@
 		tzlog: qca,tzlog {
 			compatible = "qca,tzlog_ipq6018";
 			interrupts = <GIC_SPI 244 IRQ_TYPE_EDGE_RISING>;
+			qca,tzbsp-diag-buf-start = <0x4a7df000>;
 			qca,tzbsp-diag-buf-size = <0x3000>;
 			qca,hyp-enabled;
 			hyp-scm-cmd-id = <0xA>;
@@ -2067,6 +2295,10 @@
 			qcom,offset-page-indices = <56>;
 		};
 
+		mhi_test: qcom,test@0 {
+			compatible = "qcom,testmhi";
+			status = "disabled";
+		};
 	};
 
 	psci: psci {
@@ -2137,8 +2369,9 @@
 	firmware: firmware {
 		scm {
 			compatible = "qcom,scm-ipq6018";
+			smmu-state-scm-cmd-id = <0x20>;
 		};
-		qfprom {
+		qfprom_sec {
 			compatible = "qcom,qfprom-sec";
 			img-addr = <0x4A100000>;
 			img-size = <0x00500000>;
@@ -2147,7 +2380,7 @@
 	};
 
 	pmuv8: pmu {
-		compatible = "arm,armv8-pmuv3";
+		compatible = "arm,cortex-a53-pmu";
 		interrupts = <GIC_PPI 7 (GIC_CPU_MASK_SIMPLE(4) |
 					 IRQ_TYPE_LEVEL_HIGH)>;
 	};
@@ -2191,7 +2424,4 @@
 };
 
 #include "qcom-ipq6018-coresight.dtsi"
-#include "qcom-ipq6018-rpm-regulator.dtsi"
-#include "qcom-ipq6018-cpr-regulator.dtsi"
-#include "qcom-ipq6018-cp-cpu.dtsi"
 #include "qcom-ipq6018-thermal.dtsi"

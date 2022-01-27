@@ -91,6 +91,13 @@ struct subsys_desc {
 	int sysmon_shutdown_ret;
 	bool system_debug;
 	const char *edge;
+	struct subsys_desc *parent;
+	struct list_head child;
+};
+
+struct subsys_child {
+	struct list_head node;
+	void *handle;
 };
 
 /**
@@ -108,6 +115,18 @@ struct notif_data {
 	int enable_mini_ramdumps;
 	bool no_auth;
 	struct platform_device *pdev;
+};
+
+/**
+ * enum subsys_state - state of a subsystem (public)
+ * @SUBSYS_OFFLINE: subsystem is offline
+ * @SUBSYS_ONLINE: subsystem is online
+ *
+ * The 'public' side of the subsytem state, exposed to userspace.
+ */
+enum subsys_state {
+	SUBSYS_OFFLINE,
+	SUBSYS_ONLINE,
 };
 
 #if defined(CONFIG_IPQ_SUBSYSTEM_RESTART)
@@ -131,6 +150,11 @@ void notify_proxy_vote(struct device *device);
 void notify_proxy_unvote(struct device *device);
 void complete_err_ready(struct subsys_device *subsys);
 extern int wait_for_shutdown_ack(struct subsys_desc *desc);
+extern enum subsys_state subsys_get_state(struct subsys_device *subsys);
+extern void subsys_add_child(struct subsys_desc *desc,
+				struct subsys_child *child);
+extern void subsys_remove_child(struct subsys_desc *desc,
+					struct subsys_child *child);
 #else
 static inline int subsys_get_restart_level(struct subsys_device *dev)
 {
@@ -185,6 +209,14 @@ static inline int wait_for_shutdown_ack(struct subsys_desc *desc)
 {
 	return -ENOSYS;
 }
+static inline enum subsys_state subsys_get_state(struct subsys_device *subsys)
+{
+	return 0;
+}
+static inline void subsys_add_child(struct subsys_desc *desc,
+				struct subsys_child *child) { }
+static inline void subsys_remove_child(struct subsys_desc *desc,
+				struct subsys_child *child) { }
 #endif /* CONFIG_IPQ_SUBSYSTEM_RESTART */
 
 #endif

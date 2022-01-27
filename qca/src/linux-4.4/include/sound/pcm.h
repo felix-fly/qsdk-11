@@ -453,7 +453,6 @@ struct snd_pcm_substream {
 	const struct snd_pcm_ops *ops;
 	/* -- runtime information -- */
 	struct snd_pcm_runtime *runtime;
-	spinlock_t runtime_lock;
         /* -- timer section -- */
 	struct snd_timer *timer;		/* timer */
 	unsigned timer_running: 1;	/* time is running */
@@ -488,6 +487,9 @@ struct snd_pcm_substream {
 #endif /* CONFIG_SND_VERBOSE_PROCFS */
 	/* misc flags */
 	unsigned int hw_opened: 1;
+#ifdef CONFIG_AUDIO_QGKI
+	spinlock_t runtime_lock;
+#endif
 };
 
 #define SUBSTREAM_BUSY(substream) ((substream)->ref_count > 0)

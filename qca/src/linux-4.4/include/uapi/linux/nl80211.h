@@ -52,6 +52,11 @@
 #define NL80211_MULTICAST_GROUP_NAN		"nan"
 #define NL80211_MULTICAST_GROUP_TESTMODE	"testmode"
 
+#define NL80211_EDMG_BW_CONFIG_MIN	4
+#define NL80211_EDMG_BW_CONFIG_MAX	15
+#define NL80211_EDMG_CHANNELS_MIN	1
+#define NL80211_EDMG_CHANNELS_MAX	0x3c /* 0b00111100 */
+
 /**
  * DOC: Station handling
  *
@@ -258,6 +263,28 @@
  */
 
 /**
+ * DOC: VLAN offload support for setting group keys and binding STAs to VLANs
+ *
+ * By setting @NL80211_EXT_FEATURE_VLAN_OFFLOAD flag drivers can indicate they
+ * support offloading VLAN functionality in a manner where the driver exposes a
+ * single netdev that used VLAN tagged frames and separate VLAN-specific netdevs
+ * can then be added using vconfig similarly to the Ethernet case.
+ * %NL80211_CMD_NEW_KEY and %NL80211_CMD_SET_STATION will optionally specify
+ * vlan_id using %NL80211_ATTR_VLAN_ID.
+ */
+
+/**
+ * DOC: SAE mechanism for PWE derivation
+ *
+ * By setting @NL80211_ATTR_SAE_PWE flag userspace can indicate the SAE
+ * mechanism used for PWE derivation, in WPA3-Personal networks which are
+ * using SAE authentication.
+ *
+ * In %NL80211_CMD_CONNECT and %NL80211_CMD_START_AP the sae_pwe value
+ * for SAE authentication should be specified using the %NL80211_ATTR_SAE_PWE.
+ */
+
+/**
  * enum nl80211_commands - supported nl80211 commands
  *
  * @NL80211_CMD_UNSPEC: unspecified command to catch errors
@@ -319,7 +346,8 @@
  *	%NL80211_ATTR_CIPHER_GROUP, %NL80211_ATTR_WPA_VERSIONS,
  *	%NL80211_ATTR_AKM_SUITES, %NL80211_ATTR_PRIVACY,
  *	%NL80211_ATTR_AUTH_TYPE, %NL80211_ATTR_INACTIVITY_TIMEOUT,
- *	%NL80211_ATTR_ACL_POLICY and %NL80211_ATTR_MAC_ADDRS.
+ *	%NL80211_ATTR_ACL_POLICY, %NL80211_ATTR_MAC_ADDRS and
+ *	%NL80211_ATTR_SAE_PWE.
  *	The channel to use can be set on the interface or be given using the
  *	%NL80211_ATTR_WIPHY_FREQ and the attributes determining channel width.
  * @NL80211_CMD_NEW_BEACON: old alias for %NL80211_CMD_START_AP
@@ -570,7 +598,7 @@
  *	%NL80211_ATTR_CONTROL_PORT_ETHERTYPE,
  *	%NL80211_ATTR_CONTROL_PORT_NO_ENCRYPT,
  *	%NL80211_ATTR_CONTROL_PORT_OVER_NL80211, %NL80211_ATTR_MAC_HINT, and
- *	%NL80211_ATTR_WIPHY_FREQ_HINT.
+ *	%NL80211_ATTR_WIPHY_FREQ_HINT, %NL80211_ATTR_SAE_PWE.
  *	If included, %NL80211_ATTR_MAC and %NL80211_ATTR_WIPHY_FREQ are
  *	restrictions on BSS selection, i.e., they effectively prevent roaming
  *	within the ESS. %NL80211_ATTR_MAC_HINT and %NL80211_ATTR_WIPHY_FREQ_HINT
@@ -583,6 +611,9 @@
  *	%NL80211_ATTR_PREV_BSSID can be used to request a reassociation within
  *	the ESS in case the device is already associated and an association with
  *	a different BSS is desired.
+ *	%NL80211_ATTR_SAE_PWE can be used by userspace to indicate the SAE
+ *	mechanism used for PWE derivation in WPA3-Personal networks which are
+ *	using SAE authentication.
  *	Background scan period can optionally be
  *	specified in %NL80211_ATTR_BG_SCAN_PERIOD,
  *	if not specified default background scan configuration
@@ -2362,6 +2393,26 @@ enum nl80211_commands {
  *	should be picking up the lowest tx power, either tx power per-interface
  *	or per-station.
  *
+ * @NL80211_ATTR_SAE_PASSWORD: attribute for passing SAE password material. It
+ *      is used with %NL80211_CMD_CONNECT to provide password for offloading
+ *      SAE authentication for WPA3-Personal networks.
+ *
+ * @NL80211_ATTR_TWT_RESPONDER: Enable target wait time responder support.
+ *
+ * @NL80211_ATTR_HE_OBSS_PD: nested attribute for OBSS Packet Detection
+ *      functionality.
+ *
+ * @NL80211_ATTR_WIPHY_EDMG_CHANNELS: bitmap that indicates the 2.16 GHz
+ *      channel(s) that are allowed to be used for EDMG transmissions.
+ *      Defined by IEEE P802.11ay/D4.0 section 9.4.2.251. (u8 attribute)
+ * @NL80211_ATTR_WIPHY_EDMG_BW_CONFIG: Channel BW Configuration subfield encodes
+ *      the allowed channel bandwidth configurations. (u8 attribute)
+ *      Defined by IEEE P802.11ay/D4.0 section 9.4.2.251, Table 13.
+ * @NL80211_ATTR_VLAN_ID: VLAN ID for the station and VLAN group key (u16).
+ *
+ * @NL80211_ATTR_SAE_PWE: Indicates the SAE mechanism used for PWE derivation
+ *	in  WPA3-Personal networks which are using SAE authentication.
+ *
  * @NUM_NL80211_ATTR: total number of nl80211_attrs available
  * @NL80211_ATTR_MAX: highest attribute number currently defined
  * @__NL80211_ATTR_AFTER_LAST: internal use
@@ -2800,8 +2851,8 @@ enum nl80211_attrs {
 	NL80211_ATTR_TXQ_LIMIT,
 	NL80211_ATTR_TXQ_MEMORY_LIMIT,
 	NL80211_ATTR_TXQ_QUANTUM,
-
 	NL80211_ATTR_HE_CAPABILITY,
+
 
 	NL80211_ATTR_FTM_RESPONDER,
 
@@ -2814,6 +2865,17 @@ enum nl80211_attrs {
 	NL80211_ATTR_AIRTIME_WEIGHT,
 	NL80211_ATTR_STA_TX_POWER_SETTING,
 	NL80211_ATTR_STA_TX_POWER,
+	NL80211_ATTR_SAE_PASSWORD,
+
+	NL80211_ATTR_TWT_RESPONDER,
+
+	NL80211_ATTR_HE_OBSS_PD,
+
+	NL80211_ATTR_WIPHY_EDMG_CHANNELS,
+	NL80211_ATTR_WIPHY_EDMG_BW_CONFIG,
+
+	NL80211_ATTR_VLAN_ID,
+	NL80211_ATTR_SAE_PWE = 294,
 
 	/* add attributes here, update the policy in nl80211.c */
 
@@ -2864,7 +2926,8 @@ enum nl80211_attrs {
 #define NL80211_TKIP_DATA_OFFSET_RX_MIC_KEY	24
 #define NL80211_HT_CAPABILITY_LEN		26
 #define NL80211_VHT_CAPABILITY_LEN		12
-
+#define NL80211_HE_MIN_CAPABILITY_LEN           16
+#define NL80211_HE_MAX_CAPABILITY_LEN           54
 #define NL80211_MAX_NR_CIPHER_SUITES		5
 #define NL80211_MAX_NR_AKM_SUITES		2
 
@@ -2992,6 +3055,38 @@ struct nl80211_sta_flag_update {
 } __attribute__((packed));
 
 /**
+ * enum nl80211_he_gi - HE guard interval
+ * @NL80211_RATE_INFO_HE_GI_0_8: 0.8 usec
+ * @NL80211_RATE_INFO_HE_GI_1_6: 1.6 usec
+ * @NL80211_RATE_INFO_HE_GI_3_2: 3.2 usec
+ */
+enum nl80211_he_gi {
+	NL80211_RATE_INFO_HE_GI_0_8,
+	NL80211_RATE_INFO_HE_GI_1_6,
+	NL80211_RATE_INFO_HE_GI_3_2,
+};
+
+/**
+ * enum nl80211_he_ru_alloc - HE RU allocation values
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_26: 26-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_52: 52-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_106: 106-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_242: 242-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_484: 484-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_996: 996-tone RU allocation
+ * @NL80211_RATE_INFO_HE_RU_ALLOC_2x996: 2x996-tone RU allocation
+ */
+enum nl80211_he_ru_alloc {
+	NL80211_RATE_INFO_HE_RU_ALLOC_26,
+	NL80211_RATE_INFO_HE_RU_ALLOC_52,
+	NL80211_RATE_INFO_HE_RU_ALLOC_106,
+	NL80211_RATE_INFO_HE_RU_ALLOC_242,
+	NL80211_RATE_INFO_HE_RU_ALLOC_484,
+	NL80211_RATE_INFO_HE_RU_ALLOC_996,
+	NL80211_RATE_INFO_HE_RU_ALLOC_2x996,
+};
+
+/**
  * enum nl80211_rate_info - bitrate information
  *
  * These attribute types are used with %NL80211_STA_INFO_TXRATE
@@ -3023,6 +3118,13 @@ struct nl80211_sta_flag_update {
  * @NL80211_RATE_INFO_5_MHZ_WIDTH: 5 MHz width - note that this is
  *	a legacy rate and will be reported as the actual bitrate, i.e.
  *	a quarter of the base (20 MHz) rate
+ * @NL80211_RATE_INFO_HE_MCS: HE MCS index (u8, 0-11)
+ * @NL80211_RATE_INFO_HE_NSS: HE NSS value (u8, 1-8)
+ * @NL80211_RATE_INFO_HE_GI: HE guard interval identifier
+ *	(u8, see &enum nl80211_he_gi)
+ * @NL80211_RATE_INFO_HE_DCM: HE DCM value (u8, 0/1)
+ * @NL80211_RATE_INFO_RU_ALLOC: HE RU allocation, if not present then
+ *	non-OFDMA was used (u8, see &enum nl80211_he_ru_alloc)
  * @__NL80211_RATE_INFO_AFTER_LAST: internal use
  */
 enum nl80211_rate_info {
@@ -3039,6 +3141,11 @@ enum nl80211_rate_info {
 	NL80211_RATE_INFO_160_MHZ_WIDTH,
 	NL80211_RATE_INFO_10_MHZ_WIDTH,
 	NL80211_RATE_INFO_5_MHZ_WIDTH,
+	NL80211_RATE_INFO_HE_MCS,
+	NL80211_RATE_INFO_HE_NSS,
+	NL80211_RATE_INFO_HE_GI,
+	NL80211_RATE_INFO_HE_DCM,
+	NL80211_RATE_INFO_HE_RU_ALLOC,
 
 	/* keep last */
 	__NL80211_RATE_INFO_AFTER_LAST,
@@ -3305,6 +3412,38 @@ enum nl80211_mpath_info {
 };
 
 /**
+ * enum nl80211_band_iftype_attr - Interface type data attributes
+ *
+ * @__NL80211_BAND_IFTYPE_ATTR_INVALID: attribute number 0 is reserved
+ * @NL80211_BAND_IFTYPE_ATTR_IFTYPES: nested attribute containing a flag attribute
+ *     for each interface type that supports the band data
+ * @NL80211_BAND_IFTYPE_ATTR_HE_CAP_MAC: HE MAC capabilities as in HE
+ *     capabilities IE
+ * @NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY: HE PHY capabilities as in HE
+ *     capabilities IE
+ * @NL80211_BAND_IFTYPE_ATTR_HE_CAP_MCS_SET: HE supported NSS/MCS as in HE
+ *     capabilities IE
+ * @NL80211_BAND_IFTYPE_ATTR_HE_CAP_PPE: HE PPE thresholds information as
+ *     defined in HE capabilities IE
+ * @NL80211_BAND_IFTYPE_ATTR_MAX: highest band HE capability attribute currently
+ *     defined
+ * @__NL80211_BAND_IFTYPE_ATTR_AFTER_LAST: internal use
+ */
+enum nl80211_band_iftype_attr {
+	__NL80211_BAND_IFTYPE_ATTR_INVALID,
+
+	NL80211_BAND_IFTYPE_ATTR_IFTYPES,
+	NL80211_BAND_IFTYPE_ATTR_HE_CAP_MAC,
+	NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY,
+	NL80211_BAND_IFTYPE_ATTR_HE_CAP_MCS_SET,
+	NL80211_BAND_IFTYPE_ATTR_HE_CAP_PPE,
+
+	/* keep last */
+	__NL80211_BAND_IFTYPE_ATTR_AFTER_LAST,
+	NL80211_BAND_IFTYPE_ATTR_MAX = __NL80211_BAND_IFTYPE_ATTR_AFTER_LAST - 1
+};
+
+/**
  * enum nl80211_band_attr - band attributes
  * @__NL80211_BAND_ATTR_INVALID: attribute number 0 is reserved
  * @NL80211_BAND_ATTR_FREQS: supported frequencies in this band,
@@ -3319,6 +3458,14 @@ enum nl80211_mpath_info {
  * @NL80211_BAND_ATTR_VHT_MCS_SET: 32-byte attribute containing the MCS set as
  *	defined in 802.11ac
  * @NL80211_BAND_ATTR_VHT_CAPA: VHT capabilities, as in the HT information IE
+ * @NL80211_BAND_ATTR_IFTYPE_DATA: nested array attribute, with each entry using
+ *	attributes from &enum nl80211_band_iftype_attr
+ * @NL80211_BAND_ATTR_EDMG_CHANNELS: bitmap that indicates the 2.16 GHz
+ *      channel(s) that are allowed to be used for EDMG transmissions.
+ *      Defined by IEEE P802.11ay/D4.0 section 9.4.2.251.
+ * @NL80211_BAND_ATTR_EDMG_BW_CONFIG: Channel BW Configuration subfield encodes
+ *      the allowed channel bandwidth configurations.
+ *      Defined by IEEE P802.11ay/D4.0 section 9.4.2.251, Table 13.
  * @NL80211_BAND_ATTR_MAX: highest band attribute currently defined
  * @__NL80211_BAND_ATTR_AFTER_LAST: internal use
  */
@@ -3334,6 +3481,10 @@ enum nl80211_band_attr {
 
 	NL80211_BAND_ATTR_VHT_MCS_SET,
 	NL80211_BAND_ATTR_VHT_CAPA,
+	NL80211_BAND_ATTR_IFTYPE_DATA,
+
+	NL80211_BAND_ATTR_EDMG_CHANNELS,
+	NL80211_BAND_ATTR_EDMG_BW_CONFIG,
 
 	/* keep last */
 	__NL80211_BAND_ATTR_AFTER_LAST,
@@ -4339,6 +4490,8 @@ enum nl80211_key_attributes {
 	NL80211_KEY_DEFAULT_MGMT,
 	NL80211_KEY_TYPE,
 	NL80211_KEY_DEFAULT_TYPES,
+	NL80211_KEY_MODE,
+	NL80211_KEY_DEFAULT_BEACON,
 
 	/* keep last */
 	__NL80211_KEY_AFTER_LAST,
@@ -4394,6 +4547,7 @@ enum nl80211_txrate_gi {
  * @NL80211_BAND_2GHZ: 2.4 GHz ISM band
  * @NL80211_BAND_5GHZ: around 5 GHz band (4.9 - 5.7 GHz)
  * @NL80211_BAND_60GHZ: around 60 GHz band (58.32 - 64.80 GHz)
+ * @NL80211_BAND_6GHZ: around 6 GHz band (5.9 - 7.2 GHz)
  * @NUM_NL80211_BANDS: number of bands, avoid using this in userspace
  *	since newer kernel versions may support more bands
  */
@@ -4401,6 +4555,7 @@ enum nl80211_band {
 	NL80211_BAND_2GHZ,
 	NL80211_BAND_5GHZ,
 	NL80211_BAND_60GHZ,
+	NL80211_BAND_6GHZ,
 
 	NUM_NL80211_BANDS,
 };
@@ -5300,10 +5455,20 @@ enum nl80211_feature_flags {
  * @NL80211_EXT_FEATURE_STA_TX_PWR: This driver supports controlling tx power
  *	to a station.
  *
+ * @NL80211_EXT_FEATURE_SAE_OFFLOAD: Device wants to do SAE authentication in
+ *	station mode (SAE password is passed as part of the connect command).
+ *
+ * @NL80211_EXT_FEATURE_VLAN_OFFLOAD: The driver supports a single netdev
+ *	with VLAN tagged frames and separate VLAN-specific netdevs added using
+ *	vconfig similarly to the Ethernet case.
+ *
  * @NL80211_EXT_FEATURE_FILS_CRYPTO_OFFLOAD: Driver running in AP mode supports
  *	FILS encryption/decryption for (Re)Association Request/Response frames.
  *	Userspace has to share FILS AAD details to the driver by using
  *	@NL80211_CMD_SET_FILS_AAD.
+ *
+ * @NL80211_EXT_FEATURE_BEACON_PROTECTION: The driver supports Beacon protection
+ *	and can receive key configuration for BIGTK using key indexes 6 and 7.
  *
  * @NUM_NL80211_EXT_FEATURES: number of extended features.
  * @MAX_NL80211_EXT_FEATURES: highest extended feature index.
@@ -5350,7 +5515,10 @@ enum nl80211_ext_feature_index {
 	NL80211_EXT_FEATURE_SCHED_SCAN_BAND_SPECIFIC_RSSI_THOLD,
 	NL80211_EXT_FEATURE_EXT_KEY_ID,
 	NL80211_EXT_FEATURE_STA_TX_PWR,
+	NL80211_EXT_FEATURE_SAE_OFFLOAD,
+	NL80211_EXT_FEATURE_VLAN_OFFLOAD,
 	NL80211_EXT_FEATURE_FILS_CRYPTO_OFFLOAD,
+	NL80211_EXT_FEATURE_BEACON_PROTECTION,
 
 	/* add new features before the definition below */
 	NUM_NL80211_EXT_FEATURES,

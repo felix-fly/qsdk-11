@@ -16,8 +16,9 @@
  */
 
 #include "qcom-ipq6018.dtsi"
-#include "qcom-ipq6018-ion.dtsi"
-#include "qcom-ipq6018-audio-overlay.dtsi"
+#include "qcom-ipq6018-rpm-regulator.dtsi"
+#include "qcom-ipq6018-cpr-regulator.dtsi"
+#include "qcom-ipq6018-cp-cpu.dtsi"
 
 / {
 	#address-cells = <0x2>;
@@ -41,7 +42,11 @@
 
 	chosen {
 		bootargs = "console=ttyMSM0,115200,n8 rw init=/init";
+#ifdef __IPQ_MEM_PROFILE_256_MB__
+		bootargs-append = " swiotlb=1";
+#else
 		bootargs-append = " swiotlb=1 coherent_pool=2M";
+#endif
 	};
 
 	/*
@@ -54,12 +59,10 @@
 	 * |        |              |                         |
 	 * |        |              |                         |
 	 * |        |              |                         |
-	 * | Linux  |  0x41000000  |         117MB           |
+	 * | Linux  |  0x41000000  |         119MB           |
 	 * |        |              |                         |
 	 * |        |              |                         |
 	 * |        |              |                         |
-	 * +--------+--------------+-------------------------+
-	 * | TZ App |  0x48500000  |           2MB           |
 	 * +--------+--------------+-------------------------+
 	 * |        |              |                         |
 	 * | LPASS  |              |                         |
@@ -68,18 +71,13 @@
 	 * +--------+--------------+-------------------------+
 	 *
 	 * From the available 145 MB for Linux in the first 256 MB,
-	 * we are reserving 26 MB for LPASS and 2 MB for TZAPP.
+	 * we are reserving 26 MB for LPASS.
 	 *
 	 * Refer arch/arm64/boot/dts/qcom/qcom-ipq6018-memory.dtsi
 	 * for memory layout.
 	 */
 
 	reserved-memory {
-		tzapp:tzapp@48500000 {	/* TZAPPS */
-			no-map;
-			reg = <0x0 0x48500000 0x0 0x00200000>;
-		};
-
 		lpass@48700000 {
 			no-map;
 			reg = <0x0 0x48700000 0x0 0x01a00000>;
@@ -393,30 +391,6 @@
 };
 
 &usb3 {
-	status = "ok";
-};
-
-&smmu500 {
-	status = "ok";
-};
-
-&glink_adsp {
-	status = "ok";
-};
-
-&ipc_router_adsp {
-	status = "ok";
-};
-
-&smp2p_adsp {
-	status = "ok";
-};
-
-&q6v6_adsp {
-	status = "ok";
-};
-
-&glink_adsp_ssr {
 	status = "ok";
 };
 

@@ -223,12 +223,16 @@ ifeq (TRUE, $(IN_POLICER_MINI))
   MODULE_CFLAG += -DIN_POLICER_MINI
 endif
 
+ifeq (TRUE, $(IN_UNIPHY))
+  MODULE_CFLAG += -DIN_UNIPHY
+endif
+
 ifeq (TRUE, $(IN_UNIPHY_MINI))
   MODULE_CFLAG += -DIN_UNIPHY_MINI
 endif
 
-ifeq (TRUE, $(HAWKEYE_CHIP))
-  MODULE_CFLAG += -DHAWKEYE_CHIP
+ifeq (TRUE, $(RUMI_EMULATION))
+  MODULE_CFLAG += -DRUMI_EMULATION
 endif
 
 ifeq (TRUE, $(IN_PTP))
@@ -300,11 +304,9 @@ ifneq (,$(findstring HORUS, $(SUPPORT_CHIP)))
   MODULE_CFLAG += -DHORUS
 endif
 
-ifneq (,$(findstring ISIS, $(SUPPORT_CHIP)))
-  ifneq (ISISC, $(SUPPORT_CHIP))
+ifneq (,$(filter ISIS, $(SUPPORT_CHIP)))
      MODULE_INC   += -I$(PRJ_PATH)/include/hsl/isis
      MODULE_CFLAG += -DISIS
-  endif
 endif
 
 ifneq (,$(findstring ISISC, $(SUPPORT_CHIP)))
@@ -321,6 +323,13 @@ ifneq (,$(findstring HPPE, $(SUPPORT_CHIP)))
   MODULE_INC   += -I$(PRJ_PATH)/include/hsl/hppe
   MODULE_INC   += -I$(PRJ_PATH)/include/adpt/hppe
   MODULE_CFLAG += -DHPPE
+endif
+
+ifneq (,$(filter MP, $(SUPPORT_CHIP)))
+  MODULE_INC   += -I$(PRJ_PATH)/include/hsl/hppe
+  MODULE_INC   += -I$(PRJ_PATH)/include/adpt/mp
+  MODULE_INC   += -I$(PRJ_PATH)/include/hsl/mp
+  MODULE_CFLAG += -DMP
 endif
 
 ifneq (,$(findstring CPPE, $(SUPPORT_CHIP)))
@@ -372,6 +381,18 @@ ifeq (KSLIB, $(MODULE_TYPE))
   KASAN_OPTION=-fsanitize=kernel-address -fasan-shadow-offset=$(SHADOW_OFFSET) \
                --param asan-stack=1 --param asan-globals=1 \
                --param asan-instrumentation-with-call-threshold=$(CALL_THRESHOLD)
+
+  ifeq ($(CONFIG_KASAN_SW_TAGS), y)
+      KASAN_SHADOW_SCALE_SHIFT := 4
+  else
+      KASAN_SHADOW_SCALE_SHIFT := 3
+  endif
+
+  ifeq (5_4, $(OS_VER))
+      ifeq ($(ARCH), arm64)
+          KASAN_OPTION += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
+       endif
+  endif
   ifeq ($(CONFIG_KASAN),y)
       MODULE_CFLAG += $(KASAN_OPTION)
   endif
@@ -398,7 +419,7 @@ ifeq (KSLIB, $(MODULE_TYPE))
 
   endif
 
-  ifeq (4_4, $(OS_VER))
+  ifeq ($(OS_VER),$(filter 4_4 5_4, $(OS_VER)))
                 MODULE_CFLAG += -DKVER34
                 MODULE_CFLAG += -DKVER32
             MODULE_CFLAG += -DLNX26_22
@@ -428,6 +449,7 @@ ifeq (KSLIB, $(MODULE_TYPE))
 	    else ifeq ($(ARCH), arm)
 	    MODULE_INC += -I$(SYS_PATH) \
               -I$(TOOL_PATH)/../lib/gcc/$(TARGET_NAME)/$(GCC_VERSION)/include/ \
+	      -I$(TOOL_PATH)/../lib/gcc/$(TARGET_NAME)/7.5.0/include/ \
               -I$(TOOL_PATH)/../../lib/armv7a-vfp-neon-rdk-linux-gnueabi/gcc/arm-rdk-linux-gnueabi/4.8.4/include/ \
 	      -I$(TOOL_PATH)/../../lib/arm-rdk-linux-musleabi/gcc/arm-rdk-linux-musleabi/6.4.0/include/ \
               -I$(SYS_PATH)/include \
@@ -439,6 +461,7 @@ ifeq (KSLIB, $(MODULE_TYPE))
               -I$(SYS_PATH)/arch/arm/include \
               -I$(SYS_PATH)/source/arch/arm/include/asm \
               -I$(SYS_PATH)/arch/arm/include/generated \
+	      -I$(SYS_PATH)/arch/arm/include/generated/uapi \
 	      -I$(SYS_PATH)/source/include/uapi \
               -I$(SYS_PATH)/include/generated/uapi \
               -I$(SYS_PATH)/include/uapi \

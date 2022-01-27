@@ -247,7 +247,7 @@ struct bam_instance {
 	enum bam_type type;
 	enum bam_mode mode;
 	uint8_t num_of_pipes;
-	struct bam_pipe pipe[3];
+	struct bam_pipe pipe[4];
 	uint16_t threshold;
 	uint32_t ee;
 	uint16_t max_desc_len;

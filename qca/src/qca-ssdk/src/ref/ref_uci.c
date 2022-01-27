@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015, 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, 2015, 2017-2019, 2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -2953,7 +2953,7 @@ parse_portvlan_ptqinqmode(struct switch_val *val)
 
 	return rv;
 }
-
+#ifdef HPPE
 static int
 parse_portvlan_intpid(struct switch_val *val)
 {
@@ -3163,7 +3163,7 @@ parse_portvlan_translationmissaction(struct switch_val *val)
 
 	return rv;
 }
-
+#endif
 static int
 parse_portvlan_egmode(struct switch_val *val)
 {
@@ -3196,7 +3196,7 @@ parse_portvlan_egmode(struct switch_val *val)
 
 	return rv;
 }
-
+#ifdef HPPE
 static int
 parse_portvlan_vsiegmode(struct switch_val *val)
 {
@@ -3392,7 +3392,7 @@ parse_portvlan_translationadv(struct switch_val *val)
 
 	return rv;
 }
-
+#endif
 #ifndef IN_PORTVLAN_MINI
 static int
 parse_portvlan_invlan(struct switch_val *val)
@@ -4920,7 +4920,7 @@ parse_sec_icmp6(struct switch_val *val)
 
 	return rv;
 }
-
+#ifdef HPPE
 static int
 parse_sec_expctrl(struct switch_val *val)
 {
@@ -5047,6 +5047,7 @@ parse_sec_l4parser(struct switch_val *val)
 
 	return rv;
 }
+#endif
 #endif
 
 #ifdef IN_MISC
@@ -7829,7 +7830,7 @@ parse_mib_cpukeep(struct switch_val *val)
 
 #ifdef IN_ACL
 static int
-parse_acl_rule(struct switch_val *val)
+parse_acl_rule(struct switch_val *val, a_uint32_t dev_id)
 {
 	a_uint32_t prio = 0;
 	a_uint32_t i;
@@ -7948,7 +7949,7 @@ parse_acl_rule(struct switch_val *val)
 			cmd_data_check_uint16((char*)ext_value_p->option_value,
 						&tmpdata, sizeof(tmpdata));
 			rule.ctagged_val = tmpdata;
-			rule.ctagged_mask = 1;
+			rule.ctagged_mask = BITS(0,3);
 			FAL_FIELD_FLG_SET(rule.field_flg,
 					FAL_ACL_FIELD_MAC_CTAGGED);
 		} else if(!strcmp(ext_value_p->option_name, "ctag_vlan_id")) {
@@ -7982,7 +7983,7 @@ parse_acl_rule(struct switch_val *val)
 			cmd_data_check_uint16((char*)ext_value_p->option_value,
 						&tmpdata, sizeof(tmpdata));
 			rule.stagged_val = tmpdata;
-			rule.stagged_mask = 1;
+			rule.stagged_mask = BITS(0,3);
 			FAL_FIELD_FLG_SET(rule.field_flg,
 					FAL_ACL_FIELD_MAC_STAGGED);
 		} else if(!strcmp(ext_value_p->option_name, "stag_vlan_id")) {
@@ -8348,6 +8349,8 @@ parse_acl_rule(struct switch_val *val)
 				!strcmp(ext_value_p->option_value, "no")){
 				FAL_ACTION_FLG_CLR(rule.action_flg,
 					FAL_ACL_ACTION_DENY);
+				FAL_ACTION_FLG_SET(rule.action_flg,
+					FAL_ACL_ACTION_PERMIT);
 			}
 		} else if(!strcmp(ext_value_p->option_name, "dscp_of_remark")) {
 			cmd_data_check_uint8((char*)ext_value_p->option_value,
@@ -8576,26 +8579,26 @@ parse_acl_rule(struct switch_val *val)
 	SSDK_DEBUG("uci set acl list %d, rule %d\n", list_id, rule_id);
 	SSDK_DEBUG("uci set acl portbitmap 0x%x, obj_type %d, obj_value %d\n",
 			portmap, obj_type, obj_value);
-	fal_acl_list_creat(0, list_id, prio);
-	fal_acl_rule_add(0, list_id, rule_id, 1, &rule);
+	fal_acl_list_creat(dev_id, list_id, prio);
+	fal_acl_rule_add(dev_id, list_id, rule_id, 1, &rule);
 	/*bind to port bitmap*/
 	if( portmap != 0 ) {
 		for (i = 0; i < AR8327_NUM_PORTS; i++) {
-			fal_acl_list_unbind(0, list_id, 0, 0, i);
+			fal_acl_list_unbind(dev_id, list_id, 0, 0, i);
 			if (portmap & (0x1 << i)) {
-				rv = fal_acl_list_bind(0, list_id, 0, 0, i);
+				rv = fal_acl_list_bind(dev_id, list_id, 0, 0, i);
 				if(rv != SW_OK){
 					SSDK_ERROR("uci set acl fail %d\n", rv);
 				}
 			}
 		}
 	} else {
-		rv = fal_acl_list_bind(0, list_id, 0, obj_type, obj_value);
+		rv = fal_acl_list_bind(dev_id, list_id, 0, obj_type, obj_value);
 		if(rv != SW_OK){
 			SSDK_ERROR("uci set acl fail %d\n", rv);
 		}
 	}
-	fal_acl_status_set(0, A_TRUE);
+	fal_acl_status_set(dev_id, A_TRUE);
 
 	return rv;
 }
@@ -10158,6 +10161,34 @@ parse_policer_aclentry(struct switch_val *val)
 	return rv;
 }
 
+static int
+parse_policer_bypass(struct switch_val *val)
+{
+	struct switch_ext *switch_ext_p, *ext_value_p;
+	int rv = 0;
+	switch_ext_p = val->value.ext_val;
+	while(switch_ext_p) {
+		ext_value_p = switch_ext_p;
+
+		if(!strcmp(ext_value_p->option_name, "name")) {
+			switch_ext_p = switch_ext_p->next;
+			continue;
+		} else if(!strcmp(ext_value_p->option_name, "frame_type")) {
+			val_ptr[0] = (char*)ext_value_p->option_value;
+		} else if(!strcmp(ext_value_p->option_name, "bypass_status")) {
+			val_ptr[1] = (char*)ext_value_p->option_value;
+		}  else {
+			rv = -1;
+			break;
+		}
+
+		parameter_length++;
+		switch_ext_p = switch_ext_p->next;
+	}
+
+	return rv;
+}
+
 #endif
 
 #ifdef IN_SHAPER
@@ -10733,6 +10764,7 @@ parse_portvlan(const char *command_name, struct switch_val *val)
 		rv = parse_portvlan_globalqinqmode(val);
 	} else if (!strcmp(command_name, "PtQinQMode")) {
 		rv = parse_portvlan_ptqinqmode(val);
+#ifdef HPPE
 	} else if (!strcmp(command_name, "InTpid")) {
 		rv = parse_portvlan_intpid(val);
 	} else if (!strcmp(command_name, "EgTpid")) {
@@ -10745,8 +10777,10 @@ parse_portvlan(const char *command_name, struct switch_val *val)
 		rv = parse_portvlan_tagpropagation(val);
 	} else if (!strcmp(command_name, "TranslationMissAction")) {
 		rv = parse_portvlan_translationmissaction(val);
+#endif
 	} else if (!strcmp(command_name, "EgMode")) {
 		rv = parse_portvlan_egmode(val);
+#ifdef HPPE
 	} else if (!strcmp(command_name, "VsiEgMode")) {
 		rv = parse_portvlan_vsiegmode(val);
 	} else if (!strcmp(command_name, "VsiEgModeEn")) {
@@ -10755,6 +10789,7 @@ parse_portvlan(const char *command_name, struct switch_val *val)
 		rv = parse_portvlan_counter(val);
 	} else if (!strcmp(command_name, "TranslationAdv")) {
 		rv = parse_portvlan_translationadv(val);
+#endif
 	}
 	#ifndef IN_PORTVLAN_MINI
 	else if(!strcmp(command_name, "InVlan")) {
@@ -10921,12 +10956,14 @@ parse_sec(const char *command_name, struct switch_val *val)
 		rv = parse_sec_icmp4(val);
 	} else if(!strcmp(command_name, "Icmp6")) {
 		rv = parse_sec_icmp6(val);
+#ifdef HPPE
 	} else if (!strcmp(command_name, "Expctrl")) {
 		rv = parse_sec_expctrl(val);
 	} else if (!strcmp(command_name, "L3parser")) {
 		rv = parse_sec_l3parser(val);
 	} else if (!strcmp(command_name, "L4parser")) {
 		rv = parse_sec_l4parser(val);
+#endif
 	}
 
 	return rv;
@@ -11199,11 +11236,11 @@ parse_mib(const char *command_name, struct switch_val *val)
 
 #ifdef IN_ACL
 static int
-parse_acl(const char *command_name, struct switch_val *val)
+parse_acl(const char *command_name, struct switch_val *val, a_uint32_t dev_id)
 {
 	int rv = -1;
 	if(!strcmp(command_name, "Rule")) {
-		rv = parse_acl_rule(val);
+		rv = parse_acl_rule(val, dev_id);
 	} else if(!strcmp(command_name, "Udfprofile")) {
 		rv = parse_acl_udfprofile(val);
 	} else if(!strcmp(command_name, "Udf")) {
@@ -11350,6 +11387,8 @@ parse_policer(const char *command_name, struct switch_val *val)
 		rv = parse_policer_portentry(val);
 	} else if(!strcmp(command_name, "Aclentry")) {
 		rv = parse_policer_aclentry(val);
+	} else if(!strcmp(command_name, "Bypass")) {
+		rv = parse_policer_bypass(val);
 	}
 
 	return rv;
@@ -11732,7 +11771,7 @@ qca_ar8327_sw_switch_ext(struct switch_dev *dev,
 #endif
 	} else if(!strcmp(module_name, "Acl")) {
 #ifdef IN_ACL
-		rv = parse_acl(command_name, val);
+		rv = parse_acl(command_name, val, priv->device_id);
 #endif
 	} else if(!strcmp(module_name, "Flow")) {
 #ifdef IN_FLOW

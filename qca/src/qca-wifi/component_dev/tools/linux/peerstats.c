@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -60,8 +60,9 @@ static void dp_peer_rx_rate_stats_print(uint8_t *peer_mac,
 	      peer_mac[3],
 	      peer_mac[4],
 	      peer_mac[5]);
-	PRINT("\tpeer cookie: %016lx\n", (peer_cookie & 0xFFFFFFFF00000000)
-					>> WLANSTATS_PEER_COOKIE_LSB);
+	PRINT("\tpeer cookie: %016"PRIx64"\n",
+					(peer_cookie & 0xFFFFFFFF00000000) >>
+					WLANSTATS_PEER_COOKIE_LSB);
 	is_lithium =  (peer_cookie & WLANSTATS_COOKIE_PLATFORM_OFFSET)
 					>> WLANSTATS_PEER_COOKIE_LSB;
 	if (is_lithium) {
@@ -243,7 +244,7 @@ dp_peer_tx_sojourn_stats_print(uint8_t *peer_mac,
 	      peer_mac[3],
 	      peer_mac[4],
 	      peer_mac[5]);
-	PRINT("\tPEER Cookie: %016lx\n", peer_cookie);
+	PRINT("\tPEER Cookie: %016"PRIx64"\n", peer_cookie);
 	PRINT("\n...........................................");
 	PRINT("...................................");
 	PRINT("..................................");
@@ -259,7 +260,12 @@ dp_peer_tx_sojourn_stats_print(uint8_t *peer_mac,
 		      sojourn_stats->sum_sojourn_msdu[tid],
 		      sojourn_stats->num_msdus[tid]);
 	}
-	PRINT("sizeof(avg): %lu", sizeof(sojourn_stats->avg_sojourn_msdu[tid]));
+#ifdef __LP64__
+	PRINT("sizeof(avg) : %"PRIu64,
+#else
+	PRINT("sizeof(avg) : %"PRIu32,
+#endif
+				sizeof(sojourn_stats->avg_sojourn_msdu[tid]));
 	PRINT("\n...........................................");
 	PRINT("...................................");
 	PRINT("...................................");
@@ -293,7 +299,7 @@ static void dp_peer_tx_rate_stats_print(uint8_t *peer_mac,
 	      peer_mac[3],
 	      peer_mac[4],
 	      peer_mac[5]);
-	PRINT("\tPEER Cookie: %016lx", peer_cookie);
+	PRINT("\tPEER Cookie: %016"PRIx64, peer_cookie);
 	PRINT("\n...........................................");
 	PRINT("...................................");
 	PRINT("...................................");
@@ -318,7 +324,7 @@ static void dp_peer_tx_rate_stats_print(uint8_t *peer_mac,
 			      tx_stats->mpdu_attempts,
 			      tx_stats->mpdu_success,
 			      tx_stats->num_ppdus);
-			PRINT(" %10u | %10u | %10lu |\n",
+			PRINT(" %10u | %10u | %10u |\n",
 			      tx_stats->num_msdus,
 			      tx_stats->num_bytes,
 			      tx_stats->num_retries);
@@ -334,6 +340,187 @@ static void dp_peer_tx_rate_stats_print(uint8_t *peer_mac,
 	return;
 }
 
+static void dp_peer_avg_rate_stats_print(uint8_t *peer_mac,
+					 uint64_t peer_cookie,
+					 void *buffer,
+					 uint32_t buffer_len)
+{
+	struct wlan_avg_rate_stats *stats = buffer;
+	enum wlan_rate_ppdu_type type;
+	static const char *type2str[] = {
+		"SU",
+		"MU-MIMO",
+		"MU-OFDMA",
+		"MU-MIMO-OFDMA",
+	};
+	uint32_t mpdu;
+	uint32_t psr;
+	uint32_t avg_mbps;
+	uint32_t avg_snr;
+
+	PRINT("peer %02hhx:%02hhx:%02hhx:%02hhx%02hhx:%02hhx",
+	       peer_mac[0],
+	       peer_mac[1],
+	       peer_mac[2],
+	       peer_mac[3],
+	       peer_mac[4],
+	       peer_mac[5]);
+
+	PRINT(" %20s %15s %15s %15s %15s %15s",
+	      "mode",
+	      "rate(mbps)",
+	      "total ppdu",
+	      "snr value",
+	      "snr count",
+	      "psr value");
+
+	PRINT("Avg tx stats: ");
+	for (type = 0; type < WLAN_RATE_MAX; type++) {
+		psr = 0;
+		avg_mbps = 0;
+		avg_snr = 0;
+
+		if (stats->tx[type].num_ppdu > 0)
+			avg_mbps = stats->tx[type].sum_mbps /
+					stats->tx[type].num_ppdu;
+
+		if (stats->tx[type].num_snr > 0)
+			avg_snr = stats->tx[type].sum_snr /
+					stats->tx[type].num_snr;
+
+		mpdu = stats->tx[type].num_mpdu +
+			stats->tx[type].num_retry;
+		if (mpdu > 0)
+			psr = (100 * stats->tx[type].num_mpdu) / mpdu;
+
+		PRINT(" %20s %15u %15u %15u %15u %15u",
+		      type2str[type],
+		      avg_mbps, stats->tx[type].num_ppdu,
+		      avg_snr, stats->tx[type].num_snr,
+		      psr);
+	}
+
+	PRINT("Avg rx stats: ");
+	for (type = 0; type < WLAN_RATE_MAX; type++) {
+		psr = 0;
+		avg_mbps = 0;
+		avg_snr = 0;
+
+		if (stats->rx[type].num_ppdu > 0)
+			avg_mbps = stats->rx[type].sum_mbps /
+					stats->rx[type].num_ppdu;
+
+		if (stats->rx[type].num_snr > 0)
+			avg_snr = stats->rx[type].sum_snr /
+					stats->rx[type].num_snr;
+
+		mpdu = stats->rx[type].num_mpdu +
+			stats->rx[type].num_retry;
+		if (mpdu > 0)
+			psr = (100 * stats->rx[type].num_mpdu) / mpdu;
+
+		PRINT(" %20s %15u %15u %15u %15u %15u",
+		       type2str[type],
+		       avg_mbps, stats->rx[type].num_ppdu,
+		       avg_snr, stats->rx[type].num_snr,
+		       psr);
+	}
+}
+
+static void dp_peer_tx_link_stats_print(uint8_t *peer_mac,
+					uint64_t peer_cookie,
+					void *buffer,
+					uint32_t buffer_len)
+{
+	struct wlan_tx_link_stats *tx_stats;
+	uint8_t is_lithium;
+
+	is_lithium =  (peer_cookie & WLANSTATS_COOKIE_PLATFORM_OFFSET)
+					>> WLANSTATS_PEER_COOKIE_LSB;
+
+	if (!is_lithium) {
+		PRINT("Not supported in non-lithium platforms\n");
+		return;
+	}
+
+	if (buffer_len < sizeof(struct wlan_tx_link_stats)) {
+		PRINT("invalid buffer len, return");
+		return;
+	}
+
+	tx_stats = (struct wlan_tx_link_stats *)buffer;
+
+	PRINT("\n\n");
+	PRINT("========= PEER TX LINK QUALITY METRICS =========\n");
+	PRINT("PEER %02hhx:%02hhx:%02hhx:%02hhx%02hhx:%02hhx",
+	      peer_mac[0],
+	      peer_mac[1],
+	      peer_mac[2],
+	      peer_mac[3],
+	      peer_mac[4],
+	      peer_mac[5]);
+	PRINT("num_ppdus: %u", tx_stats->num_ppdus);
+	PRINT("bytes: %"PRIu64, tx_stats->bytes);
+	PRINT("phy_rate_actual_su: %u kbps", tx_stats->phy_rate_actual_su);
+	PRINT("phy_rate_actual_mu: %u kbps", tx_stats->phy_rate_actual_mu);
+	PRINT("ofdma_usage: %u", tx_stats->ofdma_usage);
+	PRINT("mu_mimo_usage: %u", tx_stats->mu_mimo_usage);
+	PRINT("bw_usage_avg: %u MHz", tx_stats->bw.usage_avg);
+	PRINT("bw_usage_packets: 20MHz: %u 40MHz: %u 80MHz: %u 160MHz: %u",
+	      tx_stats->bw.usage_counter[0], tx_stats->bw.usage_counter[1],
+	      tx_stats->bw.usage_counter[2], tx_stats->bw.usage_counter[3]);
+	PRINT("bw_usage_max:: %u%%", tx_stats->bw.usage_max);
+	PRINT("ack_rssi: %lu", tx_stats->ack_rssi);
+	PRINT("pkt_error_rate: %u%%", tx_stats->pkt_error_rate);
+}
+
+static void dp_peer_rx_link_stats_print(uint8_t *peer_mac,
+					uint64_t peer_cookie,
+					void *buffer,
+					uint32_t buffer_len)
+{
+	struct wlan_rx_link_stats *rx_stats;
+	uint8_t is_lithium;
+
+	is_lithium =  (peer_cookie & WLANSTATS_COOKIE_PLATFORM_OFFSET)
+					>> WLANSTATS_PEER_COOKIE_LSB;
+
+	if (!is_lithium) {
+		PRINT("Not supported in non-lithium platforms\n");
+		return;
+	}
+
+	if (buffer_len < sizeof(struct wlan_rx_link_stats)) {
+		PRINT("invalid buffer len, return");
+		return;
+	}
+
+	rx_stats = (struct wlan_rx_link_stats *)buffer;
+
+	PRINT("\n\n");
+	PRINT("========= PEER RX LINK QUALITY METRICS =========\n");
+	PRINT("PEER %02hhx:%02hhx:%02hhx:%02hhx%02hhx:%02hhx",
+	      peer_mac[0],
+	      peer_mac[1],
+	      peer_mac[2],
+	      peer_mac[3],
+	      peer_mac[4],
+	      peer_mac[5]);
+	PRINT("num_ppdus: %u", rx_stats->num_ppdus);
+	PRINT("bytes: %"PRIu64, rx_stats->bytes);
+	PRINT("phy_rate_actual_su: %u kbps", rx_stats->phy_rate_actual_su);
+	PRINT("phy_rate_actual_mu: %u kbps", rx_stats->phy_rate_actual_mu);
+	PRINT("ofdma_usage: %u", rx_stats->ofdma_usage);
+	PRINT("mu_mimo_usage: %u", rx_stats->mu_mimo_usage);
+	PRINT("bw_usage_avg: %u MHz", rx_stats->bw.usage_avg);
+	PRINT("bw_usage_packets: 20MHz: %u 40MHz: %u 80MHz: %u 160MHz: %u",
+	      rx_stats->bw.usage_counter[0], rx_stats->bw.usage_counter[1],
+	      rx_stats->bw.usage_counter[2], rx_stats->bw.usage_counter[3]);
+	PRINT("bw_usage_max: %u%%", rx_stats->bw.usage_max);
+	PRINT("su_rssi: %lu", rx_stats->su_rssi);
+	PRINT("pkt_error_rate: %u%%", rx_stats->pkt_error_rate);
+}
+
 static void dp_peer_stats_handler(uint32_t cache_type,
 				 uint8_t *peer_mac,
 				 uint64_t peer_cookie,
@@ -342,12 +529,30 @@ static void dp_peer_stats_handler(uint32_t cache_type,
 {
 	switch (cache_type) {
 	case DP_PEER_RX_RATE_STATS:
+		if (getenv("SKIP_RX_RATE_STATS"))
+			break;
 		dp_peer_rx_rate_stats_print(peer_mac, peer_cookie,
 					    buffer, buffer_len);
 		break;
 	case DP_PEER_TX_RATE_STATS:
+		if (getenv("SKIP_TX_RATE_STATS"))
+			break;
 		dp_peer_tx_rate_stats_print(peer_mac, peer_cookie,
 					    buffer, buffer_len);
+		break;
+	case DP_PEER_TX_LINK_STATS:
+		dp_peer_tx_link_stats_print(peer_mac, peer_cookie,
+					    buffer, buffer_len);
+		break;
+	case DP_PEER_RX_LINK_STATS:
+		dp_peer_rx_link_stats_print(peer_mac, peer_cookie,
+					    buffer, buffer_len);
+		break;
+	case DP_PEER_AVG_RATE_STATS:
+		if (getenv("SKIP_AVG_RATE_STATS"))
+			break;
+		dp_peer_avg_rate_stats_print(peer_mac, peer_cookie,
+					     buffer, buffer_len);
 		break;
 	}
 }

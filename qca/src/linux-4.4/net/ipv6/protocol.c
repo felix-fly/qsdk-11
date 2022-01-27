@@ -73,6 +73,7 @@ int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 }
 EXPORT_SYMBOL(inet6_del_offload);
 
+#if IS_ENABLED(CONFIG_IPV6)
 int inet6_update_protocol(const struct inet6_protocol *new_prot,
 		unsigned char protocol, const struct inet6_protocol **old_prot)
 {
@@ -98,3 +99,4 @@ int inet6_update_protocol(const struct inet6_protocol *new_prot,
 	return ret;
 }
 EXPORT_SYMBOL(inet6_update_protocol);
+#endif

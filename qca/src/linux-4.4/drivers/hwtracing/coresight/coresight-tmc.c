@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2016 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, 2016-2017, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,6 +26,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/coresight.h>
 #include <linux/coresight-cti.h>
 #include <linux/amba/bus.h>
@@ -82,12 +83,11 @@
 #define TMC_FFCR_FLUSHMAN	BIT(6)
 #define TMC_FFCR_TRIGON_TRIGIN	BIT(8)
 #define TMC_FFCR_STOP_ON_FLUSH	BIT(12)
+#define TMC_FFCR_STOP_ON_TRGEVT	BIT(13)
 
 #define TMC_STS_TRIGGERED_BIT	2
 #define TMC_FFCR_FLUSHMAN_BIT	6
 
-#define TMC_ETR_SG_ENT_TO_BLK(phys_pte)	(((phys_addr_t)phys_pte >> 4)	\
-					 << PAGE_SHIFT)
 #define TMC_ETR_SG_ENT(phys_pte)	(((phys_pte >> PAGE_SHIFT) << 4) | 0x2)
 #define TMC_ETR_SG_NXT_TBL(phys_pte)	(((phys_pte >> PAGE_SHIFT) << 4) | 0x3)
 #define TMC_ETR_SG_LST_ENT(phys_pte)	(((phys_pte >> PAGE_SHIFT) << 4) | 0x1)
@@ -107,118 +107,28 @@ typedef struct usb_qdss_ch *(usb_qdss_close_f)(struct usb_qdss_ch *ch);
 usb_qdss_open_f *usb_qdss_open_ptr;
 usb_qdss_close_f *usb_qdss_close_ptr;
 
-enum tmc_config_type {
-	TMC_CONFIG_TYPE_ETB,
-	TMC_CONFIG_TYPE_ETR,
-	TMC_CONFIG_TYPE_ETF,
-};
-
-enum tmc_mode {
-	TMC_MODE_CIRCULAR_BUFFER,
-	TMC_MODE_SOFTWARE_FIFO,
-	TMC_MODE_HARDWARE_FIFO,
-};
-
-enum tmc_mem_intf_width {
-	TMC_MEM_INTF_WIDTH_32BITS	= 0x2,
-	TMC_MEM_INTF_WIDTH_64BITS	= 0x3,
-	TMC_MEM_INTF_WIDTH_128BITS	= 0x4,
-	TMC_MEM_INTF_WIDTH_256BITS	= 0x5,
-};
-
-enum tmc_etr_mem_type {
-	TMC_ETR_MEM_TYPE_CONTIG,
-	TMC_ETR_MEM_TYPE_SG,
-};
-
-static const char * const str_tmc_etr_mem_type[] = {
-	[TMC_ETR_MEM_TYPE_CONTIG]	= "contig",
-	[TMC_ETR_MEM_TYPE_SG]		= "sg",
-};
-
-enum tmc_etr_out_mode {
-	TMC_ETR_OUT_MODE_NONE,
-	TMC_ETR_OUT_MODE_MEM,
-	TMC_ETR_OUT_MODE_USB,
-	TMC_ETR_OUT_MODE_Q6MEM,
-};
-
 static const char * const str_tmc_etr_out_mode[] = {
-	[TMC_ETR_OUT_MODE_NONE]		= "none",
-	[TMC_ETR_OUT_MODE_MEM]		= "mem",
-	[TMC_ETR_OUT_MODE_USB]		= "usb",
-	[TMC_ETR_OUT_MODE_Q6MEM]	= "q6mem",
+       [TMC_ETR_OUT_MODE_NONE]         = "none",
+       [TMC_ETR_OUT_MODE_MEM]          = "mem",
+       [TMC_ETR_OUT_MODE_USB]          = "usb",
+       [TMC_ETR_OUT_MODE_Q6MEM]        = "q6mem",
+       [TMC_ETR_OUT_MODE_Q6MEM_STREAM]	= "q6mem_stream",
 };
 
 struct tmc_etr_bam_data {
-	struct sps_bam_props	props;
-	unsigned long		handle;
-	struct sps_pipe		*pipe;
-	struct sps_connect	connect;
-	uint32_t		src_pipe_idx;
-	unsigned long		dest;
-	uint32_t		dest_pipe_idx;
-	struct sps_mem_buffer	desc_fifo;
-	struct sps_mem_buffer	data_fifo;
-	bool			enable;
+       struct sps_bam_props    props;
+       unsigned long           handle;
+       struct sps_pipe         *pipe;
+       struct sps_connect      connect;
+       uint32_t                src_pipe_idx;
+       unsigned long           dest;
+       uint32_t                dest_pipe_idx;
+       struct sps_mem_buffer   desc_fifo;
+       struct sps_mem_buffer   data_fifo;
+       bool                    enable;
 };
 
-/**
- * struct tmc_drvdata - specifics associated to an TMC component
- * @base:	memory mapped base address for this component.
- * @dev:	the device entity associated to this component.
- * @csdev:	component vitals needed by the framework.
- * @miscdev:	specifics to handle "/dev/xyz.tmc" entry.
- * @spinlock:	only one at a time pls.
- * @read_count:	manages preparation of buffer for reading.
- * @buf:	area of memory where trace data get sent.
- * @paddr:	DMA start location in RAM.
- * @vaddr:	virtual representation of @paddr.
- * @size:	@buf size.
- * @enable:	this TMC is being used.
- * @config_type: TMC variant, must be of type @tmc_config_type.
- * @trigger_cntr: amount of words to store after a trigger.
- * @reg_data:	MSM memory dump data to store TMC registers.
- * @buf_data:	MSM memory dump data to store ETF/ETB buffer.
- */
-struct tmc_drvdata {
-	void __iomem		*base;
-	struct device		*dev;
-	struct coresight_device	*csdev;
-	struct miscdevice	miscdev;
-	spinlock_t		spinlock;
-	int			read_count;
-	bool			reading;
-	bool			aborting;
-	char			*buf;
-	dma_addr_t		paddr;
-	void __iomem		*vaddr;
-	u32			size;
-	struct mutex		mem_lock;
-	u32			mem_size;
-	bool			enable;
-	bool			sticky_enable;
-	enum tmc_config_type	config_type;
-	u32			trigger_cntr;
-	enum tmc_etr_mem_type	mem_type;
-	enum tmc_etr_mem_type	memtype;
-	u32			delta_bottom;
-	int			sg_blk_num;
-	enum tmc_etr_out_mode	out_mode;
-	struct usb_qdss_ch	*usbch;
-	struct tmc_etr_bam_data	*bamdata;
-	bool			enable_to_bam;
-	struct msm_dump_data	reg_data;
-	struct msm_dump_data	buf_data;
-	struct coresight_cti	*cti_flush;
-	struct coresight_cti	*cti_reset;
-	char			*reg_buf;
-	bool			force_reg_dump;
-	bool			dump_reg;
-	void __iomem		*q6_etr_vaddr;
-	dma_addr_t		q6_etr_paddr;
-	u32			q6_size;
-};
+static void __iomem *disable_funnel_ptr;
 
 static void __tmc_reg_dump(struct tmc_drvdata *drvdata);
 
@@ -257,6 +167,7 @@ static void tmc_enable_hw(struct tmc_drvdata *drvdata)
 {
 	writel_relaxed(TMC_CTL_CAPT_EN, drvdata->base + TMC_CTL);
 }
+EXPORT_SYMBOL(tmc_enable_hw);
 
 static void tmc_disable_hw(struct tmc_drvdata *drvdata)
 {
@@ -266,11 +177,12 @@ static void tmc_disable_hw(struct tmc_drvdata *drvdata)
 static void tmc_etb_enable_hw(struct tmc_drvdata *drvdata)
 {
 	/* Zero out the memory to help with debug */
-	if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM)
-		memset_io(drvdata->buf, 0, drvdata->size);
-	else
-		memset(drvdata->buf, 0, drvdata->size);
-
+	if (drvdata->memtype == TMC_ETR_MEM_TYPE_CONTIG) {
+		if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM)
+			memset_io(drvdata->buf, 0, drvdata->size);
+		else
+			memset(drvdata->buf, 0, drvdata->size);
+	}
 	CS_UNLOCK(drvdata->base);
 
 	writel_relaxed(TMC_MODE_CIRCULAR_BUFFER, drvdata->base + TMC_MODE);
@@ -285,13 +197,13 @@ static void tmc_etb_enable_hw(struct tmc_drvdata *drvdata)
 	CS_LOCK(drvdata->base);
 }
 
-static void tmc_etr_sg_tbl_free(uint32_t *vaddr, uint32_t size, uint32_t ents)
+static void tmc_etr_sg_tbl_free(uint32_t *vaddr, struct tmc_drvdata *drvdata, uint32_t ents)
 {
 	uint32_t i = 0, pte_n = 0, last_pte;
 	uint32_t *virt_st_tbl, *virt_pte;
 	void *virt_blk;
 	phys_addr_t phys_pte;
-	int total_ents = DIV_ROUND_UP(size, PAGE_SIZE);
+	int total_ents = DIV_ROUND_UP(drvdata->size, PAGE_SIZE);
 	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
 
 	virt_st_tbl = vaddr;
@@ -312,10 +224,16 @@ static void tmc_etr_sg_tbl_free(uint32_t *vaddr, uint32_t size, uint32_t ents)
 			virt_blk = phys_to_virt(phys_pte);
 
 			if ((last_pte - i) > 1) {
-				free_page((unsigned long)virt_blk);
+				if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+					free_pages((unsigned long)virt_blk, 1);
+				else
+					free_page((unsigned long)virt_blk);
 				pte_n++;
 			} else if (last_pte == total_ents) {
-				free_page((unsigned long)virt_blk);
+				if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+					free_pages((unsigned long)virt_blk, 1);
+				else
+					free_page((unsigned long)virt_blk);
 				free_page((unsigned long)virt_st_tbl);
 			} else {
 				free_page((unsigned long)virt_st_tbl);
@@ -328,13 +246,13 @@ static void tmc_etr_sg_tbl_free(uint32_t *vaddr, uint32_t size, uint32_t ents)
 	}
 }
 
-static void tmc_etr_sg_tbl_flush(uint32_t *vaddr, uint32_t size)
+static void tmc_etr_sg_tbl_flush(uint32_t *vaddr, struct tmc_drvdata *drvdata)
 {
 	uint32_t i = 0, pte_n = 0, last_pte;
 	uint32_t *virt_st_tbl, *virt_pte;
 	void *virt_blk;
 	phys_addr_t phys_pte;
-	int total_ents = DIV_ROUND_UP(size, PAGE_SIZE);
+	int total_ents = DIV_ROUND_UP(drvdata->size, PAGE_SIZE);
 	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
 
 	virt_st_tbl = vaddr;
@@ -348,8 +266,10 @@ static void tmc_etr_sg_tbl_flush(uint32_t *vaddr, uint32_t size)
 			phys_pte = TMC_ETR_SG_ENT_TO_BLK(*virt_pte);
 			virt_blk = phys_to_virt(phys_pte);
 
-			dmac_flush_range(virt_blk, virt_blk + PAGE_SIZE);
-
+			if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+				dmac_flush_range(virt_blk, virt_blk + (2 *PAGE_SIZE));
+			else
+				dmac_flush_range(virt_blk, virt_blk + PAGE_SIZE);
 			if ((last_pte - i) > 1) {
 				pte_n++;
 			} else if (last_pte != total_ents) {
@@ -409,9 +329,11 @@ static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata)
 	int total_ents = DIV_ROUND_UP(drvdata->size, PAGE_SIZE);
 	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
 
-	virt_pgdir = (uint32_t *)get_zeroed_page(GFP_KERNEL);
-	if (!virt_pgdir)
+	virt_pgdir = (uint32_t *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 0);
+
+	if (!virt_pgdir) {
 		return -ENOMEM;
+	}
 
 	virt_st_tbl = virt_pgdir;
 
@@ -419,7 +341,10 @@ static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata)
 		last_pte = ((i + ents_per_blk) > total_ents) ?
 			   total_ents : (i + ents_per_blk);
 		while (i < last_pte) {
-			virt_pte = (void *)get_zeroed_page(GFP_KERNEL);
+			if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+				virt_pte = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 1);
+			else
+				virt_pte = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO, 0);
 			if (!virt_pte) {
 				ret = -ENOMEM;
 				goto err;
@@ -446,24 +371,24 @@ static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata)
 	drvdata->paddr = virt_to_phys(virt_pgdir);
 
 	/* Flush the dcache before proceeding */
-	tmc_etr_sg_tbl_flush((uint32_t *)drvdata->vaddr, drvdata->size);
+	tmc_etr_sg_tbl_flush((uint32_t *)drvdata->vaddr, drvdata);
 
 	dev_dbg(drvdata->dev, "%s: table starts at %#lx, total entries %d\n",
 		__func__, (unsigned long)drvdata->paddr, total_ents);
 
 	return 0;
 err:
-	tmc_etr_sg_tbl_free(virt_pgdir, drvdata->size, i);
+	tmc_etr_sg_tbl_free(virt_pgdir, drvdata, i);
 	return ret;
 }
 
-static void tmc_etr_sg_mem_reset(uint32_t *vaddr, uint32_t size)
+static void tmc_etr_sg_mem_reset(uint32_t *vaddr, struct tmc_drvdata *drvdata)
 {
 	uint32_t i = 0, pte_n = 0, last_pte;
 	uint32_t *virt_st_tbl, *virt_pte;
 	void *virt_blk;
 	phys_addr_t phys_pte;
-	int total_ents = DIV_ROUND_UP(size, PAGE_SIZE);
+	int total_ents = DIV_ROUND_UP(drvdata->size, PAGE_SIZE);
 	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
 
 	virt_st_tbl = vaddr;
@@ -477,10 +402,16 @@ static void tmc_etr_sg_mem_reset(uint32_t *vaddr, uint32_t size)
 			virt_blk = phys_to_virt(phys_pte);
 
 			if ((last_pte - i) > 1) {
-				memset(virt_blk, 0, PAGE_SIZE);
+				if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+					memset(virt_blk, 0, 2*PAGE_SIZE);
+				else
+					memset(virt_blk, 0, PAGE_SIZE);
 				pte_n++;
 			} else if (last_pte == total_ents) {
-				memset(virt_blk, 0, PAGE_SIZE);
+				if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+					memset(virt_blk, 0, 2*PAGE_SIZE);
+				else
+					memset(virt_blk, 0, PAGE_SIZE);
 			} else {
 				virt_st_tbl = (uint32_t *)virt_blk;
 				pte_n = 0;
@@ -491,7 +422,7 @@ static void tmc_etr_sg_mem_reset(uint32_t *vaddr, uint32_t size)
 	}
 
 	/* Flush the dcache before proceeding */
-	tmc_etr_sg_tbl_flush(vaddr, size);
+	tmc_etr_sg_tbl_flush(vaddr, drvdata);
 }
 
 static int tmc_etr_alloc_mem(struct tmc_drvdata *drvdata)
@@ -545,7 +476,7 @@ static void tmc_etr_free_mem(struct tmc_drvdata *drvdata)
 		}
 		else
 			tmc_etr_sg_tbl_free((uint32_t *)drvdata->vaddr,
-				drvdata->size,
+				drvdata,
 				DIV_ROUND_UP(drvdata->size, PAGE_SIZE));
 
 		drvdata->vaddr = 0;
@@ -562,11 +493,14 @@ static void tmc_etr_mem_reset(struct tmc_drvdata *drvdata)
 			else
 				memset(drvdata->vaddr, 0, drvdata->size);
 		}
-		else
+		else {
 			tmc_etr_sg_mem_reset((uint32_t *)drvdata->vaddr,
-					     drvdata->size);
+					     drvdata);
+		}
 	}
 }
+
+extern void coresight_csr_set_byte_cntr(uint32_t count);
 
 static void tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 {
@@ -576,6 +510,14 @@ static void tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 	tmc_etr_mem_reset(drvdata);
 
 	CS_UNLOCK(drvdata->base);
+
+	if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+		 {
+		coresight_csr_set_byte_cntr(PAGE_SIZE);
+	} else {
+		coresight_csr_set_byte_cntr(0);
+	}
+
 
 	writel_relaxed(drvdata->size / 4, drvdata->base + TMC_RSZ);
 	writel_relaxed(TMC_MODE_CIRCULAR_BUFFER, drvdata->base + TMC_MODE);
@@ -645,7 +587,7 @@ static void __tmc_etr_enable_to_bam(struct tmc_drvdata *drvdata)
 	/* Configure and enable ETR for usb bam output */
 
 	CS_UNLOCK(drvdata->base);
-
+	coresight_csr_set_byte_cntr(0);
 	writel_relaxed(bamdata->data_fifo.size / 4, drvdata->base + TMC_RSZ);
 	writel_relaxed(TMC_MODE_CIRCULAR_BUFFER, drvdata->base + TMC_MODE);
 
@@ -696,7 +638,11 @@ static int tmc_etr_bam_enable(struct tmc_drvdata *drvdata)
 
 	bamdata->connect.mode = SPS_MODE_SRC;
 	bamdata->connect.source = bamdata->handle;
-	bamdata->connect.event_thresh = 0x4;
+	if (drvdata->is_emulation)
+		bamdata->connect.event_thresh = 0x800;
+	else
+		bamdata->connect.event_thresh = 0x4;
+
 	bamdata->connect.src_pipe_index = TMC_ETR_BAM_PIPE_INDEX;
 	bamdata->connect.options = SPS_O_AUTO_ENABLE;
 
@@ -796,6 +742,16 @@ static int tmc_enable(struct tmc_drvdata *drvdata, enum tmc_mode mode)
 	pm_runtime_get_sync(drvdata->dev);
 
 	mutex_lock(&drvdata->mem_lock);
+
+	spin_lock_irqsave(&drvdata->spinlock, flags);
+	if (drvdata->reading) {
+		spin_unlock_irqrestore(&drvdata->spinlock, flags);
+		mutex_unlock(&drvdata->mem_lock);
+		pm_runtime_put(drvdata->dev);
+		return -EBUSY;
+	}
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+
 	if (drvdata->config_type == TMC_CONFIG_TYPE_ETR &&
 	    drvdata->out_mode == TMC_ETR_OUT_MODE_MEM) {
 		/*
@@ -820,16 +776,22 @@ static int tmc_enable(struct tmc_drvdata *drvdata, enum tmc_mode mode)
 		}
 		coresight_cti_map_trigout(drvdata->cti_flush, 3, 0);
 		coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
-	} else if (drvdata->config_type == TMC_CONFIG_TYPE_ETR &&
-				drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM) {
+	} else if ((drvdata->config_type == TMC_CONFIG_TYPE_ETR) &&
+		  ((drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM) ||
+				(drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM))) {
+		if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM) {
+			drvdata->memtype = TMC_ETR_MEM_TYPE_SG;
+			drvdata->size = Q6STREAM_SIZE;
+		} else {
+			drvdata->memtype = TMC_ETR_MEM_TYPE_CONTIG;
+			drvdata->size = drvdata->q6_size;
+		}
 		ret = tmc_etr_alloc_mem(drvdata);
 		if (ret) {
 			pm_runtime_put(drvdata->dev);
 			mutex_unlock(&drvdata->mem_lock);
 			return ret;
 		}
-		drvdata->memtype = TMC_ETR_MEM_TYPE_CONTIG;
-		drvdata->size = drvdata->q6_size;
 		coresight_cti_map_trigout(drvdata->cti_flush, 3, 0);
 		coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
 	} else if (drvdata->config_type == TMC_CONFIG_TYPE_ETR &&
@@ -851,25 +813,15 @@ static int tmc_enable(struct tmc_drvdata *drvdata, enum tmc_mode mode)
 		coresight_cti_map_trigout(drvdata->cti_flush, 1, 0);
 		coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
 	}
-	mutex_unlock(&drvdata->mem_lock);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
-	if (drvdata->reading) {
-		spin_unlock_irqrestore(&drvdata->spinlock, flags);
-
-		if (drvdata->config_type == TMC_CONFIG_TYPE_ETR
-		    && drvdata->out_mode == TMC_ETR_OUT_MODE_USB)
-			usb_qdss_close_ptr(drvdata->usbch);
-		pm_runtime_put(drvdata->dev);
-
-		return -EBUSY;
-	}
 
 	if (drvdata->config_type == TMC_CONFIG_TYPE_ETB) {
 		tmc_etb_enable_hw(drvdata);
 	} else if (drvdata->config_type == TMC_CONFIG_TYPE_ETR) {
 		if ((drvdata->out_mode == TMC_ETR_OUT_MODE_MEM) ||
-			(drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM))
+			(drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM) ||
+			(drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM))
 			tmc_etr_enable_hw(drvdata);
 	} else {
 		if (mode == TMC_MODE_CIRCULAR_BUFFER)
@@ -890,6 +842,7 @@ static int tmc_enable(struct tmc_drvdata *drvdata, enum tmc_mode mode)
 	 */
 	drvdata->sticky_enable = true;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+	mutex_unlock(&drvdata->mem_lock);
 
 	dev_info(drvdata->dev, "TMC enabled\n");
 	return 0;
@@ -1047,6 +1000,7 @@ static void tmc_etr_disable_hw(struct tmc_drvdata *drvdata)
 	tmc_disable_hw(drvdata);
 
 	CS_LOCK(drvdata->base);
+
 }
 
 static void tmc_etf_disable_hw(struct tmc_drvdata *drvdata)
@@ -1092,8 +1046,9 @@ out:
 		    && drvdata->out_mode == TMC_ETR_OUT_MODE_MEM) {
 		coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
 		coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
-	} else  if (drvdata->config_type == TMC_CONFIG_TYPE_ETR
-		    && drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM) {
+	} else  if ((drvdata->config_type == TMC_CONFIG_TYPE_ETR)
+		    && ((drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM)
+		    || (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM))) {
 		coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
 		coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
 	} else if (drvdata->config_type == TMC_CONFIG_TYPE_ETB
@@ -1147,7 +1102,13 @@ static void tmc_abort(struct coresight_device *csdev)
 			dma_addr_t rrp_phy;
 			uint32_t q6mem_magic = 0xdeadbeef;
 			void __iomem *q6_etr_waddr;
+			uint32_t funnel_unlock = 0xc5acce55;
 
+			if (disable_funnel_ptr) {
+				writel_relaxed(funnel_unlock,
+						disable_funnel_ptr + 0xFB0);
+				writel_relaxed(0, disable_funnel_ptr);
+			}
 			tmc_etr_disable_hw(drvdata);
 
 			rrp = readl_relaxed(drvdata->base + TMC_RRP);
@@ -1168,6 +1129,8 @@ static void tmc_abort(struct coresight_device *csdev)
 			q6_etr_waddr += sizeof(rrp);
 			memcpy_toio(q6_etr_waddr, &rwp, sizeof(rwp));
 			q6_etr_waddr += sizeof(rwp);
+			dev_info(drvdata->dev, "rrp:0x%x rwp:0x%x sts:0x%x\n",
+								rrp, rwp,sts);
 		}
 		else if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB)
 			__tmc_etr_disable_to_bam(drvdata);
@@ -1218,12 +1181,16 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 	unsigned long flags;
 	enum tmc_mode mode;
 
+	mutex_lock(&drvdata->mem_lock);
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	if (!drvdata->sticky_enable) {
 		dev_err(drvdata->dev, "enable tmc once before reading\n");
 		ret = -EPERM;
 		goto err;
 	}
+
+	if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
+		goto out;
 
 	if (drvdata->config_type == TMC_CONFIG_TYPE_ETR &&
 	    drvdata->vaddr == NULL) {
@@ -1250,11 +1217,13 @@ static int tmc_read_prepare(struct tmc_drvdata *drvdata)
 out:
 	drvdata->reading = true;
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+	mutex_unlock(&drvdata->mem_lock);
 
 	dev_info(drvdata->dev, "TMC read start\n");
 	return 0;
 err:
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+	mutex_unlock(&drvdata->mem_lock);
 	return ret;
 }
 
@@ -1265,6 +1234,8 @@ static void tmc_read_unprepare(struct tmc_drvdata *drvdata)
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	if (!drvdata->enable)
+		goto out;
+	if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM)
 		goto out;
 
 	if (drvdata->config_type == TMC_CONFIG_TYPE_ETB) {
@@ -1431,7 +1402,11 @@ static ssize_t tmc_read(struct file *file, char __user *data, size_t len,
 {
 	struct tmc_drvdata *drvdata = container_of(file->private_data,
 						   struct tmc_drvdata, miscdev);
-	char *bufp = drvdata->buf + *ppos;
+	char *bufp;
+
+	mutex_lock(&drvdata->mem_lock);
+
+	bufp = drvdata->buf + *ppos;
 
 	if (*ppos + len > drvdata->size)
 		len = drvdata->size - *ppos;
@@ -1453,6 +1428,7 @@ static ssize_t tmc_read(struct file *file, char __user *data, size_t len,
 
 	if (copy_to_user(data, bufp, len)) {
 		dev_dbg(drvdata->dev, "%s: copy_to_user failed\n", __func__);
+		mutex_unlock(&drvdata->mem_lock);
 		return -EFAULT;
 	}
 
@@ -1460,6 +1436,8 @@ static ssize_t tmc_read(struct file *file, char __user *data, size_t len,
 
 	dev_dbg(drvdata->dev, "%s: %zu bytes copied, %d bytes left\n",
 		__func__, len, (int)(drvdata->size - *ppos));
+
+	mutex_unlock(&drvdata->mem_lock);
 	return len;
 }
 
@@ -1686,24 +1664,67 @@ static ssize_t out_mode_store(struct device *dev,
 			      const char *buf, size_t size)
 {
 	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	char str[10] = "";
+	char str[20] = "";
 	unsigned long flags;
 	int ret;
 
-	if (strlen(buf) >= 10)
+	if (strlen(buf) >= 20)
 		return -EINVAL;
 	if (sscanf(buf, "%s", str) != 1)
 		return -EINVAL;
 
+	tmc_etr_free_mem(drvdata);
+
 	mutex_lock(&drvdata->mem_lock);
-	if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_Q6MEM])) {
+	if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_Q6MEM_STREAM])) {
+		if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM) {
+			goto out;
+		}
+		spin_lock_irqsave(&drvdata->spinlock, flags);
+		if (!drvdata->enable) {
+			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM_STREAM;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_SG;
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			goto out;
+		} else if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB) {
+			__tmc_etr_disable_to_bam(drvdata);
+			tmc_etr_enable_hw(drvdata);
+			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM_STREAM;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_SG;
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			coresight_cti_map_trigout(drvdata->cti_flush, 3, 0);
+			coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
+			tmc_etr_bam_disable(drvdata);
+			usb_qdss_close_ptr(drvdata->usbch);
+		} else if (drvdata->out_mode == TMC_ETR_OUT_MODE_MEM) {
+			tmc_etr_disable_hw(drvdata);
+			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM_STREAM;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_SG;
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
+			coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
+		} else if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM) {
+			tmc_etr_disable_hw(drvdata);
+			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM_STREAM;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_SG;
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
+			coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
+		} else {
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+		}
+	} else if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_Q6MEM])) {
 		if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM)
 			goto out;
 		spin_lock_irqsave(&drvdata->spinlock, flags);
 		if (!drvdata->enable) {
 			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM;
-			drvdata->mem_type = TMC_ETR_MEM_TYPE_CONTIG;
-			drvdata->memtype  = TMC_ETR_MEM_TYPE_CONTIG;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_SG;
 			spin_unlock_irqrestore(&drvdata->spinlock, flags);
 			goto out;
 		}
@@ -1726,6 +1747,16 @@ static ssize_t out_mode_store(struct device *dev,
 			spin_unlock_irqrestore(&drvdata->spinlock, flags);
 			coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
 			coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
+		} else if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM) {
+			tmc_etr_disable_hw(drvdata);
+			drvdata->out_mode = TMC_ETR_OUT_MODE_Q6MEM;
+			drvdata->mem_type = TMC_ETR_MEM_TYPE_CONTIG;
+			drvdata->memtype  = TMC_ETR_MEM_TYPE_CONTIG;
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
+			coresight_cti_unmap_trigin(drvdata->cti_reset, 2, 0);
+			coresight_cti_unmap_trigout(drvdata->cti_flush, 3, 0);
+		} else {
+			spin_unlock_irqrestore(&drvdata->spinlock, flags);
 		}
 	} else if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_MEM])) {
 		if (drvdata->out_mode == TMC_ETR_OUT_MODE_MEM)
@@ -1737,16 +1768,23 @@ static ssize_t out_mode_store(struct device *dev,
 			spin_unlock_irqrestore(&drvdata->spinlock, flags);
 			goto out;
 		}
-		__tmc_etr_disable_to_bam(drvdata);
-		tmc_etr_enable_hw(drvdata);
+
+		if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB) {
+			__tmc_etr_disable_to_bam(drvdata);
+			tmc_etr_enable_hw(drvdata);
+		}
+
 		drvdata->out_mode = TMC_ETR_OUT_MODE_MEM;
 		spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
 		coresight_cti_map_trigout(drvdata->cti_flush, 3, 0);
 		coresight_cti_map_trigin(drvdata->cti_reset, 2, 0);
 
-		tmc_etr_bam_disable(drvdata);
-		usb_qdss_close_ptr(drvdata->usbch);
+		if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB) {
+			tmc_etr_bam_disable(drvdata);
+			usb_qdss_close_ptr(drvdata->usbch);
+		}
+
 	} else if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_USB])) {
 		if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB)
 			goto out;
@@ -1960,6 +1998,30 @@ void register_usb_qdss_close(void *fn)
 }
 EXPORT_SYMBOL(register_usb_qdss_close);
 
+static irqreturn_t etr_handler(int irq, void *data)
+{
+	struct tmc_drvdata *drvdata = data;
+	unsigned long flags;
+
+	spin_lock_irqsave(&drvdata->spinlock, flags);
+	if (drvdata->out_mode == TMC_ETR_OUT_MODE_Q6MEM_STREAM) {
+		CS_UNLOCK(drvdata->base);
+		atomic_add(PAGES_PER_DATA, &drvdata->seq_no);
+		if (atomic_read(&drvdata->seq_no) > COMP_PAGES_PER_DATA) {
+			tmc_disable_hw(drvdata);
+		} else {
+			tmc_enable_hw(drvdata);
+		}
+		schedule_work(&drvdata->qld_stream_work);
+		CS_LOCK(drvdata->base);
+	}
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+	return IRQ_HANDLED;
+}
+
+struct tmc_drvdata *tmc_drvdata_stream;
+EXPORT_SYMBOL(tmc_drvdata_stream);
+
 static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 {
 	int ret = 0;
@@ -1974,6 +2036,8 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	struct device_node *q6np;
 	struct coresight_cti_data *ctidata;
 	struct resource q6r;
+	int byte_cntr_irq;
+	uint32_t funnel_address[2];
 
 	if (!np)
 		return -ENODEV;
@@ -2003,8 +2067,16 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	drvdata->force_reg_dump = of_property_read_bool(np,
 							"qcom,force-reg-dump");
 
+	drvdata->is_emulation = of_property_read_bool(np,
+							"is_emulation");
 	devid = readl_relaxed(drvdata->base + CORESIGHT_DEVID);
 	drvdata->config_type = BMVAL(devid, 6, 7);
+
+	if (of_property_read_u32_array(np, "funnel-address",
+			funnel_address, ARRAY_SIZE(funnel_address)) == 0) {
+		disable_funnel_ptr = ioremap(funnel_address[0],
+							funnel_address[1]);
+	}
 
 	if (drvdata->config_type == TMC_CONFIG_TYPE_ETR) {
 		drvdata->out_mode = TMC_ETR_OUT_MODE_MEM;
@@ -2117,7 +2189,24 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 
 	pm_runtime_put(&adev->dev);
 
+	byte_cntr_irq = of_irq_get_byname(np, "byte-cntr-irq");
+	if (byte_cntr_irq < 0)
+		goto skip_irq;
+
+	ret = devm_request_irq(dev, byte_cntr_irq, etr_handler,
+			       IRQF_TRIGGER_RISING | IRQF_SHARED,
+			       "tmc-etr", drvdata);
+	if (ret) {
+		dev_err(dev, "Byte_cntr interrupt registration failed\n");
+	}
+	drvdata->byte_cntr_irq = byte_cntr_irq;
+	coresight_csr_set_byte_cntr(0);
+	tmc_drvdata_stream = drvdata;
+	atomic_set(&drvdata->completed_seq_no, 0);
+	atomic_set(&drvdata->seq_no, 0);
+skip_irq:
 	dev_info(dev, "TMC initialized\n");
+
 	return 0;
 
 err_misc_register:

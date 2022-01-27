@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,6 +36,9 @@
 
 /* Preprocessor definitions and constants */
 #define QDF_MAX_SGLIST 4
+
+#define CPU_CLUSTER_TYPE_LITTLE 0
+#define CPU_CLUSTER_TYPE_PERF 1
 
 /**
  * struct qdf_sglist - scatter-gather list
@@ -104,6 +107,15 @@ typedef void *qdf_pm_t;
  */
 typedef void *qdf_handle_t;
 
+/**
+ * typedef qdf_freq_t - define frequency as a 16 bit/32 bit
+ * unsigned integer depending on the requirement
+ */
+#ifdef CONFIG_16_BIT_FREQ_TYPE
+typedef uint16_t qdf_freq_t;
+#else
+typedef uint32_t qdf_freq_t;
+#endif
 /**
  * typedef qdf_device_t - Platform/bus generic handle.
  * Used for bus specific functions.
@@ -190,7 +202,7 @@ typedef struct qdf_shared_mem {
 	qdf_dma_mem_context(memctx);
 } qdf_shared_mem_t;
 
-#define qdf_iomem_t __qdf_iomem_t;
+#define qdf_iomem_t __qdf_iomem_t
 
 /**
  * typedef enum QDF_TIMER_TYPE - QDF timer type
@@ -198,10 +210,13 @@ typedef struct qdf_shared_mem {
  * on expiry
  * @QDF_TIMER_TYPE_WAKE_APPS: Non deferrable timer which will cause CPU to
  * wake up on expiry
+ * @QDF_TIMER_TYPE_SW_SPIN: Deferrable&Pinned SW timer, it will not cause cpu
+ * to wake up on expiry and be able to queue on assigned cpu by add_timer_on
  */
 typedef enum {
 	QDF_TIMER_TYPE_SW,
-	QDF_TIMER_TYPE_WAKE_APPS
+	QDF_TIMER_TYPE_WAKE_APPS,
+	QDF_TIMER_TYPE_SW_SPIN
 } QDF_TIMER_TYPE;
 
 /**
@@ -351,7 +366,6 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_DISA: DISA (encryption test) module ID
  * @QDF_MODULE_ID_GREEN_AP: Green AP related logging
  * @QDF_MODULE_ID_FTM: FTM module ID
- * @QDF_MODULE_ID_EXTAP: Extender AP module ID
  * @QDF_MODULE_ID_FD: FILS discovery logging
  * @QDF_MODULE_ID_OCB: OCB module ID
  * @QDF_MODULE_ID_IPA: IPA module ID
@@ -363,13 +377,47 @@ typedef bool (*qdf_irqlocked_func_t)(void *);
  * @QDF_MODULE_ID_SM_ENGINE: SM engine module ID
  * @QDF_MODULE_ID_CMN_MLME: CMN MLME module ID
  * @QDF_MODULE_ID_CFR: CFR module ID
- * @QDF_MODULE_ID_TX_CAPTURE: Tx capture enhancement feature ID
+ * @QDF_MODULE_ID_DP_TX_CAPTURE: Tx capture enhancement feature ID
  * @QDF_MODULE_ID_INTEROP_ISSUES_AP: interop issues ap module ID
  * @QDF_MODULE_ID_BLACKLIST_MGR: Blacklist Manager module
  * @QDF_MODULE_ID_QLD: QCA Live Debug module ID
  * @QDF_MODULE_ID_DYNAMIC_MODE_CHG: Dynamic mode change module ID
+ * @QDF_MODULE_ID_COEX: Coex related config module ID
+ * @QDF_MODULE_ID_FTM_TIME_SYNC: FTM Time sync module ID
+ * @QDF_MODULE_ID_PKT_CAPTURE: PACKET CAPTURE module ID
+ * @QDF_MODULE_ID_MON_FILTER: Monitor filter related config module ID
+ * @QDF_MODULE_ID_DCS: DCS module ID
+ * @QDF_MODULE_ID_RPTR: Repeater module ID
+ * @QDF_MODULE_ID_6GHZ: 6Ghz specific feature ID
+ * @QDF_MODULE_ID_IOT_SIM: IOT Simulation for rogue AP module ID
+ * @QDF_MODULE_ID_IFMGR: Interface Manager feature ID
+ * @QDF_MODULE_ID_MSCS: MSCS feature ID
+ * @QDF_MODULE_ID_GPIO: GPIO configuration module ID
+ * @QDF_MODULE_ID_DIAG: Host diag module ID
+ * @QDF_MODULE_ID_DP_INIT: INIT/DEINIT path of datapath module ID
+ * @QDF_MODULE_ID_DP_TX: TX path of datapath module ID
+ * @QDF_MODULE_ID_DP_RX: RX path of datapath module ID
+ * @QDF_MODULE_ID_DP_STATS: TX/RX stats, AST stats module ID
+ * @QDF_MODULE_ID_DP_HTT: Firmware to host DP event handling module ID
+ * @QDF_MODULE_ID_DP_PEER: DP peer module ID
+ * @QDF_MODULE_ID_DP_RX_ERROR: Packet handling from WBM release ring module ID
+ * @QDF_MODULE_ID_DP_HTT_TX_STATS: FW to host Tx  PPDU stats module ID
+ * @QDF_MODULE_ID_DP_RX_MON_STATUS: RX mon status ring module ID
+ * @QDF_MODULE_ID_DP_RX_MON_DEST: Monitor ode processing module ID
+ * @QDF_MODULE_ID_DP_REO: REO command status module ID
+ * @QDF_MODULE_ID_DP_TX_COMP: TX completion module ID
+ * @QDF_MODULE_ID_DP_VDEV: DP Vdev module ID
+ * @QDF_MODULE_ID_DP_CDP: Configuration module ID
+ * @QDF_MODULE_ID_TSO: TSO module ID
+ * @QDF_MODULE_ID_ME: Multicast Enhancement module ID
+ * @QDF_MODULE_ID_QWRAP: QWRAP module ID
+ * @QDF_MODULE_ID_DBDC_REP: DBDC repeater module ID
+ * @QDF_MODULE_ID_EXT_AP: Extended AP module ID
+ * @QDF_MODULE_ID_MLO: MLO Manager module ID
  * @QDF_MODULE_ID_ANY: anything
  * @QDF_MODULE_ID_MAX: Max place holder module ID
+ *
+ * New module ID needs to be added in qdf trace along with this enum.
  */
 typedef enum {
 	QDF_MODULE_ID_MIN       = 0,
@@ -468,7 +516,6 @@ typedef enum {
 	QDF_MODULE_ID_DISA,
 	QDF_MODULE_ID_GREEN_AP,
 	QDF_MODULE_ID_FTM,
-	QDF_MODULE_ID_EXTAP,
 	QDF_MODULE_ID_FD,
 	QDF_MODULE_ID_OCB,
 	QDF_MODULE_ID_IPA,
@@ -481,11 +528,43 @@ typedef enum {
 	QDF_MODULE_ID_CMN_MLME,
 	QDF_MODULE_ID_BSSCOLOR,
 	QDF_MODULE_ID_CFR,
-	QDF_MODULE_ID_TX_CAPTURE,
+	QDF_MODULE_ID_DP_TX_CAPTURE,
 	QDF_MODULE_ID_INTEROP_ISSUES_AP,
 	QDF_MODULE_ID_BLACKLIST_MGR,
 	QDF_MODULE_ID_QLD,
 	QDF_MODULE_ID_DYNAMIC_MODE_CHG,
+	QDF_MODULE_ID_COEX,
+	QDF_MODULE_ID_FTM_TIME_SYNC,
+	QDF_MODULE_ID_PKT_CAPTURE,
+	QDF_MODULE_ID_MON_FILTER,
+	QDF_MODULE_ID_DCS,
+	QDF_MODULE_ID_RPTR,
+	QDF_MODULE_ID_6GHZ,
+	QDF_MODULE_ID_IOT_SIM,
+	QDF_MODULE_ID_IFMGR,
+	QDF_MODULE_ID_MSCS,
+	QDF_MODULE_ID_GPIO,
+	QDF_MODULE_ID_DIAG,
+	QDF_MODULE_ID_DP_INIT,
+	QDF_MODULE_ID_DP_TX,
+	QDF_MODULE_ID_DP_RX,
+	QDF_MODULE_ID_DP_STATS,
+	QDF_MODULE_ID_DP_HTT,
+	QDF_MODULE_ID_DP_PEER,
+	QDF_MODULE_ID_DP_RX_ERROR,
+	QDF_MODULE_ID_DP_HTT_TX_STATS,
+	QDF_MODULE_ID_DP_RX_MON_STATUS,
+	QDF_MODULE_ID_DP_RX_MON_DEST,
+	QDF_MODULE_ID_DP_REO,
+	QDF_MODULE_ID_DP_TX_COMP,
+	QDF_MODULE_ID_DP_VDEV,
+	QDF_MODULE_ID_DP_CDP,
+	QDF_MODULE_ID_TSO,
+	QDF_MODULE_ID_ME,
+	QDF_MODULE_ID_QWRAP,
+	QDF_MODULE_ID_DBDC_REP,
+	QDF_MODULE_ID_EXT_AP,
+	QDF_MODULE_ID_MLO,
 	QDF_MODULE_ID_ANY,
 	QDF_MODULE_ID_MAX,
 } QDF_MODULE_ID;
@@ -673,7 +752,6 @@ enum QDF_GLOBAL_MODE {
 #define qdf_rl_nofl_debug(params...) \
 	QDF_TRACE_DEBUG_RL_NO_FL(QDF_MODULE_ID_QDF, ## params)
 
-#define qdf_vprint    __qdf_vprint
 #define qdf_snprint   __qdf_snprint
 
 #define qdf_kstrtoint __qdf_kstrtoint
@@ -681,15 +759,16 @@ enum QDF_GLOBAL_MODE {
 
 #ifdef WLAN_OPEN_P2P_INTERFACE
 /* This should match with WLAN_MAX_INTERFACES */
-#define QDF_MAX_CONCURRENCY_PERSONA  (4)
+#define QDF_MAX_CONCURRENCY_PERSONA  (WLAN_MAX_VDEVS)
 #else
-#define QDF_MAX_CONCURRENCY_PERSONA  (3)
+#define QDF_MAX_CONCURRENCY_PERSONA  (WLAN_MAX_VDEVS - 1)
 #endif
 
 #define QDF_STA_MASK (1 << QDF_STA_MODE)
 #define QDF_SAP_MASK (1 << QDF_SAP_MODE)
 #define QDF_P2P_CLIENT_MASK (1 << QDF_P2P_CLIENT_MODE)
 #define QDF_P2P_GO_MASK (1 << QDF_P2P_GO_MODE)
+#define QDF_MONITOR_MASK (1 << QDF_MONITOR_MODE)
 
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 
@@ -793,8 +872,43 @@ QDF_STATUS qdf_int64_parse(const char *int_str, int64_t *out_int);
 QDF_STATUS qdf_uint64_parse(const char *int_str, uint64_t *out_int);
 
 #define QDF_MAC_ADDR_SIZE 6
-#define QDF_MAC_ADDR_STR "%02x:%02x:%02x:%02x:%02x:%02x"
-#define QDF_MAC_ADDR_ARRAY(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
+
+/**
+ * If the feature CONFIG_WLAN_TRACE_HIDE_MAC_ADDRESS is enabled,
+ * then the requirement is to hide 2nd, 3rd and 4th octet of the
+ * MAC address in the kernel logs and driver logs.
+ * But other management interfaces like ioctl, debugfs, sysfs,
+ * wext, unit test code or non-production simulator sw (iot_sim)
+ * should continue to log the full mac address.
+ *
+ * Developers must use QDF_FULL_MAC_FMT instead of "%pM",
+ * as this macro helps avoid accidentally breaking the feature
+ * CONFIG_WLAN_TRACE_HIDE_MAC_ADDRESS if enabled and code auditing
+ * becomes easy.
+ */
+#define QDF_FULL_MAC_FMT "%pM"
+#define QDF_FULL_MAC_REF(a) (a)
+
+#if defined(WLAN_TRACE_HIDE_MAC_ADDRESS)
+#define QDF_MAC_ADDR_FMT "%02x:**:**:**:%02x:%02x"
+
+/*
+ * The input data type for QDF_MAC_ADDR_REF can be pointer or an array.
+ * In case of array, compiler was throwing following warning
+ * 'address of array will always evaluate as ‘true’
+ * and if the pointer is NULL, zero is passed to the format specifier
+ * which results in zero mac address (00:**:**:**:00:00)
+ * For this reason, input data type is typecasted to (uintptr_t).
+ */
+#define QDF_MAC_ADDR_REF(a) \
+	(((uintptr_t)NULL != (uintptr_t)(a)) ? (a)[0] : 0), \
+	(((uintptr_t)NULL != (uintptr_t)(a)) ? (a)[4] : 0), \
+	(((uintptr_t)NULL != (uintptr_t)(a)) ? (a)[5] : 0)
+#else
+#define QDF_MAC_ADDR_FMT "%pM"
+#define QDF_MAC_ADDR_REF(a) (a)
+#endif /* WLAN_TRACE_HIDE_MAC_ADDRESS */
+
 #define QDF_MAC_ADDR_BCAST_INIT { { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } }
 #define QDF_MAC_ADDR_ZERO_INIT { { 0, 0, 0, 0, 0, 0 } }
 
@@ -804,6 +918,84 @@ QDF_STATUS qdf_uint64_parse(const char *int_str, uint64_t *out_int);
  */
 struct qdf_mac_addr {
 	uint8_t bytes[QDF_MAC_ADDR_SIZE];
+};
+
+/**
+ * enum qdf_proto_subtype - subtype of packet
+ * @QDF_PROTO_EAPOL_M1 - EAPOL 1/4
+ * @QDF_PROTO_EAPOL_M2 - EAPOL 2/4
+ * @QDF_PROTO_EAPOL_M3 - EAPOL 3/4
+ * @QDF_PROTO_EAPOL_M4 - EAPOL 4/4
+ * @QDF_PROTO_DHCP_DISCOVER - discover
+ * @QDF_PROTO_DHCP_REQUEST - request
+ * @QDF_PROTO_DHCP_OFFER - offer
+ * @QDF_PROTO_DHCP_ACK - ACK
+ * @QDF_PROTO_DHCP_NACK - NACK
+ * @QDF_PROTO_DHCP_RELEASE - release
+ * @QDF_PROTO_DHCP_INFORM - inform
+ * @QDF_PROTO_DHCP_DECLINE - decline
+ * @QDF_PROTO_ARP_REQ - arp request
+ * @QDF_PROTO_ARP_RES - arp response
+ * @QDF_PROTO_ICMP_REQ - icmp request
+ * @QDF_PROTO_ICMP_RES - icmp response
+ * @QDF_PROTO_ICMPV6_REQ - icmpv6 request
+ * @QDF_PROTO_ICMPV6_RES - icmpv6 response
+ * @QDF_PROTO_ICMPV6_RS - icmpv6 rs packet
+ * @QDF_PROTO_ICMPV6_RA - icmpv6 ra packet
+ * @QDF_PROTO_ICMPV6_NS - icmpv6 ns packet
+ * @QDF_PROTO_ICMPV6_NA - icmpv6 na packet
+ * @QDF_PROTO_IPV4_UDP - ipv4 udp
+ * @QDF_PROTO_IPV4_TCP - ipv4 tcp
+ * @QDF_PROTO_IPV6_UDP - ipv6 udp
+ * @QDF_PROTO_IPV6_TCP - ipv6 tcp
+ * @QDF_PROTO_MGMT_ASSOC -assoc
+ * @QDF_PROTO_MGMT_DISASSOC - disassoc
+ * @QDF_PROTO_MGMT_AUTH - auth
+ * @QDF_PROTO_MGMT_DEAUTH - deauth
+ * @QDF_ROAM_SYNCH - roam synch indication from fw
+ * @QDF_ROAM_COMPLETE - roam complete cmd to fw
+ * @QDF_ROAM_EVENTID - roam eventid from fw
+ * @QDF_PROTO_DNS_QUERY - dns query
+ * @QDF_PROTO_DNS_RES -dns response
+ */
+enum qdf_proto_subtype {
+	QDF_PROTO_INVALID,
+	QDF_PROTO_EAPOL_M1,
+	QDF_PROTO_EAPOL_M2,
+	QDF_PROTO_EAPOL_M3,
+	QDF_PROTO_EAPOL_M4,
+	QDF_PROTO_DHCP_DISCOVER,
+	QDF_PROTO_DHCP_REQUEST,
+	QDF_PROTO_DHCP_OFFER,
+	QDF_PROTO_DHCP_ACK,
+	QDF_PROTO_DHCP_NACK,
+	QDF_PROTO_DHCP_RELEASE,
+	QDF_PROTO_DHCP_INFORM,
+	QDF_PROTO_DHCP_DECLINE,
+	QDF_PROTO_ARP_REQ,
+	QDF_PROTO_ARP_RES,
+	QDF_PROTO_ICMP_REQ,
+	QDF_PROTO_ICMP_RES,
+	QDF_PROTO_ICMPV6_REQ,
+	QDF_PROTO_ICMPV6_RES,
+	QDF_PROTO_ICMPV6_RS,
+	QDF_PROTO_ICMPV6_RA,
+	QDF_PROTO_ICMPV6_NS,
+	QDF_PROTO_ICMPV6_NA,
+	QDF_PROTO_IPV4_UDP,
+	QDF_PROTO_IPV4_TCP,
+	QDF_PROTO_IPV6_UDP,
+	QDF_PROTO_IPV6_TCP,
+	QDF_PROTO_MGMT_ASSOC,
+	QDF_PROTO_MGMT_DISASSOC,
+	QDF_PROTO_MGMT_AUTH,
+	QDF_PROTO_MGMT_DEAUTH,
+	QDF_ROAM_SYNCH,
+	QDF_ROAM_COMPLETE,
+	QDF_ROAM_EVENTID,
+	QDF_PROTO_DNS_QUERY,
+	QDF_PROTO_DNS_RES,
+	QDF_PROTO_SUBTYPE_MAX
 };
 
 /**
@@ -904,6 +1096,22 @@ struct qdf_ipv6_addr {
 QDF_STATUS qdf_ipv6_parse(const char *ipv6_str, struct qdf_ipv6_addr *out_addr);
 
 /**
+ * qdf_uint32_array_parse() - parse the given string as uint32 array
+ * @in_str: the input string to parse
+ * @out_array: the output uint32 array, populated on success
+ * @array_size: size of the array
+ * @out_size: size of the populated array
+ *
+ * This API is called to convert string (each value separated by
+ * a comma) into an uint32 array
+ *
+ * Return: QDF_STATUS
+ */
+
+QDF_STATUS qdf_uint32_array_parse(const char *in_str, uint32_t *out_array,
+				  qdf_size_t array_size, qdf_size_t *out_size);
+
+/**
  * qdf_uint16_array_parse() - parse the given string as uint16 array
  * @in_str: the input string to parse
  * @out_array: the output uint16 array, populated on success
@@ -933,8 +1141,6 @@ QDF_STATUS qdf_uint16_array_parse(const char *in_str, uint16_t *out_array,
  */
 QDF_STATUS qdf_uint8_array_parse(const char *in_str, uint8_t *out_array,
 				 qdf_size_t array_size, qdf_size_t *out_size);
-
-#define QDF_MAX_NUM_CHAN   (128)
 
 #define QDF_BCAST_MAC_ADDR (0xFF)
 #define QDF_MCAST_IPV4_MAC_ADDR (0x01)
@@ -1152,10 +1358,12 @@ struct qdf_tso_info_t {
  * enum qdf_suspend_type - type of suspend
  * @QDF_SYSTEM_SUSPEND: System suspend triggered wlan suspend
  * @QDF_RUNTIME_SUSPEND: Runtime pm inactivity timer triggered wlan suspend
+ * @QDF_UNIT_TEST_WOW_SUSPEND: WoW unit test suspend
  */
 enum qdf_suspend_type {
 	QDF_SYSTEM_SUSPEND,
-	QDF_RUNTIME_SUSPEND
+	QDF_RUNTIME_SUSPEND,
+	QDF_UNIT_TEST_WOW_SUSPEND
 };
 
 /**
@@ -1171,19 +1379,49 @@ enum qdf_suspend_type {
  * @QDF_SUSPEND_TIMEOUT: Timeout for an ACK from FW for suspend request
  * @QDF_RESUME_TIMEOUT: Timeout for an ACK from FW for resume request
  * @QDF_WMI_EXCEED_MAX_PENDING_CMDS: wmi exceed max pending cmd
+ * @QDF_AP_STA_CONNECT_REQ_TIMEOUT: SAP peer assoc timeout from FW
+ * @QDF_STA_AP_CONNECT_REQ_TIMEOUT: STA peer assoc timeout from FW
+ * @QDF_MAC_HW_MODE_CHANGE_TIMEOUT: HW mode change timeout from FW
+ * @QDF_MAC_HW_MODE_CONFIG_TIMEOUT: HW dual mac cfg timeout from FW
+ * @QDF_VDEV_START_RESPONSE_TIMED_OUT: Start response timeout from FW
+ * @QDF_VDEV_RESTART_RESPONSE_TIMED_OUT: Restart response timeout from FW
+ * @QDF_VDEV_STOP_RESPONSE_TIMED_OUT: Stop response timeout from FW
+ * @QDF_VDEV_DELETE_RESPONSE_TIMED_OUT: Delete response timeout from FW
+ * @QDF_VDEV_PEER_DELETE_ALL_RESPONSE_TIMED_OUT: Peer delete all resp timeout
+ * @QDF_WMI_BUF_SEQUENCE_MISMATCH: WMI Tx completion buffer sequence mismatch
+ * @QDF_HAL_REG_WRITE_FAILURE: HAL register writing failures
+ * @QDF_SUSPEND_NO_CREDIT: host lack of credit after suspend
+ * @QCA_HANG_BUS_FAILURE: Bus failure
+ * @QDF_TASKLET_CREDIT_LATENCY_DETECT: tasklet or credit latency happened
+ * @QDF_RX_REG_PKT_ROUTE_ERR: MSDU buf errors exceed thresh in REO err path
  */
 enum qdf_hang_reason {
-	QDF_REASON_UNSPECIFIED = 0,
-	QDF_RX_HASH_NO_ENTRY_FOUND = 1,
-	QDF_PEER_DELETION_TIMEDOUT = 2,
-	QDF_PEER_UNMAP_TIMEDOUT = 3,
-	QDF_SCAN_REQ_EXPIRED = 4,
-	QDF_SCAN_ATTEMPT_FAILURES = 5,
-	QDF_GET_MSG_BUFF_FAILURE = 6,
-	QDF_ACTIVE_LIST_TIMEOUT = 7,
-	QDF_SUSPEND_TIMEOUT = 8,
-	QDF_RESUME_TIMEOUT = 9,
-	QDF_WMI_EXCEED_MAX_PENDING_CMDS = 10,
+	QDF_REASON_UNSPECIFIED,
+	QDF_RX_HASH_NO_ENTRY_FOUND,
+	QDF_PEER_DELETION_TIMEDOUT,
+	QDF_PEER_UNMAP_TIMEDOUT,
+	QDF_SCAN_REQ_EXPIRED,
+	QDF_SCAN_ATTEMPT_FAILURES,
+	QDF_GET_MSG_BUFF_FAILURE,
+	QDF_ACTIVE_LIST_TIMEOUT,
+	QDF_SUSPEND_TIMEOUT,
+	QDF_RESUME_TIMEOUT,
+	QDF_WMI_EXCEED_MAX_PENDING_CMDS,
+	QDF_AP_STA_CONNECT_REQ_TIMEOUT,
+	QDF_STA_AP_CONNECT_REQ_TIMEOUT,
+	QDF_MAC_HW_MODE_CHANGE_TIMEOUT,
+	QDF_MAC_HW_MODE_CONFIG_TIMEOUT,
+	QDF_VDEV_START_RESPONSE_TIMED_OUT,
+	QDF_VDEV_RESTART_RESPONSE_TIMED_OUT,
+	QDF_VDEV_STOP_RESPONSE_TIMED_OUT,
+	QDF_VDEV_DELETE_RESPONSE_TIMED_OUT,
+	QDF_VDEV_PEER_DELETE_ALL_RESPONSE_TIMED_OUT,
+	QDF_WMI_BUF_SEQUENCE_MISMATCH,
+	QDF_HAL_REG_WRITE_FAILURE,
+	QDF_SUSPEND_NO_CREDIT,
+	QCA_HANG_BUS_FAILURE,
+	QDF_TASKLET_CREDIT_LATENCY_DETECT,
+	QDF_RX_REG_PKT_ROUTE_ERR,
 };
 
 /**
@@ -1242,4 +1480,35 @@ enum qdf_context_mode {
 	QDF_CONTEXT_TASKLET = 1,
 };
 
+/**
+ * enum qdf_dp_tx_rx_status - TX/RX packet status
+ * @QDF_TX_RX_STATUS_INVALID: default invalid status
+ * @QDF_TX_RX_STATUS_OK: successfully sent + acked
+ * @QDF_TX_RX_STATUS_DISCARD: queued but not sent over air
+ * @QDF_TX_RX_STATUS_NO_ACK: packet sent but no ack received
+ * @QDF_TX_RX_STATUS_DROP: packet dropped due to congestion
+ * @QDF_TX_RX_STATUS_DOWNLOAD_SUCC: packet delivered to target
+ * @QDF_TX_RX_STATUS_DEFAULT: default status
+ * @QDF_TX_RX_STATUS_MAX:
+ */
+enum qdf_dp_tx_rx_status {
+	QDF_TX_RX_STATUS_INVALID,
+	QDF_TX_RX_STATUS_OK,
+	QDF_TX_RX_STATUS_FW_DISCARD,
+	QDF_TX_RX_STATUS_NO_ACK,
+	QDF_TX_RX_STATUS_DROP,
+	QDF_TX_RX_STATUS_DOWNLOAD_SUCC,
+	QDF_TX_RX_STATUS_DEFAULT,
+	QDF_TX_RX_STATUS_MAX
+};
+
+/**
+ * enum qdf_dp_a_status - A_STATUS
+ * @QDF_A_STATUS_ERROR: Generic error return
+ * @QDF_A_STATUS_OK: success
+ */
+enum qdf_dp_a_status {
+	QDF_A_STATUS_ERROR = -1,
+	QDF_A_STATUS_OK,
+};
 #endif /* __QDF_TYPES_H */

@@ -247,7 +247,11 @@ void hyfi_psw_send_pkt(struct hyfi_net_bridge *br, struct net_hatbl_entry *ha,
 
 	skb->dev = br->dev;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	br_forward(ha->dst, skb, false, true);
+#else
 	br_deliver(ha->dst, skb);
+#endif
 }
 
 static int hyfi_psw_recv_pkt(psw_pkt_type type, struct psw_pkt *pkt,
@@ -271,6 +275,7 @@ static psw_pkt_type hyfi_psw_detect_pkt(struct psw_pkt *psw_pkt)
 		if (psw_pkt->field11[0] == 0x36 && psw_pkt->field13[0] == 0xff)
 			return psw_pkt->field5;
 
+		return HYFI_PSW_PKT_UNKNOWN;
 	default:
 		return HYFI_PSW_PKT_UNKNOWN;
 	}

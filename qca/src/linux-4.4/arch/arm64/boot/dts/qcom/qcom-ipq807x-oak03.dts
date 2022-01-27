@@ -315,7 +315,7 @@
 			reg = <3>;
 		};
 		phy4: ethernet-phy@4 {
-			reg = <4>;
+			reg = <30>;
 		};
 		phy5: ethernet-phy@5 {
 			compatible ="ethernet-phy-ieee802.3-c45";
@@ -330,10 +330,39 @@
 		switch_lan_bmp = <0x3e>; /* lan port bitmap */
 		switch_wan_bmp = <0x40>; /* wan port bitmap */
 		switch_mac_mode = <0x0>; /* mac mode for uniphy instance0*/
-		switch_mac_mode1 = <0xff>; /* mac mode for uniphy instance1*/
+		switch_mac_mode1 = <0xe>; /* mac mode for uniphy instance1*/
 		switch_mac_mode2 = <0xd>; /* mac mode for uniphy instance2*/
 		bm_tick_mode = <0>; /* bm tick mode */
 		tm_tick_mode = <0>; /* tm tick mode */
+		qcom,port_phyinfo {
+				port@0 {
+					port_id = <1>;
+					phy_address = <0>;
+				};
+				port@1 {
+					port_id = <2>;
+					phy_address = <1>;
+				};
+				port@2 {
+					port_id = <3>;
+					phy_address = <2>;
+				};
+				port@3 {
+					port_id = <4>;
+					phy_address = <3>;
+				};
+				port@4 {
+					port_id = <5>;
+					phy_address = <30>;
+					phy_i2c_address = <30>;
+					phy-i2c-mode; /*i2c access phy */
+				};
+				port@5 {
+					port_id = <6>;
+					phy_address = <7>;
+					ethernet-phy-ieee802.3-c45;
+				};
+		};
 		port_scheduler_resource {
 			port@0 {
 				port_id = <0>;
@@ -660,11 +689,11 @@
 		device_type = "network";
 		compatible = "qcom,nss-dp";
 		qcom,id = <5>;
-		reg = <0x3a001800 0x200>;
-		qcom,mactype = <0>;
+		reg = <0x3a003000 0x3fff>;
+		qcom,mactype = <1>;
 		local-mac-address = [000000000000];
 		qcom,link-poll = <1>;
-		qcom,phy-mdio-addr = <4>;
+		qcom,phy-mdio-addr = <30>;
 		phy-mode = "sgmii";
 	};
 

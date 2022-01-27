@@ -24,14 +24,10 @@
 			cs1 {
 				gpio59_CS {
 					gpio = <59>;
-					func = <0>;
 					out  = <GPIO_OUTPUT>;
 					pull = <GPIO_PULL_UP>;
 					drvstr = <GPIO_10MA>;
 					oe = <GPIO_OE_ENABLE>;
-					vm = <GPIO_VM_DISABLE>;
-					od_en = <GPIO_OD_DISABLE>;
-					pu_res = <GPIO_PULL_RES0>;
 
 				};
 			};

@@ -183,7 +183,7 @@ static void iommu_group_remove_file(struct iommu_group *group,
 
 static ssize_t iommu_group_show_name(struct iommu_group *group, char *buf)
 {
-	return sprintf(buf, "%s\n", group->name);
+	return snprintf(buf, PAGE_SIZE, "%s\n", group->name);
 }
 
 static IOMMU_GROUP_ATTR(name, S_IRUGO, iommu_group_show_name, NULL);

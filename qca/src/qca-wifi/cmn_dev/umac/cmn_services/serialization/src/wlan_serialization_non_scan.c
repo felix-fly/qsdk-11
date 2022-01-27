@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -27,6 +27,7 @@
 #include "wlan_serialization_main_i.h"
 #include "wlan_serialization_utils_i.h"
 #include "wlan_serialization_non_scan_i.h"
+#include "qdf_util.h"
 
 bool
 wlan_serialization_is_non_scan_pending_queue_empty(
@@ -69,7 +70,7 @@ wlan_serialization_is_active_non_scan_cmd_allowed(
 {
 	struct wlan_serialization_pdev_queue *pdev_queue;
 	struct wlan_ser_pdev_obj *ser_pdev_obj;
-	uint32_t vdev_active_cmd_bitmap;
+	unsigned long *vdev_active_cmd_bitmap;
 	bool blocking_cmd_active = 0;
 	uint8_t blocking_cmd_waiting = 0;
 	bool status = false;
@@ -82,6 +83,7 @@ wlan_serialization_is_active_non_scan_cmd_allowed(
 							   cmd->cmd_type);
 
 	vdev_active_cmd_bitmap = pdev_queue->vdev_active_cmd_bitmap;
+
 	blocking_cmd_active = pdev_queue->blocking_cmd_active;
 	blocking_cmd_waiting = pdev_queue->blocking_cmd_waiting;
 
@@ -93,7 +95,8 @@ wlan_serialization_is_active_non_scan_cmd_allowed(
 		 * For blocking commands, no other
 		 * commands from any vdev should be active
 		 */
-		if (vdev_active_cmd_bitmap) {
+
+		if (wlan_serialization_any_vdev_cmd_active(pdev_queue)) {
 			status = false;
 			pdev_queue->blocking_cmd_waiting++;
 		} else {
@@ -114,8 +117,13 @@ wlan_serialization_is_active_non_scan_cmd_allowed(
 		 * If not active, put to active else pending queue
 		 */
 			vdev_id = wlan_vdev_get_id(cmd->vdev);
-			status = vdev_active_cmd_bitmap & (1 << vdev_id)
+			status = qdf_test_bit(vdev_id, vdev_active_cmd_bitmap)
 						? false : true;
+
+			ser_debug_hex(
+				vdev_active_cmd_bitmap,
+				sizeof(pdev_queue->vdev_active_cmd_bitmap));
+
 		}
 	}
 	return status;
@@ -132,17 +140,11 @@ enum wlan_serialization_status wlan_ser_add_non_scan_cmd(
 	uint8_t vdev_id;
 	struct wlan_serialization_pdev_queue *pdev_queue;
 
-	ser_debug("add non scan cmd: type[%d] id[%d] prio[%d] blocking[%d]",
-		  cmd_list->cmd.cmd_type,
-		  cmd_list->cmd.cmd_id,
-		  cmd_list->cmd.is_high_priority,
-		  cmd_list->cmd.is_blocking);
-
 	vdev_status = wlan_serialization_add_cmd_to_vdev_queue(
 			ser_pdev_obj, cmd_list, is_cmd_for_active_queue);
 
 	if (vdev_status == WLAN_SER_CMD_DENIED_LIST_FULL) {
-		ser_err_rl("List is full cannot add CMD %d cmd id %d",
+		ser_err_rl("List is full cannot add type %d cmd id %d",
 			   cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 		status = vdev_status;
 		goto vdev_error;
@@ -150,13 +152,15 @@ enum wlan_serialization_status wlan_ser_add_non_scan_cmd(
 
 	if (is_cmd_for_active_queue) {
 		if (vdev_status != WLAN_SER_CMD_ACTIVE) {
-			ser_err("Failed to add to vdev active queue");
+			ser_err("Failed to add type %d cmd id %d to vdev active queue",
+				cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 			QDF_ASSERT(0);
 			goto vdev_error;
 		}
 	} else {
 		if (vdev_status != WLAN_SER_CMD_PENDING) {
-			ser_err("Failed to add to vdev pending queue");
+			ser_err("Failed to add type %d cmd id %d to vdev pending queue",
+				cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 			QDF_ASSERT(0);
 			goto vdev_error;
 		}
@@ -166,19 +170,23 @@ enum wlan_serialization_status wlan_ser_add_non_scan_cmd(
 			ser_pdev_obj, cmd_list, is_cmd_for_active_queue);
 
 	if (pdev_status == WLAN_SER_CMD_DENIED_LIST_FULL) {
+		ser_err_rl("pdev List is full cannot add type %d cmd id %d",
+			   cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 		status = pdev_status;
 		goto pdev_error;
 	}
 
 	if (is_cmd_for_active_queue) {
 		if (pdev_status != WLAN_SER_CMD_ACTIVE) {
-			ser_err("Failed to add to pdev active queue");
+			ser_err("Failed to add type %d cmd id %d to pdev active queue",
+				cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 			QDF_ASSERT(0);
 			goto pdev_error;
 		}
 	} else {
 		if (pdev_status != WLAN_SER_CMD_PENDING) {
-			ser_err("Failed to add to pdev pending queue");
+			ser_err("Failed to add type %d cmd id %d to pdev pending queue",
+				cmd_list->cmd.cmd_type, cmd_list->cmd.cmd_id);
 			QDF_ASSERT(0);
 			goto pdev_error;
 		}
@@ -193,6 +201,7 @@ pdev_error:
 			ser_pdev_obj, &pcmd_list,
 			&cmd_list->cmd,
 			is_cmd_for_active_queue);
+		goto vdev_error;
 	} else {
 		status = pdev_status;
 	}
@@ -201,7 +210,7 @@ pdev_error:
 		pdev_queue = wlan_serialization_get_pdev_queue_obj(
 				ser_pdev_obj, cmd_list->cmd.cmd_type);
 		vdev_id = wlan_vdev_get_id(cmd_list->cmd.vdev);
-		pdev_queue->vdev_active_cmd_bitmap |= (1 << vdev_id);
+		qdf_set_bit(vdev_id, pdev_queue->vdev_active_cmd_bitmap);
 
 		if (cmd_list->cmd.is_blocking)
 			pdev_queue->blocking_cmd_active = 1;
@@ -218,6 +227,7 @@ wlan_ser_move_non_scan_pending_to_active(
 		bool blocking_cmd_removed)
 {
 	struct wlan_serialization_command_list *pending_cmd_list = NULL;
+	struct wlan_serialization_command_list *next_cmd_list = NULL;
 	struct wlan_serialization_command_list *active_cmd_list;
 	struct wlan_serialization_command cmd_to_remove;
 	enum wlan_serialization_status status = WLAN_SER_CMD_DENIED_UNSPECIFIED;
@@ -228,6 +238,7 @@ wlan_ser_move_non_scan_pending_to_active(
 
 	qdf_list_t *pending_queue;
 	qdf_list_node_t *pending_node = NULL;
+	qdf_list_node_t *next_node = NULL;
 	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
 	uint32_t blocking_cmd_waiting = 0;
 	uint32_t vdev_id;
@@ -235,17 +246,21 @@ wlan_ser_move_non_scan_pending_to_active(
 	bool vdev_cmd_active = 0;
 	bool vdev_queue_lookup = false;
 
-	pdev_queue = &ser_pdev_obj->pdev_q[SER_PDEV_QUEUE_COMP_NON_SCAN];
-
-	ser_vdev_obj = wlan_serialization_get_vdev_obj(vdev);
-	vdev_queue = &ser_vdev_obj->vdev_q[SER_VDEV_QUEUE_COMP_NON_SCAN];
-
-	ser_enter();
-
 	if (!ser_pdev_obj) {
 		ser_err("Can't find ser_pdev_obj");
 		goto error;
 	}
+
+	pdev_queue = &ser_pdev_obj->pdev_q[SER_PDEV_QUEUE_COMP_NON_SCAN];
+
+	ser_vdev_obj = wlan_serialization_get_vdev_obj(vdev);
+
+	if (!ser_vdev_obj) {
+		ser_err("Can't find ser_vdev_obj");
+		goto error;
+	}
+
+	vdev_queue = &ser_vdev_obj->vdev_q[SER_VDEV_QUEUE_COMP_NON_SCAN];
 
 	wlan_serialization_acquire_lock(&pdev_queue->pdev_queue_lock);
 
@@ -260,20 +275,19 @@ wlan_ser_move_non_scan_pending_to_active(
 
 	qsize =  wlan_serialization_list_size(pending_queue);
 	if (!qsize) {
-		wlan_serialization_release_lock(
-			&pdev_queue->pdev_queue_lock);
-		ser_debug("Pending Queue is empty");
+		wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
+		goto error;
+	}
+
+	qdf_status = wlan_serialization_peek_front(pending_queue,
+						   &pending_node);
+	if (qdf_status != QDF_STATUS_SUCCESS) {
+		ser_err("can't peek cmd");
+		wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
 		goto error;
 	}
 
 	while (qsize--) {
-		qdf_status = wlan_serialization_get_cmd_from_queue(
-				pending_queue, &pending_node);
-		if (qdf_status != QDF_STATUS_SUCCESS) {
-			ser_err("can't peek cmd");
-			break;
-		}
-
 		if (vdev_queue_lookup) {
 			pending_cmd_list =
 				qdf_container_of(
@@ -297,20 +311,54 @@ wlan_ser_move_non_scan_pending_to_active(
 		}
 
 		vdev_id = wlan_vdev_get_id(pending_cmd_list->cmd.vdev);
-		vdev_cmd_active =
-			pdev_queue->vdev_active_cmd_bitmap &
-			(1 << vdev_id);
+		vdev_cmd_active = qdf_test_bit(
+				vdev_id, pdev_queue->vdev_active_cmd_bitmap);
 
 		if (!vdev_queue_lookup) {
 			if (pending_cmd_list->cmd.is_blocking &&
-			    pdev_queue->vdev_active_cmd_bitmap) {
+			    wlan_serialization_any_vdev_cmd_active(
+					pdev_queue)) {
 				break;
 			}
-			if (vdev_cmd_active)
+			/*
+			 * For the last node we dont need the next node
+			 */
+			if (qsize) {
+				qdf_status = wlan_serialization_peek_next(
+					pending_queue,
+					pending_node,
+					&next_node);
+
+				if (qdf_status != QDF_STATUS_SUCCESS) {
+					ser_err("can't peek cmd");
+					break;
+				}
+
+				pending_node = next_node;
+
+				next_cmd_list = qdf_container_of(
+					next_node,
+					struct wlan_serialization_command_list,
+					pdev_node);
+
+				qdf_atomic_set_bit(CMD_MARKED_FOR_MOVEMENT,
+						   &next_cmd_list->cmd_in_use);
+			}
+
+			if (vdev_cmd_active) {
+				qdf_atomic_clear_bit(CMD_MARKED_FOR_MOVEMENT,
+						     &pending_cmd_list->cmd_in_use);
 				continue;
+			}
 		} else {
 			if (vdev_cmd_active)
 				break;
+
+			if (qdf_atomic_test_bit(
+					CMD_MARKED_FOR_MOVEMENT,
+					&pending_cmd_list->cmd_in_use)) {
+				break;
+			}
 		}
 
 		qdf_mem_copy(&cmd_to_remove, &pending_cmd_list->cmd,
@@ -364,6 +412,9 @@ wlan_ser_move_non_scan_pending_to_active(
 		qdf_atomic_set_bit(CMD_MARKED_FOR_ACTIVATION,
 				   &active_cmd_list->cmd_in_use);
 
+		if (active_cmd_list->cmd.is_blocking)
+			pdev_queue->blocking_cmd_waiting--;
+
 		wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
 
 		wlan_serialization_activate_cmd(active_cmd_list, ser_pdev_obj,
@@ -371,20 +422,27 @@ wlan_ser_move_non_scan_pending_to_active(
 
 		wlan_serialization_acquire_lock(&pdev_queue->pdev_queue_lock);
 
-		if (vdev_queue_lookup)
+		if (vdev_queue_lookup || pdev_queue->blocking_cmd_active)
 			break;
 
-		pending_node = NULL;
+		qsize =  wlan_serialization_list_size(pending_queue);
+		if (!qsize) {
+			wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
+			goto error;
+		}
 
-		if (active_cmd_list->cmd.is_blocking) {
-			pdev_queue->blocking_cmd_waiting--;
-			break;
+		qdf_status = wlan_serialization_peek_front(pending_queue,
+							   &pending_node);
+		if (qdf_status != QDF_STATUS_SUCCESS) {
+			ser_err("can't peek cmd");
+			wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
+			goto error;
 		}
 	}
 
 	wlan_serialization_release_lock(&pdev_queue->pdev_queue_lock);
 error:
-	ser_exit();
+
 	return status;
 }
 
@@ -399,12 +457,6 @@ QDF_STATUS wlan_ser_remove_non_scan_cmd(
 	uint32_t vdev_id;
 	bool blocking_cmd_removed = 0;
 	struct wlan_serialization_pdev_queue *pdev_queue;
-
-	ser_debug("remove non scan cmd: type[%d] id[%d] prio[%d] blocking[%d]",
-		  cmd->cmd_type,
-		  cmd->cmd_id,
-		  cmd->is_high_priority,
-		  cmd->is_blocking);
 
 	vdev_status =
 		wlan_serialization_remove_cmd_from_vdev_queue(ser_pdev_obj,
@@ -424,7 +476,8 @@ QDF_STATUS wlan_ser_remove_non_scan_cmd(
 	if (vdev_status != QDF_STATUS_SUCCESS) {
 		status = vdev_status;
 		if (vdev_status != QDF_STATUS_E_PENDING)
-			ser_debug("Failed to remove cmd from vdev queue");
+			ser_debug("Failed to remove type %d id %d from vdev queue",
+				  cmd->cmd_type, cmd->cmd_id);
 		goto error;
 	}
 
@@ -435,7 +488,8 @@ QDF_STATUS wlan_ser_remove_non_scan_cmd(
 							      is_active_cmd);
 
 	if (pdev_status != QDF_STATUS_SUCCESS) {
-		ser_err("Failed to remove cmd from pdev active/pending queue");
+		ser_debug("Failed to remove type %d id %d from pdev active/pending queue",
+			  cmd->cmd_type, cmd->cmd_id);
 		goto error;
 	}
 
@@ -448,7 +502,7 @@ QDF_STATUS wlan_ser_remove_non_scan_cmd(
 			pdev_queue->blocking_cmd_active = 0;
 
 		vdev_id = wlan_vdev_get_id(cmd->vdev);
-		pdev_queue->vdev_active_cmd_bitmap &= ~(1 << vdev_id);
+		qdf_clear_bit(vdev_id, pdev_queue->vdev_active_cmd_bitmap);
 	}
 
 	status = QDF_STATUS_SUCCESS;
@@ -479,8 +533,6 @@ wlan_ser_cancel_non_scan_cmd(
 	QDF_STATUS qdf_status;
 	QDF_STATUS pdev_status, vdev_status;
 	struct wlan_ser_vdev_obj *ser_vdev_obj;
-
-	ser_enter();
 
 	pdev_q = wlan_serialization_get_pdev_queue_obj(ser_pdev_obj, cmd_type);
 
@@ -648,16 +700,11 @@ wlan_ser_cancel_non_scan_cmd(
 		 */
 		if (cmd_bkup.cmd_cb) {
 			/* caller should now do necessary clean up */
-			ser_debug("cmd cb: type[%d] id[%d]",
-				  cmd_bkup.cmd_type,
-				  cmd_bkup.cmd_id);
-			ser_debug("reason: WLAN_SER_CB_CANCEL_CMD");
-			cmd_bkup.cmd_cb(&cmd_bkup,
-					WLAN_SER_CB_CANCEL_CMD);
+			ser_debug("Cancel command: type %d id %d and Release memory",
+				  cmd_bkup.cmd_type, cmd_bkup.cmd_id);
+			cmd_bkup.cmd_cb(&cmd_bkup, WLAN_SER_CB_CANCEL_CMD);
 			/* caller should release the memory */
-			ser_debug("reason: WLAN_SER_CB_RELEASE_MEM_CMD");
-			cmd_bkup.cmd_cb(&cmd_bkup,
-					WLAN_SER_CB_RELEASE_MEM_CMD);
+			cmd_bkup.cmd_cb(&cmd_bkup, WLAN_SER_CB_RELEASE_MEM_CMD);
 		}
 
 		wlan_serialization_acquire_lock(&pdev_q->pdev_queue_lock);
@@ -665,10 +712,14 @@ wlan_ser_cancel_non_scan_cmd(
 		if (is_active_queue) {
 			if (is_blocking)
 				pdev_q->blocking_cmd_active = 0;
-			pdev_q->vdev_active_cmd_bitmap &= ~(1 << vdev_id);
-			ser_debug("pdev_q->vdev_active_cmd_bitmap %x after reseting for vdev %d",
-				  pdev_q->vdev_active_cmd_bitmap,
+
+			qdf_clear_bit(vdev_id, pdev_q->vdev_active_cmd_bitmap);
+
+			ser_debug("active_cmd_bitmap after resetting vdev %d",
 				  vdev_id);
+			ser_debug_hex(pdev_q->vdev_active_cmd_bitmap,
+				      sizeof(pdev_q->vdev_active_cmd_bitmap));
+
 		} else {
 			if (is_blocking)
 				pdev_q->blocking_cmd_waiting--;
@@ -683,6 +734,5 @@ wlan_ser_cancel_non_scan_cmd(
 
 	wlan_serialization_release_lock(&pdev_q->pdev_queue_lock);
 
-	ser_exit();
 	return status;
 }

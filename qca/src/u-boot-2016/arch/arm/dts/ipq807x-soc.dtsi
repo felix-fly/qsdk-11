@@ -21,21 +21,6 @@
 		reg = <0x78B3000 0x200>;
 		id = <4>;
 		bit_rate = <0xee>;
-		serial_gpio {
-			gpio1 {
-				gpio = <23>;
-				func = <2>;
-				pull = <GPIO_PULL_DOWN>;
-				oe = <GPIO_OE_ENABLE>;
-			};
-
-			gpio2 {
-				gpio = <24>;
-				func = <2>;
-				pull = <GPIO_NO_PULL>;
-				oe = <GPIO_OE_ENABLE>;
-			};
-		};
 	};
 
 	serial@78B0000 {
@@ -76,51 +61,6 @@
 		compatible = "qcom,spi-qup-v2.7.0";
 		wr_pipe_0 = <12>;
 		rd_pipe_0 = <13>;
-		spi_gpio {
-			gpio1 {
-				gpio = <38>;
-				func = <3>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
-				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
-				pu_res = <GPIO_PULL_RES2>;
-			};
-
-			gpio2 {
-				gpio = <39>;
-				func = <3>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
-				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
-				pu_res = <GPIO_PULL_RES2>;
-			};
-
-			gpio3 {
-				gpio = <40>;
-				func = <2>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
-				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
-				pu_res = <GPIO_PULL_RES2>;
-			};
-
-			gpio4 {
-				gpio = <41>;
-				func = <2>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
-				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
-				pu_res = <GPIO_PULL_RES2>;
-			};
-		};
 	};
 
 	nand: nand-controller@79B0000 {
@@ -128,109 +68,6 @@
 		#size-cells = <0>;
 		compatible = "qcom,qpic-nand.1.5.20";
 		reg = <0x79B0000 0x10000>;
-
-		nand_gpio {
-			gpio1 {
-				gpio = <1>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio2 {
-				gpio = <3>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio3 {
-				gpio = <4>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio4 {
-				gpio = <5>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio5 {
-				gpio = <6>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio6 {
-				gpio = <7>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio7 {
-				gpio = <8>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio8 {
-				gpio = <10>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio9 {
-				gpio = <11>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio10 {
-				gpio = <12>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio11 {
-				gpio = <13>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio12 {
-				gpio = <14>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio13 {
-				gpio = <15>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-			gpio14 {
-				gpio = <17>;
-				func = <1>;
-				pull = <GPIO_PULL_UP>;
-				drvstr = <GPIO_8MA>;
-				oe = <GPIO_OE_DISABLE>;
-			};
-
-		};
-
 	};
 
 	xhci@8a00000 {

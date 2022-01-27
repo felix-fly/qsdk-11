@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -15,6 +15,7 @@
 #include "ssdk_init.h"
 #include "ssdk_plat.h"
 #include "ssdk_clk.h"
+#include "ssdk_dts.h"
 #if defined(HPPE)
 #include "adpt_hppe.h"
 #endif
@@ -31,7 +32,6 @@
 #include <linux/clkdev.h>
 #endif
 
-#ifdef HAWKEYE_CHIP
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 struct device_node *clock_node = NULL;
 static struct clk *uniphy_port_clks[UNIPHYT_CLK_MAX] = {0};
@@ -46,6 +46,11 @@ void ssdk_clock_rate_set_and_enable(
 {
 	struct clk *clk;
 
+	if(ssdk_is_emulation(0)){
+		SSDK_INFO("clock_id %s rate %d on emulation platform\n",clock_id, rate);
+		return;
+	}
+
 	clk = of_clk_get_by_name(node, clock_id);
 	if (!IS_ERR(clk)) {
 		if (rate)
@@ -57,6 +62,11 @@ void ssdk_clock_rate_set_and_enable(
 
 void ssdk_gcc_reset(struct reset_control *rst, a_uint32_t action)
 {
+	if(ssdk_is_emulation(0)){
+		SSDK_INFO("action %d on emulation platform\n",action);
+		return;
+	}
+
 	if (action == SSDK_RESET_ASSERT)
 		reset_control_assert(rst);
 	else
@@ -114,6 +124,12 @@ void ssdk_uniphy_clock_rate_set(
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	struct clk *uniphy_clk;
 
+	if(ssdk_is_emulation(dev_id)){
+		SSDK_INFO("clock_type %d rate %d on emulation platform\n",
+					clock_type, rate);
+		return;
+	}
+
 	uniphy_clk = uniphy_port_clks[clock_type];
 	if (!IS_ERR(uniphy_clk)) {
 		if (rate)
@@ -133,6 +149,12 @@ void ssdk_uniphy_clock_enable(
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 	struct clk *uniphy_clk;
 
+	if(ssdk_is_emulation(dev_id)){
+		SSDK_INFO("clock_type %d enable %d on emulation platform\n",
+					clock_type, enable);
+		return;
+	}
+
 	uniphy_clk = uniphy_port_clks[clock_type];
 	if (!IS_ERR(uniphy_clk)) {
 		if (enable) {
@@ -148,10 +170,8 @@ void ssdk_uniphy_clock_enable(
 
 }
 
-/* below special for ppe */
-#if defined(HPPE)
-
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+#if defined(HPPE) || defined(MP)
 struct clk_uniphy {
 	struct clk_hw hw;
 	u8 uniphy_index;
@@ -200,6 +220,9 @@ static const struct clk_ops clk_uniphy_ops = {
 	.determine_rate = uniphy_clks_determine_rate,
 	.set_rate = uniphy_clks_set_rate,
 };
+#endif
+
+#if defined(HPPE)
 
 static struct clk_uniphy uniphy0_gcc_rx_clk = {
                 .hw.init = &(struct clk_init_data){
@@ -439,21 +462,346 @@ static void ssdk_ppe_fixed_clock_init(a_uint32_t revision)
 					SNOC_NSSNOC_CLK, NSSNOC_SNOC_RATE);
 	}
 }
+#endif
 
-#define CMN_BLK_ADDR	0x0009B780
-#define CMN_BLK_SIZE	0x100
-static void ssdk_ppe_cmnblk_init(void)
+#if defined(MP)
+#define TCSR_ETH_ADDR               0x19475C0
+#define TCSR_ETH_SIZE               0x4
+#define TCSR_GEPHY_LDO_BIAS_EN      0
+#define TCSR_ETH_LDO_RDY            0x4
+
+#define GEPHY_LDO_BIAS_EN           0x1
+#define ETH_LDO_RDY                 0x1
+#define CMN_PLL_LOCKED_ADDR         0x9B064
+#define CMN_PLL_LOCKED_SIZE         0x4
+#define CMN_PLL_LOCKED              0x4
+#define MP_RAW_CLOCK_INSTANCE       0x2
+
+static char *mp_rst_ids[MP_BCR_RST_MAX] = {
+	GEHPY_BCR_RESET_ID,
+	UNIPHY_BCR_RESET_ID,
+	GMAC0_BCR_RESET_ID,
+	GMAC1_BCR_RESET_ID,
+	GEPHY_MISC_RESET_ID
+};
+
+static struct clk_uniphy gephy_gcc_rx_clk = {
+	.hw.init = &(struct clk_init_data){
+	.name = "gephy_gcc_rx",
+	.ops = &clk_uniphy_ops,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0))
+	.flags = CLK_IS_ROOT,
+#endif
+	},
+	.uniphy_index = 0,
+	.dir = UNIPHY_RX,
+	.rate = UNIPHY_DEFAULT_RATE,
+};
+
+static struct clk_uniphy gephy_gcc_tx_clk = {
+	.hw.init = &(struct clk_init_data){
+	.name = "gephy_gcc_tx",
+	.ops = &clk_uniphy_ops,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0))
+	.flags = CLK_IS_ROOT,
+#endif
+	},
+	.uniphy_index = 0,
+	.dir = UNIPHY_TX,
+	.rate = UNIPHY_DEFAULT_RATE,
+};
+
+static struct clk_uniphy uniphy_gcc_rx_clk = {
+	.hw.init = &(struct clk_init_data){
+	.name = "uniphy_gcc_rx",
+	.ops = &clk_uniphy_ops,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0))
+	.flags = CLK_IS_ROOT,
+#endif
+	},
+	.uniphy_index = 1,
+	.dir = UNIPHY_RX,
+	.rate = UNIPHY_DEFAULT_RATE,
+};
+
+static struct clk_uniphy uniphy_gcc_tx_clk = {
+	.hw.init = &(struct clk_init_data){
+	.name = "uniphy_gcc_tx",
+	.ops = &clk_uniphy_ops,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0))
+	.flags = CLK_IS_ROOT,
+#endif
+	},
+	.uniphy_index = 1,
+	.dir = UNIPHY_TX,
+	.rate = UNIPHY_DEFAULT_RATE,
+};
+
+static struct clk_hw *mp_raw_clks[MP_RAW_CLOCK_INSTANCE * 2] = {
+	&gephy_gcc_rx_clk.hw, &gephy_gcc_tx_clk.hw,
+	&uniphy_gcc_rx_clk.hw, &uniphy_gcc_tx_clk.hw,
+};
+
+static void ssdk_mp_fixed_clock_init(void)
+{
+	ssdk_clock_rate_set_and_enable(clock_node, CMN_AHB_CLK, 0);
+	ssdk_clock_rate_set_and_enable(clock_node, CMN_SYS_CLK, 0);
+	ssdk_clock_rate_set_and_enable(clock_node, UNIPHY_AHB_CLK,
+				UNIPHY_AHB_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				UNIPHY_SYS_CLK,
+				MP_UNIPHY_SYS_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				MDIO0_AHB_CLK, MDIO_AHB_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				MDIO1_AHB_CLK, MDIO_AHB_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC0_CFG_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC0_SYS_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC1_CFG_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC1_SYS_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC0_PTP_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				GMAC1_PTP_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				SNOC_GMAC0_AHB_CLK, GMAC_CLK_RATE);
+	ssdk_clock_rate_set_and_enable(clock_node,
+				SNOC_GMAC1_AHB_CLK, GMAC_CLK_RATE);
+}
+
+static void ssdk_mp_uniphy_clock_init(void)
+{
+	a_uint32_t i, inst_num;
+	struct clk *clk;
+	struct clk **ports;
+
+	inst_num = sizeof(mp_raw_clks) / sizeof(struct clk_hw *);
+
+	for (i = 0; i < inst_num; i++) {
+		clk = clk_register(NULL, mp_raw_clks[i]);
+		if (IS_ERR(clk))
+			SSDK_ERROR("Clk register %d fail!\n", i);
+	}
+
+	ports = uniphy_port_clks;
+	ports[NSS_PORT1_RX_CLK_E] = of_clk_get_by_name(clock_node,
+					NSS_PORT1_RX_CLK);
+	ports[NSS_PORT1_TX_CLK_E] = of_clk_get_by_name(clock_node,
+					NSS_PORT1_TX_CLK);
+	ports[NSS_PORT2_RX_CLK_E] = of_clk_get_by_name(clock_node,
+					NSS_PORT2_RX_CLK);
+	ports[NSS_PORT2_TX_CLK_E] = of_clk_get_by_name(clock_node,
+					NSS_PORT2_TX_CLK);
+	ports[UNIPHY0_PORT1_RX_CLK_E] = of_clk_get_by_name(clock_node,
+					UNIPHY0_PORT1_RX_CLK);
+	ports[UNIPHY0_PORT1_TX_CLK_E] = of_clk_get_by_name(clock_node,
+					UNIPHY0_PORT1_TX_CLK);
+	ports[UNIPHY1_PORT5_RX_CLK_E] = of_clk_get_by_name(clock_node,
+					UNIPHY1_PORT5_RX_CLK);
+	ports[UNIPHY1_PORT5_TX_CLK_E] = of_clk_get_by_name(clock_node,
+					UNIPHY1_PORT5_TX_CLK);
+}
+
+static void ssdk_mp_uniphy_clock_enable(void)
+{
+	ssdk_uniphy_clock_enable(0, NSS_PORT1_RX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, NSS_PORT1_TX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, NSS_PORT2_RX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, NSS_PORT2_TX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, UNIPHY0_PORT1_RX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, UNIPHY0_PORT1_TX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, UNIPHY1_PORT5_RX_CLK_E, A_TRUE);
+	ssdk_uniphy_clock_enable(0, UNIPHY1_PORT5_TX_CLK_E, A_TRUE);
+}
+
+static void
+ssdk_mp_tcsr_get(a_uint32_t tcsr_offset, a_uint32_t *tcsr_val)
+{
+	void __iomem *tcsr_base = NULL;
+
+	tcsr_base = ioremap_nocache(TCSR_ETH_ADDR, TCSR_ETH_SIZE);
+	if (!tcsr_base)
+	{
+		SSDK_ERROR("Failed to map tcsr eth address!\n");
+		return;
+	}
+	*tcsr_val = readl(tcsr_base + tcsr_offset);
+	iounmap(tcsr_base);
+
+	return;
+}
+
+static void
+ssdk_mp_tcsr_set(a_uint32_t tcsr_offset, a_uint32_t tcsr_val)
+{
+	void __iomem *tcsr_base = NULL;
+
+	tcsr_base = ioremap_nocache(TCSR_ETH_ADDR, TCSR_ETH_SIZE);
+	if (!tcsr_base)
+	{
+		SSDK_ERROR("Failed to map tcsr eth address!\n");
+		return;
+	}
+	writel(tcsr_val, tcsr_base + tcsr_offset);
+	iounmap(tcsr_base);
+
+	return;
+}
+
+static void
+ssdk_mp_cmnblk_enable(void)
+{
+	a_uint32_t reg_val;
+
+	ssdk_mp_tcsr_get(TCSR_ETH_LDO_RDY, &reg_val);
+	reg_val |= ETH_LDO_RDY;
+	ssdk_mp_tcsr_set(TCSR_ETH_LDO_RDY, reg_val);
+
+	return;
+}
+
+void
+ssdk_mp_gephy_icc_efuse_load_enable(a_bool_t enable)
+{
+	a_uint32_t reg_val;
+
+	ssdk_mp_tcsr_get(TCSR_GEPHY_LDO_BIAS_EN, &reg_val);
+	if(!enable)
+	{
+		reg_val |= GEPHY_LDO_BIAS_EN;
+	}
+	else
+	{
+		reg_val &= ~GEPHY_LDO_BIAS_EN;
+	}
+	ssdk_mp_tcsr_set(TCSR_GEPHY_LDO_BIAS_EN, reg_val);
+}
+
+static a_bool_t
+ssdk_mp_cmnblk_stable_check(void)
+{
+	void __iomem *pll_lock = NULL;
+	a_uint32_t reg_val;
+	int i, loops = 20;
+
+	pll_lock = ioremap_nocache(CMN_PLL_LOCKED_ADDR, CMN_PLL_LOCKED_SIZE);
+	if (!pll_lock) {
+		SSDK_ERROR("Failed to map CMN PLL LOCK register!\n");
+		return A_FALSE;
+	}
+
+	for (i = 0; i < loops; i++) {
+		reg_val = readl(pll_lock);
+		if (reg_val & CMN_PLL_LOCKED) {
+			break;
+		}
+		msleep(10);
+	}
+
+	iounmap(pll_lock);
+
+	if (i >= loops) {
+		return A_FALSE;
+	} else {
+		return A_TRUE;
+	}
+}
+
+static void
+ssdk_mp_reset_init(void)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	struct reset_control *rst;
+	a_uint32_t i;
+
+	rst_node = of_find_node_by_name(NULL, "ess-switch");
+
+	for (i = 0; i < MP_BCR_RST_MAX; i++) {
+		rst = of_reset_control_get(rst_node, mp_rst_ids[i]);
+		if (IS_ERR(rst)) {
+			SSDK_ERROR("%s not exist!\n", mp_rst_ids[i]);
+			return;
+		}
+		ssdk_gcc_reset(rst, SSDK_RESET_ASSERT);
+		msleep(200);
+		ssdk_gcc_reset(rst, SSDK_RESET_DEASSERT);
+		msleep(200);
+		reset_control_put(rst);
+	}
+
+	i = UNIPHY1_SOFT_RESET_E;
+	uniphy_rsts[i] = of_reset_control_get(rst_node, UNIPHY1_SOFT_RESET_ID);
+
+	SSDK_INFO("MP reset successfully!\n");
+#endif
+}
+
+static void ssdk_cmnblk_pll_src_set(enum cmnblk_pll_src_type pll_source)
+{
+	void __iomem *cmn_pll_src_base = NULL;
+	a_uint32_t reg_val;
+
+	cmn_pll_src_base = ioremap_nocache(CMN_BLK_PLL_SRC_ADDR, CMN_BLK_SIZE);
+	if (!cmn_pll_src_base) {
+		SSDK_ERROR("Failed to map cmn pll source address!\n");
+		return;
+	}
+	reg_val = readl(cmn_pll_src_base);
+	reg_val = (reg_val & PLL_CTRL_SRC_MASK) | (pll_source << 0x8);
+	writel(reg_val, cmn_pll_src_base);
+	iounmap(cmn_pll_src_base);
+
+	return;
+}
+#endif
+#endif
+
+#if defined(HPPE) || defined(MP)
+static void ssdk_cmnblk_init(enum cmnblk_clk_type mode)
 {
 	void __iomem *gcc_pll_base = NULL;
 	a_uint32_t reg_val;
 
 	gcc_pll_base = ioremap_nocache(CMN_BLK_ADDR, CMN_BLK_SIZE);
 	if (!gcc_pll_base) {
-		SSDK_ERROR("can't map gcc pll address!\n");
+		SSDK_ERROR("Failed to map gcc pll address!\n");
 		return;
 	}
 	reg_val = readl(gcc_pll_base + 4);
-	reg_val = (reg_val & 0xfffffff0) | 0x7;
+
+	switch (mode) {
+		case INTERNAL_48MHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | INTERNAL_48MHZ_CLOCK;
+			break;
+		case EXTERNAL_50MHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | EXTERNAL_50MHZ_CLOCK;
+			break;
+		case EXTERNAL_25MHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | EXTERNAL_25MHZ_CLOCK;
+			break;
+		case EXTERNAL_31250KHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | EXTERNAL_31250KHZ_CLOCK;
+			break;
+		case EXTERNAL_40MHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | EXTERNAL_40MHZ_CLOCK;
+			break;
+		case EXTERNAL_48MHZ:
+			reg_val = (reg_val & FREQUENCY_MASK) | EXTERNAL_48MHZ_CLOCK;
+			break;
+#if defined(MP)
+		case INTERNAL_96MHZ:
+			ssdk_cmnblk_pll_src_set(CMN_BLK_PLL_SRC_SEL_FROM_REG);
+			reg_val = (reg_val & PLL_REFCLK_DIV_MASK) | PLL_REFCLK_DIV_2;
+			break;
+#endif
+		default:
+			return;
+	}
+
 	writel(reg_val, gcc_pll_base + 0x4);
 	reg_val = readl(gcc_pll_base);
 	reg_val = reg_val | 0x40;
@@ -469,7 +817,6 @@ static void ssdk_ppe_cmnblk_init(void)
 
 	iounmap(gcc_pll_base);
 }
-#endif
 
 void ssdk_port_mac_clock_reset(
 	a_uint32_t dev_id,
@@ -483,7 +830,9 @@ void ssdk_port_mac_clock_reset(
 #endif
 	return;
 }
+#endif
 
+#if defined(HPPE)
 static
 void ssdk_uniphy1_clock_source_set(void)
 {
@@ -493,28 +842,6 @@ void ssdk_uniphy1_clock_source_set(void)
 	clk_set_parent(uniphy_port_clks[PORT5_TX_SRC_E],
 			uniphy_raw_clks[3]->clk);
 #endif
-}
-
-void ssdk_ppe_clock_init(void)
-{
-#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
-	a_uint32_t revision = HPPE_REVISION;
-
-	clock_node = of_find_node_by_name(NULL, "ess-switch");
-
-	if (of_device_is_compatible(clock_node, "qcom,ess-switch-ipq807x")) {
-		revision = HPPE_REVISION;
-	} else if (of_device_is_compatible(clock_node,
-			"qcom,ess-switch-ipq60xx")) {
-		revision = CPPE_REVISION;
-	}
-
-	ssdk_ppe_fixed_clock_init(revision);
-	/*fixme for cmn clock init*/
-	ssdk_ppe_cmnblk_init();
-	ssdk_ppe_uniphy_clock_init(revision);
-#endif
-	SSDK_INFO("ppe and uniphy clock init successfully!\n");
 }
 
 void ssdk_uniphy_raw_clock_reset(a_uint8_t uniphy_index)
@@ -539,7 +866,7 @@ void ssdk_uniphy_raw_clock_set(
 	a_uint32_t clock)
 {
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
-	a_uint32_t old_clock, id;
+	a_uint32_t old_clock, id, mode;
 
 	if ((uniphy_index >= SSDK_MAX_UNIPHY_INSTANCE) ||
 	     (direction > UNIPHY_TX) ||
@@ -565,12 +892,145 @@ void ssdk_uniphy_raw_clock_set(
 			SSDK_ERROR("set rate: %d fail!\n", clock);
 	}
 
-	if (uniphy_index == SSDK_UNIPHY_INSTANCE1) {
+	mode = ssdk_dt_global_get_mac_mode(0, SSDK_UNIPHY_INSTANCE1);
+	if (((uniphy_index == SSDK_UNIPHY_INSTANCE0) &&
+	     (mode == PORT_INTERFACE_MODE_MAX)) ||
+	    (uniphy_index == SSDK_UNIPHY_INSTANCE1)) {
 		if (clk_set_parent(uniphy_port_clks[PORT5_RX_SRC_E + direction],
 				uniphy_raw_clks[id]->clk))
 			SSDK_ERROR("set parent fail!\n");
 	}
 #endif
+}
+
+void ssdk_uniphy_port5_clock_source_set(void)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	a_uint32_t id, mode, i;
+
+	mode = ssdk_dt_global_get_mac_mode(0, SSDK_UNIPHY_INSTANCE1);
+
+	for (i = UNIPHY_RX; i <= UNIPHY_TX; i++) {
+		if (mode == PORT_INTERFACE_MODE_MAX) {
+			id = SSDK_UNIPHY_INSTANCE0*2 + i;
+		} else {
+			id = SSDK_UNIPHY_INSTANCE1*2 + i;
+		}
+		if (clk_set_parent(uniphy_port_clks[PORT5_RX_SRC_E + i],
+			uniphy_raw_clks[id]->clk)) {
+			SSDK_ERROR("set parent fail!\n");
+		}
+	}
+#endif
+}
+
+static
+void ssdk_gcc_ppe_clock_init(a_uint32_t revision, enum cmnblk_clk_type mode)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	ssdk_ppe_fixed_clock_init(revision);
+	/*fixme for cmn clock init*/
+	ssdk_cmnblk_init(mode);
+	ssdk_ppe_uniphy_clock_init(revision);
+	ssdk_uniphy_port5_clock_source_set();
+#endif
+}
+#endif
+
+#if defined(MP)
+void ssdk_gcc_mp_clock_init(enum cmnblk_clk_type mode)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	ssdk_mp_fixed_clock_init();
+	ssdk_mp_uniphy_clock_init();
+	ssdk_cmnblk_init(mode);
+	msleep(200);
+	ssdk_mp_cmnblk_enable();
+	if (ssdk_mp_cmnblk_stable_check()) {
+		ssdk_mp_reset_init();
+		ssdk_mp_uniphy_clock_enable();
+	} else {
+		SSDK_ERROR("Cmnblock is still not stable!\n");
+	}
+#endif
+}
+
+void ssdk_mp_raw_clock_set(
+	a_uint8_t uniphy_index,
+	a_uint8_t direction,
+	a_uint32_t clock)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	a_uint32_t old_clock, id;
+
+	if ((uniphy_index >= MP_RAW_CLOCK_INSTANCE) ||
+	     (direction > UNIPHY_TX) ||
+	     (clock != UNIPHY_CLK_RATE_125M &&
+	      clock != UNIPHY_CLK_RATE_312M))
+		return;
+
+	if(ssdk_is_emulation(0)){
+		SSDK_INFO("uniphy_index %d direction %d clock %d on emulation platform\n",
+					uniphy_index, direction, clock);
+		return;
+	}
+
+	id = uniphy_index*2 + direction;
+	old_clock = clk_get_rate(mp_raw_clks[id]->clk);
+
+	if (clock != old_clock) {
+		if (clk_set_rate(mp_raw_clks[id]->clk, clock))
+			SSDK_ERROR("set rate: %d fail!\n", clock);
+	}
+#endif
+}
+
+#endif
+
+#if defined(HPPE) || defined(MP)
+void ssdk_gcc_clock_init(void)
+{
+#if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
+	enum cmnblk_clk_type cmnblk_clk_mode = INTERNAL_48MHZ;
+	a_uint8_t *mode = NULL;
+
+	clock_node = of_find_node_by_name(NULL, "ess-switch");
+	if (of_property_read_string(clock_node, "cmnblk_clk",
+				    (const char **)&mode)) {
+		cmnblk_clk_mode = INTERNAL_48MHZ;
+	} else {
+		if (!strcmp(mode, "external_50MHz")) {
+			cmnblk_clk_mode = EXTERNAL_50MHZ;
+		} else if (!strcmp(mode, "external_25MHz")) {
+			cmnblk_clk_mode = EXTERNAL_25MHZ;
+		} else if (!strcmp(mode, "external_31250KHz")) {
+			cmnblk_clk_mode = EXTERNAL_31250KHZ;
+		} else if (!strcmp(mode, "external_40MHz")) {
+			cmnblk_clk_mode = EXTERNAL_40MHZ;
+		} else if (!strcmp(mode, "external_48MHz")) {
+			cmnblk_clk_mode = EXTERNAL_48MHZ;
+		} else if (!strcmp(mode, "internal_96MHz")) {
+			cmnblk_clk_mode = INTERNAL_96MHZ;
+		}
+	}
+
+	if (of_device_is_compatible(clock_node, "qcom,ess-switch-ipq807x")) {
+#if defined(HPPE)
+		ssdk_gcc_ppe_clock_init(HPPE_REVISION, cmnblk_clk_mode);
+#endif
+	} else if (of_device_is_compatible(clock_node,
+			"qcom,ess-switch-ipq60xx")) {
+#if defined(HPPE)
+		ssdk_gcc_ppe_clock_init(CPPE_REVISION, cmnblk_clk_mode);
+#endif
+	} else if (of_device_is_compatible(clock_node,
+			"qcom,ess-switch-ipq50xx")) {
+#if defined(MP)
+		ssdk_gcc_mp_clock_init(cmnblk_clk_mode);
+#endif
+	}
+#endif
+	SSDK_INFO("SSDK gcc clock init successfully!\n");
 }
 
 void
@@ -704,7 +1164,9 @@ ssdk_port_speed_clock_set(
 	a_uint32_t port_id,
 	a_uint32_t rate)
 {
+#if defined(HPPE)
 	a_uint32_t mode = 0;
+#endif
 
                switch (port_id ) {
 		case SSDK_PHYSICAL_PORT1:
@@ -719,6 +1181,7 @@ ssdk_port_speed_clock_set(
 			ssdk_uniphy_clock_rate_set(dev_id,
 					NSS_PORT2_TX_CLK_E, rate);
 			break;
+#if defined(HPPE)
 		case SSDK_PHYSICAL_PORT3:
 			ssdk_uniphy_clock_rate_set(dev_id,
 					NSS_PORT3_RX_CLK_E, rate);
@@ -746,11 +1209,14 @@ ssdk_port_speed_clock_set(
 			ssdk_uniphy_clock_rate_set(dev_id,
 					NSS_PORT6_TX_CLK_E, rate);
 			break;
+#endif
 		default:
 			break;
 	}
 }
+#endif
 
+#if defined(HPPE)
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0))
 static char *ppe_rst_ids[UNIPHY_RST_MAX] = {
 	UNIPHY0_SOFT_RESET_ID,
@@ -795,6 +1261,7 @@ void ssdk_ppe_reset_init(void)
 	msleep(100);
 	ssdk_gcc_reset(rst, SSDK_RESET_DEASSERT);
 	msleep(100);
+	reset_control_put(rst);
 	SSDK_INFO("ppe reset successfully!\n");
 
 	for (i = UNIPHY0_SOFT_RESET_E; i < UNIPHY_RST_MAX; i++)
@@ -806,31 +1273,33 @@ void ssdk_ppe_reset_init(void)
 							port_rst_ids[i-1]);
 #endif
 }
-#endif
-#endif
 
-#ifndef HAWKEYE_CHIP
-#if defined(HPPE)
-sw_error_t
-qca_cppe_fpga_xgmac_clock_enable(a_uint32_t dev_id)
+void ssdk_gcc_uniphy_sys_set(a_uint32_t dev_id, a_uint32_t uniphy_index,
+	a_bool_t enable)
 {
-	void __iomem *cppe_xgmac_clock_base;
+	enum unphy_rst_type rst_type;
 
-	cppe_xgmac_clock_base = ioremap_nocache(CPPE_XGMAC_CLK_REG,
-		CPPE_XGMAC_CLK_SIZE);
-	if (!cppe_xgmac_clock_base) {
-		SSDK_INFO("can't get cppe xgmac clock address!\n");
-		return -1;
+	if (of_device_is_compatible(clock_node, "qcom,ess-switch-ipq60xx")){
+		if (uniphy_index > SSDK_UNIPHY_INSTANCE1) {
+			return;
+		}
 	}
-	/* RUMI specific clock configuration for enabling XGMAC */
-	writel(CPPE_XGMAC_CLK_ENABLE, cppe_xgmac_clock_base + 0);
-	iounmap(cppe_xgmac_clock_base);
-	SSDK_INFO("set cppe clock to enable XGMAC successfully!\n");
 
-	msleep(100);
+	if (uniphy_index == SSDK_UNIPHY_INSTANCE0) {
+		rst_type = UNIPHY0_SOFT_RESET_E;
+	} else if (uniphy_index == SSDK_UNIPHY_INSTANCE1) {
+		rst_type = UNIPHY1_SOFT_RESET_E;
+	} else {
+		rst_type = UNIPHY2_SOFT_RESET_E;
+	}
 
-	return SW_OK;
+	if (enable == A_TRUE) {
+		ssdk_uniphy_reset(dev_id, rst_type, SSDK_RESET_DEASSERT);
+	} else {
+		ssdk_uniphy_reset(dev_id, rst_type, SSDK_RESET_ASSERT);
+	}
+
+	return;
 }
-#endif
 #endif
 

@@ -262,6 +262,41 @@ int __qca_scm_call_armv8_32(u32 x0, u32 x1, u32 x2, u32 x3, u32 x4, u32 x5,
 	return r0;
 }
 
+/**
+ * __scm_call_64() - Invoke a syscall in the secure world
+ *  <at> svc_id: service identifier
+ *  <at> cmd_id: command identifier
+ *  <at> ownr_id: owner identifier
+ *  <at> fn_id: The function ID for this syscall
+ *  <at> desc: Descriptor structure containing arguments and return values
+ *
+ * Sends a command to the SCM and waits for the command to finish processing.
+ *
+ */
+static int __scm_call_64(u32 svc_id, u32 cmd_id, u32 ownr_id, struct qca_scm_desc *desc)
+{
+	int arglen = desc->arginfo & 0xf;
+	int ret;
+	u32 fn_id = QCA_SCM_FNID(svc_id, cmd_id, ownr_id);
+
+
+	if (arglen > QCA_MAX_ARG_LEN) {
+		printf("Error Extra args not supported\n");
+		hang();
+	}
+
+	desc->ret[0] = desc->ret[1] = desc->ret[2] = 0;
+
+	flush_dcache_all();
+
+	ret = __qca_scm_call_armv8_32(fn_id, desc->arginfo,
+			desc->args[0], desc->args[1],
+			desc->args[2], desc->x5,
+			&desc->ret[0], &desc->ret[1],
+			&desc->ret[2]);
+
+	return ret;
+}
 
 /**
  * scm_call_64() - Invoke a syscall in the secure world
@@ -275,26 +310,7 @@ int __qca_scm_call_armv8_32(u32 x0, u32 x1, u32 x2, u32 x3, u32 x4, u32 x5,
  */
 static int scm_call_64(u32 svc_id, u32 cmd_id, struct qca_scm_desc *desc)
 {
-	int arglen = desc->arginfo & 0xf;
-	int ret;
-	u32 fn_id = QCA_SCM_SIP_FNID(svc_id, cmd_id);
-
-
-	if (arglen > QCA_MAX_ARG_LEN) {
-		printf("Error Extra args not supported\n");
-		hang();
-	}
-
-	desc->ret[0] = desc->ret[1] = desc->ret[2] = 0;
-
-	flush_dcache_all();
-	ret = __qca_scm_call_armv8_32(fn_id, desc->arginfo,
-			desc->args[0], desc->args[1],
-			desc->args[2], desc->x5,
-			&desc->ret[0], &desc->ret[1],
-			&desc->ret[2]);
-
-	return ret;
+	return __scm_call_64(svc_id, cmd_id, SCM_OWNR_SIP, desc);
 }
 
 static enum scm_interface_version {
@@ -434,8 +450,12 @@ int qca_scm_fuseipq(u32 svc_id, u32 cmd_id, void *buf, size_t len)
 	if (is_scm_armv8())
 	{
 		struct qca_scm_desc desc = {0};
-
+#ifdef CONFIG_ARCH_IPQ5018
+		desc.arginfo = QCA_SCM_ARGS(2, SCM_READ_OP);
+		desc.args[1] = 0x800;
+#else
 		desc.arginfo = QCA_SCM_ARGS(1, SCM_READ_OP);
+#endif
 		desc.args[0] = *((unsigned int *)buf);
 
 		ret = scm_call_64(svc_id, cmd_id, &desc);
@@ -530,6 +550,85 @@ int qca_scm_secure_authenticate(void *cmd_buf, size_t cmd_len)
 
 	return ret;
 }
+
+#ifdef CONFIG_IPQ_BT_SUPPORT
+int qti_scm_otp(u32 peripheral)
+{
+	int ret;
+
+	if (is_scm_armv8())
+	{
+		struct qca_scm_desc desc = {0};
+
+		desc.arginfo = QCA_SCM_ARGS(1);
+		desc.args[0] = peripheral;
+
+		ret = scm_call_64(SCM_SVC_PIL, SCM_CMD_OTP, &desc);
+	}
+	else
+	{
+		u32 cmd = peripheral;
+
+		ret = scm_call(SCM_SVC_PIL, SCM_CMD_OTP, &cmd, sizeof(cmd),
+				NULL, 0);
+	}
+
+	return ret;
+}
+
+int qti_scm_pas_init_image(u32 peripheral, u32 addr)
+{
+	int ret;
+
+	if (is_scm_armv8())
+	{
+		struct qca_scm_desc desc = {0};
+
+		desc.arginfo = QCA_SCM_ARGS(2, SCM_VAL, SCM_IO_WRITE);
+		desc.args[0] = peripheral;
+		desc.args[1] = addr;
+
+		ret = scm_call_64(SCM_SVC_PIL, SCM_PAS_INIT_IMAGE_CMD, &desc);
+	}
+	else
+	{
+		struct {
+			u32 proc;
+			u32 image_addr;
+		} request;
+		request.proc = peripheral;
+		request.image_addr = addr;
+		ret = scm_call(SCM_SVC_PIL, SCM_PAS_INIT_IMAGE_CMD, &request,
+				sizeof(request), NULL, 0);
+	}
+
+	return ret;
+}
+
+int qti_pas_and_auth_reset(u32 peripheral)
+{
+	int ret;
+	u32 cmd = peripheral;
+
+	if (is_scm_armv8())
+	{
+		struct qca_scm_desc desc = {0};
+
+		desc.arginfo = QCA_SCM_ARGS(1);
+		desc.args[0] = peripheral;
+
+		ret = scm_call_64(SCM_SVC_PIL, SCM_PAS_AUTH_AND_RESET_CMD, &desc);
+	}
+	else
+	{
+		ret = scm_call(SCM_SVC_PIL, SCM_PAS_AUTH_AND_RESET_CMD, &cmd, sizeof(cmd),
+				NULL, 0);
+	}
+
+	return ret;
+}
+#endif
+
 #else
 int qca_scm_call(u32 svc_id, u32 cmd_id, void *buf, size_t len)
 {
@@ -553,6 +652,19 @@ int qca_scm_secure_authenticate(void *cmd_buf, size_t cmd_len)
 	return 0;
 }
 #endif
+
+int qca_scm_call_crypto_v8(u32 svc_id, u32 cmd_id, u32 *addr, u32 val)
+{
+        int ret = 0;
+        struct qca_scm_desc desc = {0};
+
+        desc.arginfo = QCA_SCM_ARGS(2, SCM_RW_OP, SCM_VAL);
+
+        desc.args[0] = (u32)addr;
+        desc.args[1] = val;
+        ret = scm_call_64(svc_id, cmd_id, &desc);
+        return ret;
+}
 
 int qca_scm_call_write(u32 svc_id, u32 cmd_id, u32 *addr, u32 val)
 {
@@ -603,6 +715,18 @@ int qca_scm_sdi(void)
 
         ret = scm_call(SCM_SVC_BOOT, SCM_CMD_TZ_CONFIG_HW_FOR_RAM_DUMP_ID, &clear_info,
                                 sizeof(clear_info), NULL, 0);
+
+        return ret;
+}
+
+int qca_scm_crypto(int cmd_id, void *req_ptr, uint32_t req_size)
+{
+        int ret;
+        if (is_scm_armv8())
+                ret = qca_scm_call_crypto_v8(SCM_SVC_CRYPTO, cmd_id,
+                                         (u32 *)req_ptr, req_size);
+        else
+		ret = -ENOTSUPP;
 
         return ret;
 }
@@ -663,3 +787,12 @@ int qca_scm_usb_mode_write(u32 arg1, u32 arg2)
 	return ret;
 }
 
+#ifdef CONFIG_IPQ_TZT
+int qca_scm(u32 svc_id, u32 cmd_id, u32 ownr_id, u32 *addr, u32 val)
+{
+	struct qca_scm_desc desc = {0};
+
+	memcpy(&desc, addr, sizeof(u32)*val);
+	return  __scm_call_64(svc_id, cmd_id, ownr_id, &desc);
+}
+#endif

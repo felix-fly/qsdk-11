@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, 2019 The Linux Foundation. All rights reserved.
 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,6 +15,11 @@
 #define ___QCA_COMMON_H_
 #include <asm/u-boot.h>
 #include <asm/arch-qca-common/smem.h>
+#include <asm/arch-qca-common/gpio.h>
+
+#ifdef CONFIG_ARCH_IPQ5018
+#include <asm/arch-ipq5018/clk.h>
+#endif
 
 #ifdef CONFIG_ARCH_IPQ6018
 #include <asm/arch-ipq6018/clk.h>
@@ -59,6 +64,23 @@ typedef struct {
 	u32 val[2];
 } add_node_t;
 
+typedef struct qca_gpio_config gpio_func_data_t;
+
+typedef struct  {
+	gpio_func_data_t *gpio;
+	unsigned int gpio_count;
+}spi_cfg_t;
+
+typedef struct  {
+	gpio_func_data_t *gpio;
+	unsigned int gpio_count;
+}qpic_nand_cfg_t;
+
+typedef struct {
+	spi_cfg_t spi_nor_cfg;
+	qpic_nand_cfg_t qpic_nand_cfg;
+}board_param_t;
+
 int qca_mmc_init(bd_t *, qca_mmc *);
 
 #if defined(CONFIG_QCA_MMC) && !defined(CONFIG_SDHCI_SUPPORT)
@@ -83,6 +105,7 @@ void aquantia_phy_reset_init(void);
 int bring_sec_core_up(unsigned int cpuid, unsigned int entry, unsigned int arg);
 int is_secondary_core_off(unsigned int cpuid);
 int smem_read_cpu_count(void);
+int get_soc_hw_version(void);
 
 struct dumpinfo_t{
 	char name[16]; /* use only file name in 8.3 format */
@@ -94,6 +117,7 @@ struct dumpinfo_t{
 			    */
 	uint32_t offset; /* offset to be added to start address */
 	uint32_t dump_level;
+	uint32_t to_compress; /* non-zero represent for compressed dump*/
 };
 extern struct dumpinfo_t dumpinfo_n[];
 extern int dump_entries_n;

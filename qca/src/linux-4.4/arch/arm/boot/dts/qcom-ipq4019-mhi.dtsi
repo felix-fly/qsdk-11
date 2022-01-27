@@ -22,7 +22,7 @@
 
 	soc {
 		wifi3: wifi3@f00000 {
-			compatible  = "qcom,cnss-qca6290";
+			compatible  = "qcom,cnss-qcn9000";
 			qcom,mhi = <&mhi_wlan>;
 			qcom,wlan-ramdump-dynamic = <0x400000>;
 			status = "disabled";

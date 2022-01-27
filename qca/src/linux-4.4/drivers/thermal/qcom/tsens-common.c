@@ -80,7 +80,7 @@ void compute_intercept_slope(struct tsens_device *tmdev, u32 *p1,
 	}
 }
 
-static inline int code_to_degc(u32 adc_code, const struct tsens_sensor *s)
+int code_to_degc(u32 adc_code, const struct tsens_sensor *s)
 {
 	int degc, num, den;
 

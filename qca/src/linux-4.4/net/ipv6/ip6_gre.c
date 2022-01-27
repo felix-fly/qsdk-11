@@ -1510,7 +1510,7 @@ static void ip6gre_tap_setup(struct net_device *dev)
 
 	dev->netdev_ops = &ip6gre_tap_netdev_ops;
 	dev->destructor = ip6gre_dev_free;
-	dev->priv_flags |= IFF_GRE_V6_TAP;
+	dev->priv_flags_ext |= IFF_EXT_GRE_V6_TAP;
 	dev->features |= NETIF_F_NETNS_LOCAL;
 }
 

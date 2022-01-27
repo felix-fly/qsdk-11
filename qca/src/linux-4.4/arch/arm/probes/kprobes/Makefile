@@ -1,3 +1,5 @@
+
+KASAN_SANITIZE := n
 obj-$(CONFIG_KPROBES)		+= core.o actions-common.o checkers-common.o
 obj-$(CONFIG_ARM_KPROBES_TEST)	+= test-kprobes.o
 test-kprobes-objs		:= test-core.o

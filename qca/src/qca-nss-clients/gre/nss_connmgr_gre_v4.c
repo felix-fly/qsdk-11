@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018, 2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -93,16 +93,17 @@ static int nss_connmgr_gre_v4_get_mac_address(uint32_t src_ip, uint32_t dest_ip,
 		return GRE_ERR_RADDR_ROUTE_LOOKUP;
 	}
 
-	rcu_read_lock();
-
 	neigh = dst_neigh_lookup(&rt->dst, (const void *)&raddr);
 	if (!neigh) {
 		neigh = neigh_lookup(&arp_tbl, (const void *)&raddr,  rt->dst.dev);
 	}
 
-	if (neigh && !is_valid_ether_addr(neigh->ha)) {
-		neigh_release(neigh);
-		neigh = NULL;
+	if (neigh) {
+		if (!(neigh->nud_state & NUD_VALID) || !is_valid_ether_addr(neigh->ha)) {
+			nss_connmgr_gre_info("neigh lookup failed for %pI4, state=%x, neigh->ha=%pM\n", &raddr, neigh->nud_state, neigh->ha);
+			neigh_release(neigh);
+			neigh = NULL;
+		}
 	}
 
 	/*
@@ -112,7 +113,6 @@ static int nss_connmgr_gre_v4_get_mac_address(uint32_t src_ip, uint32_t dest_ip,
 		neigh = neigh_create(&arp_tbl, &raddr, rt->dst.dev);
 		if (IS_ERR_OR_NULL(neigh)) {
 			nss_connmgr_gre_warning("Unable to create ARP request neigh for %pI4\n", &raddr);
-			rcu_read_unlock();
 			ip_rt_put(rt);
 			return GRE_ERR_NEIGH_CREATE;
 		}
@@ -122,8 +122,14 @@ static int nss_connmgr_gre_v4_get_mac_address(uint32_t src_ip, uint32_t dest_ip,
 		msleep(2000);
 	}
 
+	if (!(neigh->nud_state & NUD_VALID) || !is_valid_ether_addr(neigh->ha)) {
+		ip_rt_put(rt);
+		nss_connmgr_gre_warning("invalid neigh state (%x) or invalid MAC(%pM) for %pI4\n", neigh->nud_state, neigh->ha,  &raddr);
+		neigh_release(neigh);
+		return GRE_ERR_NEIGH_CREATE;
+	}
+
 	if (neigh->dev->type == ARPHRD_LOOPBACK) {
-		rcu_read_unlock();
 		ip_rt_put(rt);
 		neigh_release(neigh);
 		nss_connmgr_gre_warning("Err in destination MAC address, neighbour dev is loop back for %pI4\n", &raddr);
@@ -132,7 +138,6 @@ static int nss_connmgr_gre_v4_get_mac_address(uint32_t src_ip, uint32_t dest_ip,
 	}
 
 	if (neigh->dev->flags & IFF_NOARP) {
-		rcu_read_unlock();
 		ip_rt_put(rt);
 		neigh_release(neigh);
 		nss_connmgr_gre_warning("Err in destination MAC address, neighbour dev is of type NO_ARP for %pI4\n", &raddr);
@@ -140,7 +145,6 @@ static int nss_connmgr_gre_v4_get_mac_address(uint32_t src_ip, uint32_t dest_ip,
 	}
 
 	ether_addr_copy(dest_mac, neigh->ha);
-	rcu_read_unlock();
 	ip_rt_put(rt);
 	neigh_release(neigh);
 	nss_connmgr_gre_info("Destination MAC address for %pI4 is %pM\n", &raddr, dest_mac);
@@ -233,7 +237,7 @@ void nss_connmgr_gre_tap_v4_outer_exception(struct net_device *dev, struct sk_bu
 	 */
 	if (unlikely(!pskb_may_pull(skb, (sizeof(struct ethhdr) + sizeof(struct iphdr)
 				+ sizeof(struct gre_base_hdr))))) {
-		nss_connmgr_gre_warning("%p: pskb_may_pull failed for skb:%p\n", dev, skb);
+		nss_connmgr_gre_warning("%px: pskb_may_pull failed for skb:%px\n", dev, skb);
 		dev_kfree_skb_any(skb);
 		return;
 	}
@@ -245,7 +249,7 @@ void nss_connmgr_gre_tap_v4_outer_exception(struct net_device *dev, struct sk_bu
 				+ sizeof(struct gre_base_hdr)));
 
 	if (unlikely(!pskb_may_pull(skb, sizeof(struct ethhdr)))) {
-		nss_connmgr_gre_warning("%p: pskb_may_pull failed for skb:%p\n", dev, skb);
+		nss_connmgr_gre_warning("%px: pskb_may_pull failed for skb:%px\n", dev, skb);
 		dev_kfree_skb_any(skb);
 		return;
 	}
@@ -275,7 +279,7 @@ void nss_connmgr_gre_tun_v4_outer_exception(struct net_device *dev, struct sk_bu
 	 * and transmit on GRE interface.
 	 */
 	if (unlikely(!pskb_may_pull(skb, sizeof(struct iphdr) + sizeof(struct gre_base_hdr)))) {
-		nss_connmgr_gre_warning("%p: pskb_may_pull failed for skb:%p\n", dev, skb);
+		nss_connmgr_gre_warning("%px: pskb_may_pull failed for skb:%px\n", dev, skb);
 		dev_kfree_skb_any(skb);
 		return;
 	}
@@ -295,7 +299,7 @@ void nss_connmgr_gre_tun_v4_outer_exception(struct net_device *dev, struct sk_bu
 		skb->protocol = htons(ETH_P_IPV6);
 		break;
 	default:
-		nss_connmgr_gre_info("%p: wrong IP version in GRE encapped packet. skb: %p\n", dev, skb);
+		nss_connmgr_gre_info("%px: wrong IP version in GRE encapped packet. skb: %px\n", dev, skb);
 		dev_kfree_skb_any(skb);
 		return;
 	}

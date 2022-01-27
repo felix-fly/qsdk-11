@@ -31,7 +31,9 @@ Required properties:
 - qca,extended-intc	notifies that virtual interrupt controller is used
 			instead of virtual GPIOs
 - qca,secure		notifies that TZ is used for bringing q6 out of reset
-
+- qca,wcss-aon-reset-seq	IPQ60xx family of devices uses different
+			reset out sequence from IPQ807x family of devices. This quirk adds
+			target-specific sequence.
 Example:
 --------
 /* IPQ807x */

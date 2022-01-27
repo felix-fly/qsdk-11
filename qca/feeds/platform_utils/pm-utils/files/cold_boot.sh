@@ -25,7 +25,7 @@ check_temp()
     echo "Thermal_zone$i = $temp" > /dev/console 2>&1
     if [ $temp -lt $1 ]
     then
-      echo "Thermal_zone$i is below threshold $1C" > /dev/console > 2>&1
+      echo "Thermal_zone$i is below threshold $1C" > /dev/console 2>&1
       retval=0
       return
     fi

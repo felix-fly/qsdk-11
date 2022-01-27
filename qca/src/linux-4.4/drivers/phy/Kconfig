@@ -428,4 +428,11 @@ config PHY_IPQ_UNIPHY_USB
 	  the hardware and power management. This driver is required
 	  even for peripheral only or host only mode configurations.
 
+config PHY_IPQ_UNIPHY_PCIE
+	bool "PCIE UNI PHY driver"
+	depends on ARCH_QCOM
+	depends on HAS_IOMEM
+	depends on OF
+	select GENERIC_PHY
+
 endmenu

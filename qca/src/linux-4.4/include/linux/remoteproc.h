@@ -435,6 +435,7 @@ struct rproc_dump_segment {
  * @name: human readable name of the rproc
  * @firmware: name of firmware file to be loaded
  * @priv: private data which belongs to the platform-specific rproc module
+ * @parent : parent of this remote processor
  * @ops: platform-specific start/stop rproc handlers
  * @dev: virtual device for refcounting and common remoteproc behavior
  * @power: refcount of users who need this rproc powered up
@@ -468,6 +469,8 @@ struct rproc {
 	const char *name;
 	char *firmware;
 	void *priv;
+	struct rproc *parent;
+	bool is_parent_dependent;
 	struct rproc_ops *ops;
 	struct device dev;
 	atomic_t power;
@@ -494,6 +497,12 @@ struct rproc {
 	bool auto_boot;
 	struct list_head dump_segments;
 	int nb_vdev;
+	struct list_head child;
+};
+
+struct rproc_child {
+	struct list_head node;
+	void *handle;
 };
 
 /**
@@ -614,5 +623,17 @@ static inline struct rproc *vdev_to_rproc(struct virtio_device *vdev)
 void rproc_add_subdev(struct rproc *rproc, struct rproc_subdev *subdev);
 
 void rproc_remove_subdev(struct rproc *rproc, struct rproc_subdev *subdev);
+
+int rproc_start_subdevices(struct rproc *rproc);
+
+void rproc_stop_subdevices(struct rproc *rproc, bool crashed);
+
+struct rproc *rproc_get_by_name(const char *rproc_name);
+
+int rproc_get_child_cnt(const char *rproc_parent_name);
+
+void rproc_add_child(struct rproc *rproc_p, struct rproc_child *child);
+
+void rproc_remove_child(struct rproc *rproc_p, struct rproc_child *child);
 
 #endif /* REMOTEPROC_H */

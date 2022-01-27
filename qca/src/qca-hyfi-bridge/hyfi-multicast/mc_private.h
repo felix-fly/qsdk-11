@@ -186,6 +186,7 @@ struct mc_acl_rule_table {
 };
 
 struct mc_struct {
+    struct rcu_head         rcu;
     spinlock_t              lock;
     __be32                  salt;  /* salt for hash */
     struct net_device       *dev;  /* bridge device */

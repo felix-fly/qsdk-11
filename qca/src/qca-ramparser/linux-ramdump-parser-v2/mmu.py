@@ -14,16 +14,14 @@ from register import Register
 import sizes
 
 def phys_to_virt(ramdump, phys):
-        if not ramdump.arm64:
-              return phys - ramdump.phys_offset + ramdump.page_offset
+	if not ramdump.arm64:
+		return phys - ramdump.phys_offset + ramdump.page_offset
+	if ramdump.kernel_version < (4, 4, 0):
+		return None
 
-        if ramdump.kernel_version < (4, 4, 0):
-              return None
-
-        memstart_addr = ramdump.read_s64('memstart_addr')
-        val = (phys - memstart_addr) | ramdump.page_offset
-        return val
-
+	memstart_addr = ramdump.read_s64('memstart_addr')
+	val = (phys - memstart_addr) | ramdump.page_offset
+	return val
 
 class MMU(object):
 
@@ -558,6 +556,8 @@ class Armv8MMU(MMU):
     def block_or_page_desc_2_phys(self, desc, virt_r, n):
         phys = Register(output_address=(47, n),
                         page_offset=(n - 1, 0))
+        if phys is None or desc is None:
+            return 0
         phys.output_address = desc.output_address
         virt_r.add_field('rest', (n - 1, 0))
         phys.page_offset |= virt_r.rest
@@ -604,12 +604,11 @@ class Armv8MMU(MMU):
         try:
             sl_desc = self.do_sl_level_lookup(
                 base.value, virt_r.sl_index)
+            if sl_desc.dtype == Armv8MMU.DESCRIPTOR_BLOCK:
+                r = self.sl_block_desc_2_phys(sl_desc, virt_r)
+                return r
         except:
             return None
-
-        if sl_desc.dtype == Armv8MMU.DESCRIPTOR_BLOCK:
-            r = self.sl_block_desc_2_phys(sl_desc, virt_r)
-            return r
 
         base.base = sl_desc.next_level_base_addr_upper
         try:

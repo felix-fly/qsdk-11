@@ -30,6 +30,7 @@ wil6210-y += config.o
 CFLAGS_trace.o := -I$(src)
 
 subdir-ccflags-y += -D__CHECK_ENDIAN__
+subdir-ccflags-y += -Werror
 
 # NSS Support
 ifeq (y, $(CONFIG_WIL6210_NSS_SUPPORT))

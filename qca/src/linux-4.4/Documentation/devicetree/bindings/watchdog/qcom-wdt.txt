@@ -10,6 +10,7 @@ Required properties :
 			"qcom,kpss-wdt-ipq807x"
 			"qcom,kpss-wdt-ipq40xx"
 			"qcom,kpss-wdt-ipq6018"
+			"qcom,kpss-wdt-ipq5018"
 
 - reg : shall contain base register location and length as listed
 	in the reg-names property

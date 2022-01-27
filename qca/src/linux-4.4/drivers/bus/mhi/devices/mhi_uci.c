@@ -32,6 +32,7 @@ struct uci_buf {
 	void *data;
 	size_t len;
 	struct list_head node;
+	bool done;
 };
 
 struct uci_dev {
@@ -124,6 +125,7 @@ static int mhi_queue_inbound(struct uci_dev *uci_dev)
 
 		uci_buf = buf + mtu;
 		uci_buf->data = buf;
+		uci_buf->done = 1;
 
 		MSG_VERB("Allocated buf %d of %d size %zu\n", i, nr_trbs, mtu);
 
@@ -172,6 +174,8 @@ static int mhi_uci_release(struct inode *inode, struct file *file)
 
 		/* clean inbound channel */
 		uci_chan = &uci_dev->dl_chan;
+
+		spin_lock_bh(&uci_chan->lock);
 		list_for_each_entry_safe(itr, tmp, &uci_chan->pending, node) {
 			list_del(&itr->node);
 			kfree(itr->data);
@@ -180,6 +184,7 @@ static int mhi_uci_release(struct inode *inode, struct file *file)
 			kfree(uci_chan->cur_buf->data);
 
 		uci_chan->cur_buf = NULL;
+		spin_unlock_bh(&uci_chan->lock);
 
 		if (!uci_dev->enabled) {
 			MSG_LOG("Node is deleted, freeing dev node\n");
@@ -378,28 +383,32 @@ static ssize_t mhi_uci_read(struct file *file,
 		}
 
 		list_del(&uci_buf->node);
+
+		uci_buf->done = 1;
 		uci_chan->cur_buf = uci_buf;
 		uci_chan->rx_size = uci_buf->len;
 		MSG_VERB("Got pkt of size:%zu\n", uci_chan->rx_size);
 	}
 
 	uci_buf = uci_chan->cur_buf;
-	spin_unlock_bh(&uci_chan->lock);
 
 	/* Copy the buffer to user space */
 	to_copy = min_t(size_t, count, uci_chan->rx_size);
 	ptr = uci_buf->data + (uci_buf->len - uci_chan->rx_size);
+	uci_chan->rx_size -= to_copy;
+	if (!uci_chan->rx_size)
+		uci_chan->cur_buf = NULL;
+	spin_unlock_bh(&uci_chan->lock);
+
 	ret = copy_to_user(buf, ptr, to_copy);
 	if (ret)
 		return ret;
 
 	MSG_VERB("Copied %zu of %zu bytes\n", to_copy, uci_chan->rx_size);
-	uci_chan->rx_size -= to_copy;
 
 	/* we finished with this buffer, queue it back to hardware */
 	if (!uci_chan->rx_size) {
 		spin_lock_bh(&uci_chan->lock);
-		uci_chan->cur_buf = NULL;
 
 		if (uci_dev->enabled)
 			ret = mhi_queue_transfer(mhi_dev, DMA_FROM_DEVICE,
@@ -479,10 +488,12 @@ static int mhi_uci_open(struct inode *inode, struct file *filp)
  error_rx_queue:
 	dl_chan = &uci_dev->dl_chan;
 	mhi_unprepare_from_transfer(uci_dev->mhi_dev);
+	spin_lock_bh(&dl_chan->lock);
 	list_for_each_entry_safe(buf_itr, tmp, &dl_chan->pending, node) {
 		list_del(&buf_itr->node);
 		kfree(buf_itr->data);
 	}
+	spin_unlock_bh(&dl_chan->lock);
 
  error_open_chan:
 	mutex_unlock(&uci_dev->mutex);
@@ -548,6 +559,7 @@ static int mhi_uci_probe(struct mhi_device *mhi_dev,
 	struct uci_dev *uci_dev;
 	int minor;
 	char node_name[32];
+	char d_name[32];
 	int dir;
 
 	uci_dev = kzalloc(sizeof(*uci_dev), GFP_KERNEL);
@@ -567,18 +579,27 @@ static int mhi_uci_probe(struct mhi_device *mhi_dev,
 	mutex_lock(&mhi_uci_drv.lock);
 
 	uci_dev->devt = MKDEV(mhi_uci_drv.major, minor);
+	if (!mhi_dev->mhi_cntrl->dev_id)
+		snprintf(d_name, sizeof(d_name),
+			 dev_name(mhi_dev->mhi_cntrl->cntrl_dev));
+	else
+		snprintf(d_name, sizeof(d_name),
+			 "%04x_%02u.%02u.%02u",
+			 mhi_dev->dev_id, mhi_dev->domain,
+			 mhi_dev->bus, mhi_dev->slot);
+
 	uci_dev->dev = device_create(mhi_uci_drv.class, &mhi_dev->dev,
 				     uci_dev->devt, uci_dev,
-				     DEVICE_NAME "_%04x_%02u.%02u.%02u%s%d",
-				     mhi_dev->dev_id, mhi_dev->domain,
-				     mhi_dev->bus, mhi_dev->slot, "_pipe_",
-				     mhi_dev->ul_chan_id);
+				     DEVICE_NAME "_%s%s%d",
+				     (const char *)d_name,
+				     "_pipe_", mhi_dev->ul_chan_id);
+
 	set_bit(minor, uci_minors);
 
 	/* create debugging buffer */
-	snprintf(node_name, sizeof(node_name), "mhi_uci_%04x_%02u.%02u.%02u_%d",
-		 mhi_dev->dev_id, mhi_dev->domain, mhi_dev->bus, mhi_dev->slot,
-		 mhi_dev->ul_chan_id);
+	snprintf(node_name, sizeof(node_name), "mhi_uci_%s_%d",
+		 d_name, mhi_dev->ul_chan_id);
+
 	uci_dev->ipc_log = ipc_log_context_create(MHI_UCI_IPC_LOG_PAGES,
 						  node_name, 0);
 
@@ -628,20 +649,30 @@ static void mhi_dl_xfer_cb(struct mhi_device *mhi_dev,
 	MSG_VERB("status:%d receive_len:%zu\n", mhi_result->transaction_status,
 		 mhi_result->bytes_xferd);
 
-	if (mhi_result->transaction_status == -ENOTCONN) {
-		kfree(mhi_result->buf_addr);
+	spin_lock_irqsave(&uci_chan->lock, flags);
+	buf = mhi_result->buf_addr + uci_dev->mtu;
+	if (!buf->done) {
+		WARN_ONCE(1, "Receiving stale buffers from client, dropping it. Please fix client\n");
+		spin_unlock_irqrestore(&uci_chan->lock, flags);
 		return;
 	}
 
-	spin_lock_irqsave(&uci_chan->lock, flags);
-	buf = mhi_result->buf_addr + uci_dev->mtu;
+	if (mhi_result->transaction_status == -ENOTCONN) {
+		kfree(mhi_result->buf_addr);
+		spin_unlock_irqrestore(&uci_chan->lock, flags);
+		return;
+	}
+
 	buf->data = mhi_result->buf_addr;
 	buf->len = mhi_result->bytes_xferd;
 	list_add_tail(&buf->node, &uci_chan->pending);
+	buf->done = 0;
 	spin_unlock_irqrestore(&uci_chan->lock, flags);
 
+#ifdef CONFIG_PM
 	if (mhi_dev->dev.power.wakeup)
 		__pm_wakeup_event(mhi_dev->dev.power.wakeup, 0);
+#endif
 
 	wake_up(&uci_chan->wq);
 }

@@ -17,15 +17,20 @@
 
 START=08
 
-. /lib/ipq806x.sh
+[ -e /lib/ipq806x.sh ] && . /lib/ipq806x.sh
+
+type ipq806x_board_name &>/dev/null  || ipq806x_board_name() {
+	echo $(board_name) | sed 's/^\([^-]*-\)\{1\}//g'
+}
 
 boot() {
 	local board=$(ipq806x_board_name)
 
 	case "$board" in
-		ap-hk0* | db-hk0* |\
-		ap-ac0* | ap-oak0* |\
-		ap-cp0* | db-cp0*)
+		ap-hk* | db-hk* |\
+		ap-ac* | ap-oak* |\
+		ap-cp* | db-cp* |\
+		ap-mp*)
 		/usr/sbin/qrtr-cfg 1
 		service_start /usr/sbin/qrtr-ns
 		;;

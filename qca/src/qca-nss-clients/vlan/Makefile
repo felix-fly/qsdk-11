@@ -9,4 +9,8 @@ ccflags-y += -DNSS_VLAN_MGR_PPE_SUPPORT
 endif
 
 ccflags-y += -DNSS_VLAN_MGR_DEBUG_LEVEL=0
-ccflags-y += -Werror
+ccflags-y += -Wall -Werror
+
+ifneq (,$(filter $(CONFIG_BONDING),y m))
+ccflags-y += -DBONDING_SUPPORT
+endif

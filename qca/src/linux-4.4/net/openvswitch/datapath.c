@@ -61,6 +61,8 @@
 int ovs_net_id __read_mostly;
 EXPORT_SYMBOL_GPL(ovs_net_id);
 
+static struct ovs_accel_callback *ovs_accel_cb;
+
 static struct genl_family dp_packet_genl_family;
 static struct genl_family dp_flow_genl_family;
 static struct genl_family dp_datapath_genl_family;
@@ -252,6 +254,126 @@ void ovs_dp_detach_port(struct vport *p)
 	ovs_vport_del(p);
 }
 
+/* Notify datapath add event to acceleration callback */
+static void ovs_dp_add_notify(struct datapath *dp, struct vport *vp)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_add)
+		ovs_cb->ovs_accel_dp_add((void *)dp, vp->dev);
+	rcu_read_unlock();
+}
+
+/* Notify datapath delete event to acceleration callback */
+static void ovs_dp_del_notify(struct datapath *dp, struct vport *vp)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_del)
+		ovs_cb->ovs_accel_dp_del((void *)dp, vp->dev);
+	rcu_read_unlock();
+}
+
+/* Notify datapath port add event to acceleration callback */
+static void ovs_dp_port_add_notify(struct datapath *dp, struct vport *vp,
+				   struct nlattr **a)
+{
+	struct ovs_accel_callback *ovs_cb;
+	const char *master = NULL;
+
+	if (a[OVS_VPORT_ATTR_MASTER])
+		master = nla_data(a[OVS_VPORT_ATTR_MASTER]);
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_port_add)
+		ovs_cb->ovs_accel_dp_port_add((void *)dp, (void *)vp,
+					      vp->port_no, vp->ops->type,
+					      master, vp->dev);
+	rcu_read_unlock();
+}
+
+/* Notify datapath port delete event to acceleration callback */
+static void ovs_dp_port_del_notify(struct datapath *dp, struct vport *vp)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_port_del)
+		ovs_cb->ovs_accel_dp_port_del((void *)dp, (void *)vp, vp->dev);
+	rcu_read_unlock();
+}
+
+/* Notify datapath flow add event to acceleration callback */
+static void ovs_dp_flow_add_notify(struct datapath *dp, struct sw_flow *sf)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_flow_add)
+		ovs_cb->ovs_accel_dp_flow_add((void *)dp, sf);
+	rcu_read_unlock();
+}
+
+/* Notify datapath flow delete event to acceleration callback */
+static void ovs_dp_flow_del_notify(struct datapath *dp, struct sw_flow *sf)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_flow_del)
+		ovs_cb->ovs_accel_dp_flow_del((void *)dp, sf);
+	rcu_read_unlock();
+}
+
+/* Notify datapath flow table flush event to acceleration callback */
+static void ovs_dp_flow_tbl_flush_notify(struct datapath *dp)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_flow_tbl_flush)
+		ovs_cb->ovs_accel_dp_flow_tbl_flush((void *)dp);
+	rcu_read_unlock();
+}
+
+/* Notify datapath flow set/change event to acceleration callback */
+static void ovs_dp_flow_set_notify(struct datapath *dp, struct sw_flow *sf,
+				   struct sw_flow_actions *new_sfa)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	rcu_read_lock();
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_flow_set)
+		ovs_cb->ovs_accel_dp_flow_set((void *)dp, sf, new_sfa);
+	rcu_read_unlock();
+}
+
+/* Forward datapath packet to acceleration callback
+ * Must be called with rcu_read_lock.
+ */
+static void ovs_dp_pkt_process_notify(struct datapath *dp, struct sk_buff *skb,
+				      struct sw_flow_key *key, struct sw_flow *sf,
+		struct sw_flow_actions *sfa)
+{
+	struct ovs_accel_callback *ovs_cb;
+
+	WARN_ON(!rcu_read_lock_held());
+
+	ovs_cb = rcu_dereference(ovs_accel_cb);
+	if (ovs_cb && ovs_cb->ovs_accel_dp_pkt_process)
+		ovs_cb->ovs_accel_dp_pkt_process((void *)dp, skb, key, sf, sfa);
+}
+
 /* Must be called with rcu_read_lock. */
 void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 {
@@ -264,6 +386,8 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 	u32 n_mask_hit;
 
 	stats = this_cpu_ptr(dp->stats_percpu);
+
+	ovs_dp_pkt_process_notify(dp, skb, key, NULL, NULL);
 
 	/* Look up flow. */
 	flow = ovs_flow_tbl_lookup_stats(&dp->table, key, &n_mask_hit);
@@ -286,6 +410,7 @@ void ovs_dp_process_packet(struct sk_buff *skb, struct sw_flow_key *key)
 
 	ovs_flow_stats_update(flow, key->tp.flags, skb);
 	sf_acts = rcu_dereference(flow->sf_acts);
+	ovs_dp_pkt_process_notify(dp, skb, key, flow, sf_acts);
 	ovs_execute_actions(dp, skb, sf_acts, key);
 
 	stats_counter = &stats->n_hit;
@@ -992,6 +1117,7 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 			goto err_unlock_ovs;
 		}
 
+		ovs_dp_flow_add_notify(dp, new_flow);
 		if (unlikely(reply)) {
 			error = ovs_flow_cmd_fill_info(new_flow,
 						       ovs_header->dp_ifindex,
@@ -1156,6 +1282,7 @@ static int ovs_flow_cmd_set(struct sk_buff *skb, struct genl_info *info)
 	if (likely(acts)) {
 		old_acts = ovsl_dereference(flow->sf_acts);
 		rcu_assign_pointer(flow->sf_acts, acts);
+		ovs_dp_flow_set_notify(dp, flow, old_acts);
 
 		if (unlikely(reply)) {
 			error = ovs_flow_cmd_fill_info(flow,
@@ -1292,6 +1419,7 @@ static int ovs_flow_cmd_del(struct sk_buff *skb, struct genl_info *info)
 
 	if (unlikely(!a[OVS_FLOW_ATTR_KEY] && !ufid_present)) {
 		err = ovs_flow_tbl_flush(&dp->table);
+		ovs_dp_flow_tbl_flush_notify(dp);
 		goto unlock;
 	}
 
@@ -1305,6 +1433,7 @@ static int ovs_flow_cmd_del(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	ovs_flow_tbl_remove(&dp->table, flow);
+	ovs_dp_flow_del_notify(dp, flow);
 	ovs_unlock();
 
 	reply = ovs_flow_cmd_alloc_info((const struct sw_flow_actions __force *) flow->sf_acts,
@@ -1606,6 +1735,7 @@ static int ovs_dp_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	ovs_net = net_generic(ovs_dp_get_net(dp), ovs_net_id);
 	list_add_tail_rcu(&dp->list_node, &ovs_net->dps);
 
+	ovs_dp_add_notify(dp, vport);
 	ovs_unlock();
 
 	ovs_notify(&dp_datapath_genl_family, reply, info);
@@ -1642,6 +1772,7 @@ static void __dp_destroy(struct datapath *dp)
 
 	list_del_rcu(&dp->list_node);
 
+	ovs_dp_del_notify(dp, ovs_vport_ovsl(dp, OVSP_LOCAL));
 	/* OVSP_LOCAL is datapath internal port. We need to make sure that
 	 * all ports in datapath are destroyed first before freeing datapath.
 	 */
@@ -1975,6 +2106,7 @@ restart:
 		goto exit_unlock_free;
 	}
 
+	ovs_dp_port_add_notify(dp, vport, a);
 	err = ovs_vport_cmd_fill_info(vport, reply, info->snd_portid,
 				      info->snd_seq, 0, OVS_VPORT_CMD_NEW);
 	BUG_ON(err < 0);
@@ -2017,7 +2149,6 @@ static int ovs_vport_cmd_set(struct sk_buff *skb, struct genl_info *info)
 		if (err)
 			goto exit_unlock_free;
 	}
-
 
 	if (a[OVS_VPORT_ATTR_UPCALL_PID]) {
 		struct nlattr *ids = a[OVS_VPORT_ATTR_UPCALL_PID];
@@ -2063,6 +2194,7 @@ static int ovs_vport_cmd_del(struct sk_buff *skb, struct genl_info *info)
 		goto exit_unlock_free;
 	}
 
+	ovs_dp_port_del_notify(vport->dp, vport);
 	err = ovs_vport_cmd_fill_info(vport, reply, info->snd_portid,
 				      info->snd_seq, 0, OVS_VPORT_CMD_DEL);
 	BUG_ON(err < 0);
@@ -2296,6 +2428,256 @@ static struct pernet_operations ovs_net_ops = {
 	.id   = &ovs_net_id,
 	.size = sizeof(struct ovs_net),
 };
+
+/* Register OVS datapath accelerator */
+int ovs_register_accelerator(struct ovs_accel_callback *oac)
+{
+	ovs_lock();
+
+	if (unlikely(rcu_access_pointer(ovs_accel_cb))) {
+		ovs_unlock();
+		return -EEXIST;
+	}
+
+	rcu_assign_pointer(ovs_accel_cb, oac);
+	ovs_unlock();
+	return 0;
+}
+EXPORT_SYMBOL(ovs_register_accelerator);
+
+/* Unregister OVS datapath accelerator */
+void ovs_unregister_accelerator(struct ovs_accel_callback *oac)
+{
+	ovs_lock();
+	rcu_assign_pointer(ovs_accel_cb, NULL);
+	ovs_unlock();
+}
+EXPORT_SYMBOL(ovs_unregister_accelerator);
+
+/* Find datapath flow rule using the key*/
+struct sw_flow *ovs_accel_flow_find(void *dp_inst, struct sw_flow_key *key)
+{
+	struct datapath *dp = dp_inst;
+	struct sw_flow *flow;
+
+	rcu_read_lock();
+	flow = ovs_flow_tbl_lookup(&dp->table, key);
+	rcu_read_unlock();
+
+	return flow;
+}
+EXPORT_SYMBOL(ovs_accel_flow_find);
+
+/* Find datapath flow rule using MAC addresses*/
+struct sw_flow *ovs_accel_flow_find_by_mac(void *dp_inst,
+						struct net_device *indev,
+						struct net_device *outdev,
+						uint8_t *smac, uint8_t *dmac, uint16_t type)
+{
+	struct datapath *dp = dp_inst;
+	struct table_instance *ti;
+	struct sw_flow *flow = NULL;
+	struct sw_flow_actions *sf_acts;
+	const struct nlattr *a;
+	struct vport *vport;
+	bool flow_found = false;
+	int rem;
+	int i;
+
+	rcu_read_lock();
+	ti = rcu_dereference(dp->table.ti);
+
+	for (i = 0; i < ti->n_buckets; i++) {
+		struct hlist_head *head = flex_array_get(ti->buckets, i);
+		struct hlist_node *n;
+
+		if (unlikely(!head))
+			continue;
+
+		hlist_for_each_entry_safe(flow, n, head,
+				flow_table.node[ti->node_ver]) {
+			if ((flow->key.eth.type == type) &&
+			     ether_addr_equal(flow->key.eth.src, smac) &&
+			     ether_addr_equal(flow->key.eth.dst, dmac)) {
+				flow_found = true;
+				goto found;
+			}
+		}
+	}
+found:
+	if (!flow_found) {
+		rcu_read_unlock();
+		return NULL;
+	}
+
+	/*
+	 * Flow is found, check if ingress port matches indev.
+	 */
+	if (!indev) {
+		goto check_outdev;
+	}
+
+	vport = ovs_vport_ovsl_rcu(dp, flow->key.phy.in_port);
+	if (!vport || (indev != vport->dev)) {
+		rcu_read_unlock();
+		return NULL;
+	}
+
+check_outdev:
+	/*
+	 * if outdev is NULL, then the API is called
+	 * to find the flow only.
+	 */
+	if (!outdev) {
+		rcu_read_unlock();
+		return flow;
+	}
+
+	/*
+	 * Flow is found, check if output action is outdev
+	 */
+	flow_found = false;
+	sf_acts = rcu_dereference(flow->sf_acts);
+	for (a = sf_acts->actions, rem = sf_acts->actions_len; rem > 0;
+			a = nla_next(a, &rem)) {
+		int port_no;
+
+		if (nla_type(a) != OVS_ACTION_ATTR_OUTPUT)
+			continue;
+
+		port_no = nla_get_u32(a);
+		vport = ovs_vport_ovsl_rcu(dp, port_no);
+
+		if (vport && (outdev == vport->dev)) {
+			flow_found = true;
+		}
+	}
+
+	if (!flow_found)
+		flow = NULL;
+
+	rcu_read_unlock();
+	return flow;
+}
+EXPORT_SYMBOL(ovs_accel_flow_find_by_mac);
+
+/* Update flow rule statistics */
+int ovs_accel_flow_stats_update(void *dp_inst, void *out_vport,
+				 struct sw_flow_key *key, int pkts, int bytes)
+{
+	struct datapath *dp = dp_inst;
+	struct flow_stats *stats;
+	struct sw_flow *flow;
+	struct dp_stats_percpu *dp_stats;
+	int node = numa_node_id();
+	u64 *stats_counter;
+	u32 n_mask_hit;
+
+	rcu_read_lock();
+	flow = ovs_flow_tbl_lookup_stats(&dp->table, key, &n_mask_hit);
+	if (!flow) {
+		rcu_read_unlock();
+		return -EINVAL;
+	}
+
+	/* Update node specific statistics, if memory is not allocated
+	 * for this node then update in 0 node
+	 */
+	stats = rcu_dereference(flow->stats[node]);
+	if (unlikely(!stats))
+		stats = rcu_dereference(flow->stats[0]);
+
+	rcu_read_unlock();
+
+	spin_lock(&stats->lock);
+	stats->used = jiffies;
+	stats->packet_count += pkts;
+	stats->byte_count += bytes;
+
+	/* Update datapath statistics, only hit count should be updated here,
+	 * miss count is taken care by datapath.
+	 * n_mask_hit and stats_counter are updated per packet, whereas
+	 * stats_counter will match the number of packets processed in datapath
+	 * n_mask_hit is updated number of packets times the total masks that
+	 * are processed.  Datapath flows are now accelerated and this API is
+	 * called to update flow statistics, datpath statistics should use
+	 * number of packets.
+	 */
+	dp_stats = this_cpu_ptr(dp->stats_percpu);
+	stats_counter = &dp_stats->n_hit;
+
+	u64_stats_update_begin(&dp_stats->syncp);
+	(*stats_counter) += pkts;
+	dp_stats->n_mask_hit += n_mask_hit * pkts;
+	u64_stats_update_end(&dp_stats->syncp);
+
+	spin_unlock(&stats->lock);
+	return 0;
+}
+EXPORT_SYMBOL(ovs_accel_flow_stats_update);
+
+/* Find netdev using vport number */
+struct net_device *ovs_accel_dev_find(void *dp_inst, int vport_no)
+{
+	struct datapath *dp = dp_inst;
+	struct net_device *dev;
+	struct vport *vport;
+
+	rcu_read_lock();
+
+	vport = ovs_vport_rcu(dp, vport_no);
+	if (!vport) {
+		rcu_read_unlock();
+		return NULL;
+	}
+
+	dev = vport->dev;
+	rcu_read_unlock();
+	return dev;
+}
+EXPORT_SYMBOL(ovs_accel_dev_find);
+
+/* Find egress interface using key and skb */
+struct net_device *ovs_accel_egress_dev_find(void *dp_inst,
+					     struct sw_flow_key *key,
+					     struct sk_buff *skb)
+{
+	struct datapath *dp = dp_inst;
+	struct sw_flow *flow;
+	struct sw_flow_actions *sf_acts;
+	struct net_device *dev;
+	const struct nlattr *a;
+	int rem;
+
+	rcu_read_lock();
+	flow = ovs_accel_flow_find(dp_inst, key);
+	if (unlikely(!flow))
+		goto done;
+
+	sf_acts = rcu_dereference(flow->sf_acts);
+	for (a = sf_acts->actions, rem = sf_acts->actions_len; rem > 0;
+			     a = nla_next(a, &rem)) {
+		struct vport *vport;
+		int port_no;
+
+		switch (nla_type(a)) {
+		case OVS_ACTION_ATTR_OUTPUT:
+			port_no = nla_get_u32(a);
+			vport = ovs_vport_ovsl_rcu(dp, port_no);
+			if (!vport) {
+				goto done;
+			}
+
+			dev = vport->dev;
+			rcu_read_unlock();
+			return dev;
+		}
+	}
+done:
+	rcu_read_unlock();
+	return NULL;
+}
+EXPORT_SYMBOL(ovs_accel_egress_dev_find);
 
 static int __init dp_init(void)
 {

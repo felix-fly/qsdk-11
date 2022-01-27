@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: ISC */
 /*
- * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef WIL6210_TXRX_EDMA_H
@@ -37,15 +37,18 @@
 #define WIL_RX_EDMA_ERROR_L4_ERR	(BIT(0) | BIT(1))
 
 #define WIL_RX_EDMA_DLPF_LU_MISS_BIT		BIT(11)
-#define WIL_RX_EDMA_DLPF_LU_MISS_CID_TID_MASK	0x7
+#define WIL_RX_EDMA_DLPF_LU_MISS_CID_TID_MASK	0xf
 #define WIL_RX_EDMA_DLPF_LU_HIT_CID_TID_MASK	0xf
 
-#define WIL_RX_EDMA_DLPF_LU_MISS_CID_POS	2
+#define WIL_RX_EDMA_DLPF_LU_MISS_CID_POS	3
 #define WIL_RX_EDMA_DLPF_LU_HIT_CID_POS		4
 
 #define WIL_RX_EDMA_DLPF_LU_MISS_TID_POS	5
 
 #define WIL_RX_EDMA_MID_VALID_BIT		BIT(22)
+
+#define WIL_RX_EDMA_AMSDU_BASIC_MASK		0x1
+#define WIL_RX_EDMA_DS_TYPE_WDS			0x3
 
 #define WIL_EDMA_DESC_TX_MAC_CFG_0_QID_POS 16
 #define WIL_EDMA_DESC_TX_MAC_CFG_0_QID_LEN 6
@@ -354,6 +357,12 @@ static inline u8 wil_rx_status_get_mcs(void *msg)
 			    16, 21);
 }
 
+static inline u8 wil_rx_status_get_cb_mode(void *msg)
+{
+	return WIL_GET_BITS(((struct wil_rx_status_compressed *)msg)->d1,
+			    22, 23);
+}
+
 static inline u16 wil_rx_status_get_flow_id(void *msg)
 {
 	return WIL_GET_BITS(((struct wil_rx_status_compressed *)msg)->d0,
@@ -363,17 +372,17 @@ static inline u16 wil_rx_status_get_flow_id(void *msg)
 static inline u8 wil_rx_status_get_mcast(void *msg)
 {
 	return WIL_GET_BITS(((struct wil_rx_status_compressed *)msg)->d0,
-			    26, 26);
+			    25, 26);
 }
 
 /**
  * In case of DLPF miss the parsing of flow Id should be as follows:
- * dest_id:2
- * src_id :3 - cid
- * tid:3
- * Otherwise:
+ * dest_id:3
+ * src_id :4 - cid
  * tid:4
+ * Otherwise:
  * cid:4
+ * tid:4
  */
 
 static inline u8 wil_rx_status_get_cid(void *msg)
@@ -381,13 +390,12 @@ static inline u8 wil_rx_status_get_cid(void *msg)
 	u16 val = wil_rx_status_get_flow_id(msg);
 
 	if (val & WIL_RX_EDMA_DLPF_LU_MISS_BIT)
-		/* CID is in bits 2..4 */
+		/* CID is in bits 3..6 */
 		return (val >> WIL_RX_EDMA_DLPF_LU_MISS_CID_POS) &
 			WIL_RX_EDMA_DLPF_LU_MISS_CID_TID_MASK;
 	else
-		/* CID is in bits 4..7 */
-		return (val >> WIL_RX_EDMA_DLPF_LU_HIT_CID_POS) &
-			WIL_RX_EDMA_DLPF_LU_HIT_CID_TID_MASK;
+		/* CID is in bits 0..3 */
+		return (val & WIL_RX_EDMA_DLPF_LU_HIT_CID_TID_MASK);
 }
 
 static inline u8 wil_rx_status_get_tid(void *msg)
@@ -449,6 +457,21 @@ static inline int wil_rx_status_get_fc1(struct wil6210_priv *wil, void *msg)
 
 	return WIL_GET_BITS(((struct wil_rx_status_extended *)msg)->ext.d1,
 			    0, 5) << 2;
+}
+
+static inline int wil_rx_status_get_ds_type(struct wil6210_priv *wil, void *msg)
+{
+	if (wil->use_compressed_rx_status)
+		return 0;
+
+	return WIL_GET_BITS(((struct wil_rx_status_extended *)msg)->ext.d0,
+			    19, 20);
+}
+
+static inline int wil_rx_status_is_basic_amsdu(void *msg)
+{
+	return (WIL_GET_BITS(((struct wil_rx_status_compressed *)msg)->d1,
+			     28, 29) == WIL_RX_EDMA_AMSDU_BASIC_MASK);
 }
 
 static inline __le16 wil_rx_status_get_seq(struct wil6210_priv *wil, void *msg)

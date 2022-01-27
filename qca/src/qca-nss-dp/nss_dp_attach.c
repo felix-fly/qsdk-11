@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2016-2017, 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2017, 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -16,8 +16,8 @@
  **************************************************************************
  */
 
-#include "nss_dp_dev.h"
-#include <nss_dp_api_if.h>
+#include <linux/version.h>
+#include "nss_dp_hal.h"
 
 /*
  * nss_dp_reset_netdev_features()
@@ -46,7 +46,14 @@ void nss_dp_receive(struct net_device *netdev, struct sk_buff *skb,
 			dp_dev->macid, skb->len, skb->ip_summed);
 
 #ifdef CONFIG_NET_SWITCHDEV
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 	skb->offload_fwd_mark = netdev->offload_fwd_mark;
+#else
+	/*
+	 * TODO: Implement ndo_get_devlink_port()
+	 */
+	skb->offload_fwd_mark = 0;
+#endif
 #endif
 
 	napi_gro_receive(napi, skb);
@@ -96,7 +103,14 @@ int nss_dp_override_data_plane(struct net_device *netdev,
 	/*
 	 * Free up the resources used by the data plane
 	 */
-	dp_dev->data_plane_ops->deinit(dpc);
+	if (dp_dev->drv_flags & NSS_DP_PRIV_FLAG(INIT_DONE)) {
+		if (dp_dev->data_plane_ops->deinit(dpc)) {
+			netdev_dbg(netdev, "Data plane init failed\n");
+			return -ENOMEM;
+		}
+
+		dp_dev->drv_flags &= ~NSS_DP_PRIV_FLAG(INIT_DONE);
+	}
 
 	/*
 	 * Override the data_plane_ctx, data_plane_ops
@@ -123,7 +137,7 @@ void nss_dp_start_data_plane(struct net_device *netdev,
 	}
 
 	if (dp_dev->dpc != dpc) {
-		netdev_dbg(netdev, "Cookie %p does not match, reject\n", dpc);
+		netdev_dbg(netdev, "Cookie %px does not match, reject\n", dpc);
 		return;
 	}
 
@@ -148,8 +162,8 @@ void nss_dp_restore_data_plane(struct net_device *netdev)
 		nss_dp_reset_netdev_features(netdev);
 	}
 
-	dp_dev->data_plane_ops = &nss_dp_edma_ops;
-	dp_dev->dpc = &dp_global_data_plane_ctx[dp_dev->macid-1];
+	dp_dev->data_plane_ops = nss_dp_hal_get_data_plane_ops();
+	dp_dev->dpc = &dp_global_data_plane_ctx[dp_dev->macid - NSS_DP_START_IFNUM];
 
 	/*
 	 * TODO: Re-initialize EDMA dataplane
@@ -158,21 +172,21 @@ void nss_dp_restore_data_plane(struct net_device *netdev)
 EXPORT_SYMBOL(nss_dp_restore_data_plane);
 
 /*
- * nss_dp_get_netdev_by_macid()
+ * nss_dp_get_netdev_by_nss_if_num()
  *	return the net device of the corrsponding id if exist
  */
-struct net_device *nss_dp_get_netdev_by_macid(int macid)
+struct net_device *nss_dp_get_netdev_by_nss_if_num(int if_num)
 {
 	struct nss_dp_dev *dp_dev;
 
-	if (macid > NSS_DP_MAX_PHY_PORTS || macid <= 0) {
-		pr_err("Invalid macid %d\n", macid);
+	if ((if_num > NSS_DP_HAL_MAX_PORTS) || (if_num < NSS_DP_START_IFNUM)) {
+		pr_err("Invalid if_num %d\n", if_num);
 		return NULL;
 	}
 
-	dp_dev = dp_global_ctx.nss_dp[macid - 1];
+	dp_dev = dp_global_ctx.nss_dp[if_num - NSS_DP_START_IFNUM];
 	if (!dp_dev)
 		return NULL;
 	return dp_dev->netdev;
 }
-EXPORT_SYMBOL(nss_dp_get_netdev_by_macid);
+EXPORT_SYMBOL(nss_dp_get_netdev_by_nss_if_num);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -75,7 +75,7 @@ static QDF_STATUS wlan_mgmt_txrx_psoc_obj_create_notification(
 		goto err_psoc_attach;
 	}
 
-	mgmt_txrx_info("Mgmt txrx creation successful, mgmt txrx ctx: %pK, psoc: %pK",
+	mgmt_txrx_debug("Mgmt txrx creation successful, mgmt txrx ctx: %pK, psoc: %pK",
 			mgmt_txrx_psoc_ctx, psoc);
 
 	return QDF_STATUS_SUCCESS;
@@ -116,7 +116,7 @@ static QDF_STATUS wlan_mgmt_txrx_psoc_obj_destroy_notification(
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	mgmt_txrx_info("deleting mgmt txrx psoc obj, mgmt txrx ctx: %pK, psoc: %pK",
+	mgmt_txrx_debug("deleting mgmt txrx psoc obj, mgmt txrx ctx: %pK, psoc: %pK",
 			mgmt_txrx_psoc_ctx, psoc);
 	if (wlan_objmgr_psoc_component_obj_detach(psoc,
 				WLAN_UMAC_COMP_MGMT_TXRX, mgmt_txrx_psoc_ctx)
@@ -128,7 +128,7 @@ static QDF_STATUS wlan_mgmt_txrx_psoc_obj_destroy_notification(
 	qdf_spinlock_destroy(&mgmt_txrx_psoc_ctx->mgmt_txrx_psoc_ctx_lock);
 	qdf_mem_free(mgmt_txrx_psoc_ctx);
 
-	mgmt_txrx_info("mgmt txrx deletion successful, psoc: %pK", psoc);
+	mgmt_txrx_debug("mgmt txrx deletion successful");
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -195,7 +195,7 @@ static QDF_STATUS wlan_mgmt_txrx_pdev_obj_create_notification(
 		goto err_pdev_attach;
 	}
 
-	mgmt_txrx_info(
+	mgmt_txrx_debug(
 		"Mgmt txrx creation successful, mgmt txrx ctx: %pK, pdev: %pK",
 		mgmt_txrx_pdev_ctx, pdev);
 
@@ -242,7 +242,7 @@ static QDF_STATUS wlan_mgmt_txrx_pdev_obj_destroy_notification(
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	mgmt_txrx_info("deleting mgmt txrx pdev obj, mgmt txrx ctx: %pK, pdev: %pK",
+	mgmt_txrx_debug("deleting mgmt txrx pdev obj, mgmt txrx ctx: %pK, pdev: %pK",
 			mgmt_txrx_pdev_ctx, pdev);
 	if (wlan_objmgr_pdev_component_obj_detach(pdev,
 				WLAN_UMAC_COMP_MGMT_TXRX, mgmt_txrx_pdev_ctx)
@@ -257,7 +257,7 @@ static QDF_STATUS wlan_mgmt_txrx_pdev_obj_destroy_notification(
 	qdf_wake_lock_destroy(&mgmt_txrx_pdev_ctx->wakelock_tx_cmp);
 	qdf_mem_free(mgmt_txrx_pdev_ctx);
 
-	mgmt_txrx_info("mgmt txrx deletion successful, pdev: %pK", pdev);
+	mgmt_txrx_debug("mgmt txrx deletion successful, pdev: %pK", pdev);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -303,7 +303,7 @@ QDF_STATUS wlan_mgmt_txrx_init(void)
 		goto err_pdev_delete;
 	}
 
-	mgmt_txrx_info("Successfully registered create and destroy handlers with objmgr");
+	mgmt_txrx_debug("Successfully registered create and destroy handlers with objmgr");
 	return QDF_STATUS_SUCCESS;
 
 err_pdev_delete:
@@ -352,7 +352,7 @@ QDF_STATUS wlan_mgmt_txrx_deinit(void)
 	}
 
 
-	mgmt_txrx_info("Successfully unregistered create and destroy handlers with objmgr");
+	mgmt_txrx_debug("Successfully unregistered create and destroy handlers with objmgr");
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -370,6 +370,7 @@ QDF_STATUS wlan_mgmt_txrx_mgmt_frame_tx(struct wlan_objmgr_peer *peer,
 	struct mgmt_txrx_priv_pdev_context *txrx_ctx;
 	struct wlan_objmgr_vdev *vdev;
 	QDF_STATUS status;
+	struct wlan_lmac_if_tx_ops *tx_ops;
 
 	if (!peer) {
 		mgmt_txrx_err("peer passed is NULL");
@@ -428,9 +429,23 @@ QDF_STATUS wlan_mgmt_txrx_mgmt_frame_tx(struct wlan_objmgr_peer *peer,
 	desc->vdev_id = wlan_vdev_get_id(vdev);
 	desc->context = context;
 
-	if (!psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.mgmt_tx_send) {
-		mgmt_txrx_err(
-				"mgmt txrx txop to send mgmt frame is NULL for psoc: %pK",
+	if (QDF_STATUS_E_NULL_VALUE ==
+	    iot_sim_mgmt_tx_update(psoc, vdev, buf)) {
+		wlan_objmgr_peer_release_ref(peer, WLAN_MGMT_NB_ID);
+		wlan_mgmt_txrx_desc_put(txrx_ctx, desc->desc_id);
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	tx_ops = wlan_psoc_get_lmac_if_txops(psoc);
+	if (!tx_ops) {
+		mgmt_txrx_err("tx_ops is NULL");
+		wlan_objmgr_peer_release_ref(peer, WLAN_MGMT_NB_ID);
+		wlan_mgmt_txrx_desc_put(txrx_ctx, desc->desc_id);
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	if (!tx_ops->mgmt_txrx_tx_ops.mgmt_tx_send) {
+		mgmt_txrx_err("mgmt txrx txop to send mgmt frame is NULL for psoc: %pK",
 				psoc);
 		wlan_objmgr_peer_release_ref(peer, WLAN_MGMT_NB_ID);
 		desc->nbuf = NULL;
@@ -438,7 +453,7 @@ QDF_STATUS wlan_mgmt_txrx_mgmt_frame_tx(struct wlan_objmgr_peer *peer,
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.mgmt_tx_send(
+	if (tx_ops->mgmt_txrx_tx_ops.mgmt_tx_send(
 			vdev, buf, desc->desc_id, mgmt_tx_params)) {
 		mgmt_txrx_err("Mgmt send fail for peer %pK psoc %pK pdev: %pK",
 				peer, psoc, pdev);
@@ -456,6 +471,7 @@ QDF_STATUS wlan_mgmt_txrx_beacon_frame_tx(struct wlan_objmgr_peer *peer,
 {
 	struct wlan_objmgr_vdev *vdev;
 	struct wlan_objmgr_psoc *psoc;
+	struct wlan_lmac_if_tx_ops *tx_ops;
 
 	vdev = wlan_peer_get_vdev(peer);
 	if (!vdev) {
@@ -469,18 +485,57 @@ QDF_STATUS wlan_mgmt_txrx_beacon_frame_tx(struct wlan_objmgr_peer *peer,
 		return QDF_STATUS_E_NULL_VALUE;
 	}
 
-	if (!psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.beacon_send) {
+	tx_ops = wlan_psoc_get_lmac_if_txops(psoc);
+	if (!tx_ops) {
+		mgmt_txrx_err("tx_ops is NULL");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	if (!tx_ops->mgmt_txrx_tx_ops.beacon_send) {
 		mgmt_txrx_err("mgmt txrx tx op to send beacon frame is NULL for psoc: %pK",
 				psoc);
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.beacon_send(vdev, buf)) {
+	if (tx_ops->mgmt_txrx_tx_ops.beacon_send(vdev, buf)) {
 		mgmt_txrx_err("Beacon send fail for peer %pK psoc %pK",
 				peer, psoc);
 		return QDF_STATUS_E_FAILURE;
 	}
 	return QDF_STATUS_SUCCESS;
+}
+
+bool wlan_mgmt_is_rmf_mgmt_action_frame(uint8_t action_category)
+{
+	switch (action_category) {
+	case ACTION_CATEGORY_SPECTRUM_MGMT:
+	case ACTION_CATEGORY_QOS:
+	case ACTION_CATEGORY_DLS:
+	case ACTION_CATEGORY_BACK:
+	case ACTION_CATEGORY_RRM:
+	case ACTION_FAST_BSS_TRNST:
+	case ACTION_CATEGORY_SA_QUERY:
+	case ACTION_CATEGORY_PROTECTED_DUAL_OF_PUBLIC_ACTION:
+	case ACTION_CATEGORY_WNM:
+	case ACTION_CATEGORY_MESH_ACTION:
+	case ACTION_CATEGORY_MULTIHOP_ACTION:
+	case ACTION_CATEGORY_DMG:
+	case ACTION_CATEGORY_FST:
+	case ACTION_CATEGORY_RVS:
+	case ACTION_CATEGORY_SIG:
+	case ACTION_CATEGORY_FLOW_CONTROL:
+	case ACTION_CATEGORY_CONTROL_RSP_MCS_NEGO:
+	case ACTION_CATEGORY_FILS:
+	case ACTION_CATEGORY_CDMG:
+	case ACTION_CATEGORY_CMMG:
+	case ACTION_CATEGORY_GLK:
+	case ACTION_CATEGORY_VENDOR_SPECIFIC_PROTECTED:
+		return true;
+	default:
+		break;
+	}
+
+	return false;
 }
 
 #ifdef WLAN_SUPPORT_FILS
@@ -491,6 +546,7 @@ wlan_mgmt_txrx_fd_action_frame_tx(struct wlan_objmgr_vdev *vdev,
 {
 	struct wlan_objmgr_psoc *psoc;
 	uint32_t vdev_id;
+	struct wlan_lmac_if_tx_ops *tx_ops;
 
 	if (!vdev) {
 		mgmt_txrx_err("Invalid vdev");
@@ -503,12 +559,18 @@ wlan_mgmt_txrx_fd_action_frame_tx(struct wlan_objmgr_vdev *vdev,
 		return QDF_STATUS_E_NULL_VALUE;
 	}
 
-	if (!psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.fd_action_frame_send) {
+	tx_ops = wlan_psoc_get_lmac_if_txops(psoc);
+	if (!tx_ops) {
+		mgmt_txrx_err("tx_ops is NULL");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	if (!tx_ops->mgmt_txrx_tx_ops.fd_action_frame_send) {
 		mgmt_txrx_err("mgmt txrx txop to send fd action frame is NULL");
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	if (psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.fd_action_frame_send(
+	if (tx_ops->mgmt_txrx_tx_ops.fd_action_frame_send(
 			vdev, buf)) {
 		mgmt_txrx_err("FD send fail for vdev %d", vdev_id);
 		return QDF_STATUS_E_FAILURE;
@@ -550,7 +612,7 @@ static QDF_STATUS wlan_mgmt_txrx_create_rx_handler(
 	mgmt_txrx_psoc_ctx->mgmt_rx_comp_cb[frm_type] = rx_handler;
 	qdf_spin_unlock_bh(&mgmt_txrx_psoc_ctx->mgmt_txrx_psoc_ctx_lock);
 
-	mgmt_txrx_info("Callback registered for comp_id: %d, frm_type: %d",
+	mgmt_txrx_debug("Callback registered for comp_id: %d, frm_type: %d",
 			comp_id, frm_type);
 	return QDF_STATUS_SUCCESS;
 }
@@ -604,7 +666,7 @@ static QDF_STATUS wlan_mgmt_txrx_delete_rx_handler(
 		return QDF_STATUS_E_FAILURE;
 	}
 
-	mgmt_txrx_info("Callback deregistered for comp_id: %d, frm_type: %d",
+	mgmt_txrx_debug("Callback deregistered for comp_id: %d, frm_type: %d",
 			comp_id, frm_type);
 	return QDF_STATUS_SUCCESS;
 }
@@ -735,6 +797,7 @@ QDF_STATUS wlan_mgmt_txrx_pdev_close(struct wlan_objmgr_pdev *pdev)
 	struct mgmt_txrx_desc_elem_t *mgmt_desc;
 	uint32_t pool_size;
 	uint32_t index;
+	struct wlan_lmac_if_tx_ops *tx_ops;
 
 	if (!pdev) {
 		mgmt_txrx_err("pdev context is NULL");
@@ -744,6 +807,12 @@ QDF_STATUS wlan_mgmt_txrx_pdev_close(struct wlan_objmgr_pdev *pdev)
 	psoc = wlan_pdev_get_psoc(pdev);
 	if (!psoc) {
 		mgmt_txrx_err("psoc unavailable for pdev %pK", pdev);
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	tx_ops = wlan_psoc_get_lmac_if_txops(psoc);
+	if (!tx_ops) {
+		mgmt_txrx_err("tx_ops is NULL");
 		return QDF_STATUS_E_NULL_VALUE;
 	}
 
@@ -764,13 +833,13 @@ QDF_STATUS wlan_mgmt_txrx_pdev_close(struct wlan_objmgr_pdev *pdev)
 
 	for (index = 0; index < pool_size; index++) {
 		if (mgmt_txrx_pdev_ctx->mgmt_desc_pool.pool[index].in_use) {
-			mgmt_txrx_info(
+			mgmt_txrx_debug(
 				"mgmt descriptor with desc id: %d not in freelist",
 				index);
 			mgmt_desc = &mgmt_txrx_pdev_ctx->mgmt_desc_pool.pool[index];
-			if (psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.
+			if (tx_ops->mgmt_txrx_tx_ops.
 					tx_drain_nbuf_op)
-				psoc->soc_cb.tx_ops.mgmt_txrx_tx_ops.
+				tx_ops->mgmt_txrx_tx_ops.
 					tx_drain_nbuf_op(pdev, mgmt_desc->nbuf);
 			qdf_nbuf_free(mgmt_desc->nbuf);
 			wlan_objmgr_peer_release_ref(mgmt_desc->peer,

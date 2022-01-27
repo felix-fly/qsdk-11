@@ -158,6 +158,14 @@ config MHI_DEBUG
 	   throughput as individual MHI packets and state transitions
 	   will be logged.
 
+config MHI_BUS_TEST
+	tristate "MHI bus Test driver"
+	default n
+	depends on MHI_BUS
+	select IPQ_SUBSYSTEM_RESTART
+	help
+	 Test driver for testing the MHI bus
+
 source "drivers/bus/mhi/controllers/Kconfig"
 source "drivers/bus/mhi/devices/Kconfig"
 

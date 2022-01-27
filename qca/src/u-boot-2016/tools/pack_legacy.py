@@ -720,7 +720,7 @@ class Pack(object):
             if "ipq40xx" in KERNEL_IMG_NAME:
                 DTB = "qcom-ipq4019-ap.dk04.1-c1.dtb"
                 BASE_ADDR = "0x80200000"
-                BOOT_ARGS = "\'console=ttyMSM0,115200 root=/dev/mmcblk0p12 rootwait\'"
+                BOOT_ARGS = "\'rootfsname=rootfs rootdelay=1\'"
             elif "ipq806x" in KERNEL_IMG_NAME:
                 DTB = "qcom-ipq8064-ap145.dtb"
                 BASE_ADDR = "0x42200000"

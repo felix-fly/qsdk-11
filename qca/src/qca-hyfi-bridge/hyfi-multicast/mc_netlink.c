@@ -246,7 +246,7 @@ static int mc_rtports_fillbuf(struct mc_struct *mc, void *buf,
         }
     }
 
-#ifdef MC_SUPPORT_MLD
+#ifdef HYBRID_MC_MLD
     rhead = &mc->rp.mld_rlist;
     if (!hlist_empty(rhead)) {
         struct mc_querier_entry *qe;
@@ -396,7 +396,11 @@ static void mc_group_list_add(struct mc_ip *pgroup, struct mc_glist_entry **ghea
     *ghead = pge;
 }
 
-static void mc_group_notify_one(struct mc_struct *mc, struct mc_ip *pgroup)
+/*
+ *  mc_group_notify_one
+ *  notify a group to the listeners
+ */
+void mc_group_notify_one(struct mc_struct *mc, struct mc_ip *pgroup)
 {
     struct net_device *brdev;
 
@@ -510,7 +514,7 @@ static void mc_set_psw_flood(struct mc_struct *mc, void *param, __be32 param_len
     }
 }
 
-static void mc_netlink_receive(struct sk_buff *__skb)
+static void __mc_netlink_receive(struct sk_buff *__skb)
 {
     struct net_device *brdev = NULL;
     struct hyfi_net_bridge *hyfi_br;
@@ -519,7 +523,7 @@ static void mc_netlink_receive(struct sk_buff *__skb)
     void *hymsgdata = NULL;
     u32 pid, seq, msgtype;
     struct __hyctl_msg_header *hymsghdr;
-    struct mc_struct *mc;
+    struct mc_struct *mc = NULL;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
     if ((skb = skb_clone(__skb, GFP_KERNEL)) == NULL)
@@ -622,16 +626,16 @@ static void mc_netlink_receive(struct sk_buff *__skb)
                 break;
             case HYFI_SET_MC_ADD_ACL_RULE:
                 {
-                    spin_lock(&mc->lock);
+                    spin_lock_bh(&mc->lock);
                     mc_acltbl_update(mc, hymsgdata);
-                    spin_unlock(&mc->lock);
+                    spin_unlock_bh(&mc->lock);
                 }
                 break;
             case HYFI_SET_MC_FLUSH_ACL_RULE:
                 {
-                    spin_lock(&mc->lock);
+                    spin_lock_bh(&mc->lock);
                     mc_acltbl_flush(mc, hymsgdata);
-                    spin_unlock(&mc->lock);
+                    spin_unlock_bh(&mc->lock);
                 }
                 break;
             case HYFI_SET_MC_CONVERT_ALL:
@@ -685,49 +689,47 @@ static void mc_netlink_receive(struct sk_buff *__skb)
                 {
                     struct __mc_param_value *i = (struct __mc_param_value *)hymsgdata;
                     if (i->val) {
+                        spin_lock_bh(&mc->lock);
                         mc->local_query_interval = i->val * HZ;
                         if (timer_pending(&mc->qtimer) ?
                             time_after(mc->qtimer.expires, jiffies + mc->local_query_interval) :
-                                try_to_del_timer_sync(&mc->qtimer) >= 0)
-                            mod_timer(&mc->qtimer, jiffies + mc->local_query_interval);
+                                try_to_del_timer_sync(&mc->qtimer) >= 0) {
+                            if (mc->started)
+                                mod_timer(&mc->qtimer, jiffies + mc->local_query_interval);
+                        }
+                        spin_unlock_bh(&mc->lock);
                     }
                     MC_PRINT(KERN_INFO "%s: Set local query interval to %u\n",__func__, i->val);
                 }
                 break;
             case HYFI_SET_MC_PSW_ENCAP:
                 {
-                    rcu_read_lock();
                     mc_set_psw_encap(mc, hymsgdata, hymsghdr->buf_len);
-                    rcu_read_unlock();
                 }
                 break;
             case HYFI_SET_MC_PSW_FLOOD:
                 {
                     struct mc_glist_entry *ghead = NULL;
-                    rcu_read_lock();
                     mc_set_psw_flood(mc, hymsgdata, hymsghdr->buf_len, &ghead);
-                    rcu_read_unlock();
-
-                    /*lock free callback*/
                     mc_group_notify(mc, &ghead);
                 }
                 break;
            case HYFI_GET_MC_ACL:
                 {
-                    spin_lock(&mc->lock);
+                    spin_lock_bh(&mc->lock);
                     if (mc_acltbl_fillbuf(mc, hymsgdata, hymsghdr->buf_len, 
                             &hymsghdr->bytes_written, &hymsghdr->bytes_needed))
                         hymsghdr->status = HYFI_STATUS_BUFFER_OVERFLOW;
-                    spin_unlock(&mc->lock);
+                    spin_unlock_bh(&mc->lock);
                 }
                 break;
             case HYFI_GET_MC_MDB:
                 {
-                    rcu_read_lock();
+                    spin_lock_bh(&mc->lock);
                     if (mc_mdbtbl_fillbuf(mc, hymsgdata, hymsghdr->buf_len,
                                 &hymsghdr->bytes_written, &hymsghdr->bytes_needed))
                         hymsghdr->status = HYFI_STATUS_BUFFER_OVERFLOW;
-                    rcu_read_unlock();
+                    spin_unlock_bh(&mc->lock);
                 }
                 break;
             case HYFI_SET_MC_ROUTER:
@@ -759,6 +761,18 @@ static void mc_netlink_receive(struct sk_buff *__skb)
 #endif
     NETLINK_CB(skb).dst_group = 0; /* unicast */
     netlink_unicast(mc_nl_sk, skb, pid, MSG_DONTWAIT);
+}
+
+/*
+ * mc_netlink_receive
+ *  netlink message receiver
+ *  the entry of netlink message, rcu protected the further process
+ */
+static void mc_netlink_receive(struct sk_buff *__skb)
+{
+    rcu_read_lock();
+    __mc_netlink_receive(__skb);
+    rcu_read_unlock();
 }
 
 void mc_netlink_event_send(struct mc_struct *mc, u32 event_type, u32 event_len, void *event_data)

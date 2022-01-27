@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015-2016, 2019 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015-2016, 2019-2021, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -17,6 +17,13 @@
 #include <linux/if_pppox.h>
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_acct.h>
+
+/*
+ * Flag to limit the number of DB connections at any point to the maximum number
+ * that can be accelerated by NSS. This may need to be enabled for low memory
+ * platforms to control memory allocated by ECM databases.
+ */
+extern unsigned int ecm_front_end_conn_limit;
 
 #ifdef ECM_FRONT_END_NSS_ENABLE
 #include "ecm_nss_bond_notifier.h"
@@ -97,19 +104,18 @@ static inline bool ecm_front_end_acceleration_rejected(struct sk_buff *skb)
 		 */
 		return false;
 	}
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
 	if (unlikely(nf_ct_is_untracked(ct))) {
+#else
+	if (unlikely(ctinfo == IP_CT_UNTRACKED)) {
+#endif
 		/*
 		 * Untracked traffic certainly can't be accelerated.
 		 */
 		return true;
 	}
 
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
-	acct = nf_conn_acct_find(ct);
-#else
 	acct = nf_conn_acct_find(ct)->counter;
-#endif
 	if (acct) {
 		long long packets = atomic64_read(&acct[CTINFO2DIR(ctinfo)].packets);
 		if ((packets > 0xff) && (packets & 0xff)) {
@@ -175,7 +181,14 @@ static inline void ecm_front_end_flow_and_return_directions_get(struct nf_conn *
  */
 static inline bool ecm_front_end_common_connection_defunct_check(struct ecm_front_end_connection_instance *feci)
 {
-	DEBUG_ASSERT(spin_is_locked(&feci->lock), "%p: feci lock is not held\n", feci);
+	DEBUG_ASSERT(spin_is_locked(&feci->lock), "%px: feci lock is not held\n", feci);
+
+	/*
+	 * If we have not completed the destroy failure handling, do nothing.
+	 */
+	if (feci->destroy_fail_handle_pending) {
+		return false;
+	}
 
 	/*
 	 * If connection has already become defunct, do nothing.
@@ -217,7 +230,7 @@ static inline bool ecm_front_end_common_connection_defunct_check(struct ecm_fron
  */
 static inline bool ecm_front_end_common_connection_decelerate_accel_mode_check(struct ecm_front_end_connection_instance *feci)
 {
-	DEBUG_ASSERT(spin_is_locked(&feci->lock), "%p: feci lock is not held\n", feci);
+	DEBUG_ASSERT(spin_is_locked(&feci->lock), "%px: feci lock is not held\n", feci);
 
 	/*
 	 * If decelerate is in error or already pending then ignore
@@ -263,7 +276,7 @@ static inline bool ecm_front_end_destroy_failure_handle(struct ecm_front_end_con
 		 */
 		feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_FAIL_DRIVER;
 		spin_unlock_bh(&feci->lock);
-		DEBUG_WARN("%p: Decel failed - driver fail limit\n", feci);
+		DEBUG_WARN("%px: Decel failed - driver fail limit\n", feci);
 		return true;
 	}
 
@@ -274,6 +287,7 @@ static inline bool ecm_front_end_destroy_failure_handle(struct ecm_front_end_con
 	 */
 	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
 	feci->is_defunct = false;
+	feci->destroy_fail_handle_pending = true;
 	spin_unlock_bh(&feci->lock);
 
 	/*
@@ -282,9 +296,33 @@ static inline bool ecm_front_end_destroy_failure_handle(struct ecm_front_end_con
 	 */
 	ecm_db_connection_defunct_timer_remove_and_set(feci->ci, ECM_DB_TIMER_GROUPS_CONNECTION_DEFUNCT_RETRY_TIMEOUT);
 
+	spin_lock_bh(&feci->lock);
+	feci->destroy_fail_handle_pending = false;
+	spin_unlock_bh(&feci->lock);
+
 	return false;
 }
 
 extern void ecm_front_end_bond_notifier_stop(int num);
 extern int ecm_front_end_bond_notifier_init(struct dentry *dentry);
 extern void ecm_front_end_bond_notifier_exit(void);
+
+extern bool ecm_front_end_gre_proto_is_accel_allowed(struct net_device *indev,
+						      struct net_device *outdev,
+						      struct sk_buff *skb,
+						      struct nf_conntrack_tuple *tuple,
+						      int ip_version);
+extern uint64_t ecm_front_end_get_slow_packet_count(struct ecm_front_end_connection_instance *feci);
+#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+void ecm_front_end_tcp_set_dscp_ext(struct nf_conn *ct,
+					      struct ecm_tracker_ip_header *iph,
+					      struct sk_buff *skb,
+					      ecm_tracker_sender_type_t sender);
+#endif
+void ecm_front_end_fill_ovs_params(struct ecm_front_end_ovs_params ovs_params[],
+					ip_addr_t ip_src_addr, ip_addr_t ip_src_addr_nat,
+					ip_addr_t ip_dest_addr, ip_addr_t ip_dest_addr_nat,
+					int src_port, int src_port_nat,
+					int dest_port, int dest_port_nat, ecm_db_direction_t ecm_dir);
+void ecm_front_end_common_sysctl_register(void);
+void ecm_front_end_common_sysctl_unregister(void);

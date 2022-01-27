@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2016, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, 2020-2021, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -20,7 +20,8 @@ extern int ecm_front_end_ipv6_stopped;	/* When non-zero further traffic will not
 extern int ecm_front_end_ipv6_mc_stopped;	/* When non-zero further traffic will not be processed */
 #endif
 
-#ifdef ECM_FRONT_END_NSS_ENABLE
+
+#if defined(ECM_FRONT_END_NSS_ENABLE) && defined(ECM_IPV6_ENABLE)
 #include "ecm_nss_ipv6.h"
 #else
 static inline int ecm_nss_ipv6_init(struct dentry *dentry)

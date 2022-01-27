@@ -125,7 +125,6 @@ CONFIGURE_ARGS += \
 EXTRA_LDFLAGS+= \
 	-Wl,-rpath-link=$(STAGING_DIR)/usr/lib \
 	$(if $(ICONV_FULL),-liconv) \
-	$(TOOLCHAIN_DIR)/lib/libm.a \
 
 
 define Package/gst1-plugins-ugly/install

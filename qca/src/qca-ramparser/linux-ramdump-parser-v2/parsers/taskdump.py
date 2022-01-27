@@ -16,12 +16,10 @@ from parser_util import register_parser, RamParser, cleanupString
 
 def find_panic(ramdump, addr_stack, thread_task_name):
     if ramdump.arm64:
-        stack_size = 0x4000
         increment = 8
     else:
-        stack_size = 0x2000
         increment = 4
-    for i in range(addr_stack, addr_stack + stack_size, increment):
+    for i in range(addr_stack, addr_stack + ramdump.thread_size, increment):
         if ramdump.arm64:
             pc = ramdump.read_word(i + 8) - 4
             fp = ramdump.read_word(i)
@@ -34,8 +32,8 @@ def find_panic(ramdump, addr_stack, thread_task_name):
             fp = 0
 
         l = ramdump.unwind_lookup(pc,0,0)
-        if l is not None and len(l) > 3:
-            s, offset, foo, symtab_st_size = l
+        if l is not None and len(l) >= 3:
+            s, offset, foo = l[:3]
             if s == 'panic':
                 print_out_str('Faulting process found! Name {0})'.format(thread_task_name))
                 ramdump.unwind.unwind_backtrace(spx, fp, pc, lr, '')
@@ -235,9 +233,13 @@ class DumpTasks(RamParser):
 class CheckForPanic(RamParser):
 
     def parse(self):
-        addr = self.ramdump.addr_lookup('in_panic')
-
-        result = self.ramdump.read_word(addr)
+        if (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (5, 4):
+            addr = self.ramdump.addr_lookup('tlv_msg')
+            offset_is_panic = self.ramdump.field_offset('struct ctx_save_tlv_msg', 'is_panic')
+            result = self.ramdump.read_byte(addr + offset_is_panic)
+        else:
+            addr = self.ramdump.addr_lookup('in_panic')
+            result = self.ramdump.read_word(addr)
 
         if result == 1:
             print_out_str('-------------------------------------------------')
@@ -280,6 +282,9 @@ class CheckForDeadlock(RamParser):
 class CheckForRegister(RamParser):
 
     def parse(self):
+        if(self.ramdump.arm64 and (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (5, 4)):
+            print_out_str("Check-for-register info disabled in kernel 5.4 for 64 bit")
+            return None
         reg_addr = self.get_pc_register(self.ramdump.outdir + '/dmesg.txt')
         if reg_addr is not None:
             pc_addr, lr_addr = reg_addr

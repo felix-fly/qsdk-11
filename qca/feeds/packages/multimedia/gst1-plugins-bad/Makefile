@@ -157,7 +157,6 @@ TARGET_CFLAGS+= -std=gnu99
 EXTRA_LDFLAGS+= \
 	-Wl,-rpath-link=$(STAGING_DIR)/usr/lib \
 	$(if $(ICONV_FULL),-liconv) \
-	$(TOOLCHAIN_DIR)/lib/libm.a \
 
 
 define Package/gst1-plugins-bad/install
@@ -231,10 +230,12 @@ define GstBuildPlugin
 	$(INSTALL_DIR) $$(1)/usr/lib/gstreamer-$(GST_VERSION)
 	( cd $(PKG_INSTALL_DIR); $(CP) \
 		./usr/lib/gstreamer-$(GST_VERSION)/libgst$(1).so* \
-		./usr/lib/libgstmpegts-1.0.so* \
-		./usr/lib/libgstcodecparsers-1.0.so* \
-		$$(1)/usr/lib/gstreamer-$(GST_VERSION)/ \
+		$$(1)/usr/lib/gstreamer-$(GST_VERSION)/; \
 	)
+	if [ "$(1)" = 'mpegtsdemux' ]; then \
+	( cd $(PKG_INSTALL_DIR); $(CP) ./usr/lib/libgstmpegts-1.0.so* ./usr/lib/libgstcodecparsers-1.0.so* $$(1)/usr/lib/; \
+	) \
+	fi
   endef
 
   $$(eval $$(call BuildPackage,gst1-mod-$(1)))
@@ -258,7 +259,7 @@ $(eval $(call GstBuildPlugin,id3tag,id3tag support,tag,,))
 $(eval $(call GstBuildPlugin,jpegformat,jpegformat support,tag,,))
 $(eval $(call GstBuildPlugin,mpegpsdemux,mpegpsdemux support,pbutils,,))
 $(eval $(call GstBuildPlugin,mpegpsmux,mpegpsmux support,,,))
-$(eval $(call GstBuildPlugin,mpegtsdemux,mpegtsdemux support,mpegts pbutils,,))
+$(eval $(call GstBuildPlugin,mpegtsdemux,mpegtsdemux support,pbutils,,))
 $(eval $(call GstBuildPlugin,mpegtsmux,mpegtsmux support,video,,))
 $(eval $(call GstBuildPlugin,mxf,mxf support,badbase audio video,,))
 $(eval $(call GstBuildPlugin,opusparse,OPUS streams library,pbutils,,+libopus))

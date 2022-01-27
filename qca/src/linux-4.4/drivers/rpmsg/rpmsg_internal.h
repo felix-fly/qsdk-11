@@ -83,7 +83,7 @@ struct device *rpmsg_find_device(struct device *parent,
  */
 static inline int rpmsg_chrdev_register_device(struct rpmsg_device *rpdev)
 {
-	strcpy(rpdev->id.name, "rpmsg_chrdev");
+	strlcpy(rpdev->id.name, "rpmsg_chrdev", RPMSG_NAME_SIZE);
 	rpdev->driver_override = "rpmsg_chrdev";
 
 	return rpmsg_register_device(rpdev);

@@ -21,3 +21,4 @@ obj-$(CONFIG_CORESIGHT_REMOTE_ETM) += coresight-remote-etm.o
 obj-$(CONFIG_CORESIGHT_QPDI) += coresight-qpdi.o
 obj-$(CONFIG_CORESIGHT_HWEVENT) += coresight-hwevent.o
 obj-$(CONFIG_CORESIGHT_SOURCE_DUMMY) += coresight-dummy.o
+obj-$(CONFIG_CORESIGHT_STREAM) += coresight-stream.o

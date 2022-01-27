@@ -1,4 +1,4 @@
-/* Copyright (c) 2014,2015-2019 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014,2015-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -339,7 +339,6 @@ static void nss_cfi_ocf_process_done(struct nss_crypto_buf *buf)
 
 	nss_cfi_assert(buf);
 
-
 	crp = (struct cryptop *)buf->cb_ctx;
 	crd = crp->crp_desc;
 
@@ -529,7 +528,7 @@ static int nss_cfi_ocf_process(device_t dev, struct cryptop *crp, int hint)
 
 		params.cipher_skip = cip_crd->crd_skip;
 
-		nss_cfi_dbg("cipher len %d cipher skip %d iv_addr %p\n",
+		nss_cfi_dbg("cipher len %d cipher skip %d iv_addr %px\n",
 				cipher_len, params.cipher_skip, iv_addr);
 	}
 

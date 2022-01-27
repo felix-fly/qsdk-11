@@ -209,7 +209,7 @@ bool lacpd_aggregator_del_port(struct lacpd_aggregator *agg, struct lacpd_port *
  */
 bool lacpd_aggregator_attach_port(struct lacpd_aggregator *agg, struct lacpd_port *port)
 {
-	char dev_name[LACP_NAME_SIZE];
+	char dev_name[LACP_NAME_SIZE + 32];
 
 	if (port->dev_ifindex == 0) {
 		DP(LACP, CRIT, "No physical device for port");

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -16,7 +16,7 @@
 
 /**
  * @file nss_wifi_vdev.h
- *	NSS TO HLOS Wi-Fi virtual device interface definitions.
+ *	NSS-to-HLOS Wi-Fi virtual device interface definitions.
  */
 
 #ifndef __NSS_WIFI_VDEV_H
@@ -74,6 +74,8 @@ enum nss_wifi_vdev_msg_types {
 	NSS_WIFI_VDEV_INTERFACE_RECOVERY_RESET_MSG,
 	NSS_WIFI_VDEV_INTERFACE_RECOVERY_RECONF_MSG,
 	NSS_WIFI_VDEV_SET_GROUP_KEY,
+	NSS_WIFI_VDEV_HMMC_MEMBER_ADD_MSG,
+	NSS_WIFI_VDEV_HMMC_MEMBER_DEL_MSG,
 	NSS_WIFI_VDEV_MAX_MSG
 };
 
@@ -128,6 +130,15 @@ enum nss_wifi_vdev_err_types {
 	NSS_WIFI_VDEV_VLAN_MODE_CONFIG_FAIL,
 	NSS_WIFI_VDEV_RECOVERY_RESET_FAIL,
 	NSS_WIFI_VDEV_RECOVERY_RECONF_FAIL,
+	NSS_WIFI_VDEV_CONFIG_GROUP_KEY_FAIL,
+	NSS_WIFI_VDEV_MULTIPASS_NOT_ENABLED,
+	NSS_WIFI_VDEV_ALLOC_VLAN_MAP_FAILED,
+	NSS_WIFI_VDEV_MTU_CHANGE_FAIL,
+	NSS_WIFI_VDEV_MAC_ADDR_CHANGE_FAIL,
+	NSS_WIFI_VDEV_PPE_PORT_CREATE_FAIL,
+	NSS_WIFI_VDEV_PPE_PORT_DESTROY_FAIL,
+	NSS_WIFI_VDEV_PPE_VSI_ASSIGN_FAIL,
+	NSS_WIFI_VDEV_PPE_VSI_UNASSIGN_FAIL,
 	NSS_WIFI_VDEV_EINV_MAX_CFG
 };
 
@@ -150,6 +161,11 @@ enum nss_wifi_vdev_ext_data_pkt_type {
 	NSS_WIFI_VDEV_EXT_TX_COMPL_PKT_TYPE = 11,	/**< Tx completion. */
 	NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_WDS_LEARN = 12,	/**< WDS source port learning command. */
 	NSS_WIFI_VDEV_EXT_DATA_PPDU_INFO = 13,		/**< PPDU metadata information. */
+	NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_MCBC_RX = 14,	/**< Multicast/broadcast packet received. */
+	NSS_WIFI_VDEV_MESH_EXT_DATA_PKT_TYPE_RX_SPL_PACKET = 15,
+							/**< Mesh link VAP special packet. */
+	NSS_WIFI_VDEV_MESH_EXT_DATA_PKT_TYPE_RX_MCAST_EXC = 16,
+							/**< Mesh link VAP multicast packet. */
 	NSS_WIFI_VDEV_EXT_DATA_PKT_TYPE_MAX
 };
 
@@ -180,6 +196,14 @@ enum nss_wifi_vdev_cmd {
 	NSS_WIFI_VDEV_CFG_AST_OVERRIDE_CMD,	/**< Configuration to set AST (Address Search Table) override on VAP. */
 	NSS_WIFI_VDEV_CFG_SON_CAP_CMD,		/**< Configuration to set software defined network capability on VAP. */
 	NSS_WIFI_VDEV_CFG_MULTIPASS_CMD,	/**< Configuration to enable multipass phrase capability on VAP. */
+	NSS_WIFI_VDEV_CFG_HLOS_TID_OVERRIDE_CMD,
+					/**< Configuration to enable HLOS TID override on VAP. */
+	NSS_WIFI_VDEV_ENABLE_IGMP_ME_CMD,	/**< Configuration to set IGMP multicast enhancement on VAP. */
+	NSS_WIFI_VDEV_CFG_WDS_BACKHAUL_CMD,
+					/**< Configuration to set WDS backhaul extension on VAP. */
+	NSS_WIFI_VDEV_CFG_MCBC_EXC_TO_HOST_CMD, /**< Configuration to set multicast/broadcast exception to host on VAP. */
+	NSS_WIFI_VDEV_CFG_PEER_AUTHORIZE_CMD,
+					/**< Configuration to enable peer authorization on VAP. */
 	NSS_WIFI_VDEV_MAX_CMD
 };
 
@@ -200,19 +224,24 @@ enum nss_wifi_vdev_dp_type {
 enum nss_wifi_vdev_vlan_tagging_mode {
 	NSS_WIFI_VDEV_VLAN_NONE,	/**< VLAN support disabled. */
 
-	/*
+	/**
 	 * Default VLAN mode to add VLAN tag in Rx path and
 	 * remove VLAN tag only when matching with configured
 	 * VLAN tag in Tx path.
 	 */
 	NSS_WIFI_VDEV_VLAN_INGRESS_ADD_EGRESS_STRIP_ON_ID_MATCH,
 
-	/*
+	/**
 	 * Port-based VLAN mode to add VLAN tag in Rx path
 	 * and remove any VLAN tag in Tx path.
 	 */
 	NSS_WIFI_VDEV_VLAN_INGRESS_ADD_EGRESS_STRIP_ALWAYS,
 	NSS_WIFI_VDEV_VLAN_MAX		/**< Wi-Fi maximum VLAN support type. */
+};
+
+enum vap_ext_mode {
+	WIFI_VDEV_EXT_MODE_MESH_LINK = 1,	/* Wi-Fi mesh VAP mode */
+	WIFI_VDEV_EXT_MODE_MAX,			/* Wi-Fi maximum VAP mode */
 };
 
 /**
@@ -240,7 +269,9 @@ struct nss_wifi_vdev_config_msg {
 					/**< VAP is configured as a smart monitor VAP. */
 	uint8_t is_wrap;		/**< Specifies whether the VAP is a WRAP-AP. */
 	uint8_t is_nss_qwrap_en;	/**< VAP is configured for NSS firmware QWRAP logic. */
-	uint8_t reserved[2];		/**< Reserved for 4-byte alignment padding. */
+	uint8_t tx_per_pkt_vdev_id_check;	/**< Transmit per-packet virtual device ID check. */
+	uint8_t align_pad;		/**< Reserved field. */
+	uint32_t vap_ext_mode;		/**< Different VAP extended modes. */
 };
 
 /**
@@ -427,6 +458,66 @@ struct nss_wifi_vdev_me_snptbl_grp_mbr_update_msg {
 	uint8_t nsrcs;		/**< Number of source IP addresses for selective source multicast. */
 	uint8_t src_ip_addr[NSS_WIFI_VDEV_IPV6_ADDR_LENGTH * NSS_WIFI_MAX_SRCS];
 				/**< Source IP address. */
+};
+
+/**
+ * nss_wifi_vdev_me_hmmc_add_msg
+ *	Information for adding an entry into the host-managed multicast list.
+ */
+struct nss_wifi_vdev_me_hmmc_add_msg {
+	uint32_t ether_type;	/**< IPv4 or IPv6. */
+	union {
+		uint32_t ipv4_addr;
+			/**< IPv4 multicast group address. */
+		uint8_t ipv6_addr[NSS_WIFI_VDEV_IPV6_ADDR_LENGTH];
+			/**< IPv6 multicast group address. */
+	} u;	/**< Type of group addresses. */
+	uint32_t netmask;	/**< IP subnet netmask. */
+};
+
+/**
+ * nss_wifi_vdev_me_hmmc_del_msg
+ *	Information for deleting an entry from the host-managed multicast list.
+ */
+struct nss_wifi_vdev_me_hmmc_del_msg {
+	uint32_t ether_type;	/**< IPv4 or IPv6. */
+	union {
+		uint32_t ipv4_addr;
+			/**< IPv4 multicast group address. */
+		uint8_t ipv6_addr[NSS_WIFI_VDEV_IPV6_ADDR_LENGTH];
+			/**< IPv6 multicast group address. */
+	} u;	/**< Type of group addresses. */
+	uint32_t netmask;	/**< IP subnet netmask. */
+};
+
+/**
+ * nss_wifi_vdev_me_deny_ip_add_msg
+ *	Information for adding an entry into the denylist.
+ */
+struct nss_wifi_vdev_me_deny_ip_add_msg {
+	uint32_t ether_type;	/**< IPv4 or IPv6. */
+	union {
+		uint32_t ipv4_addr;
+			/**< IPv4 multicast group address. */
+		uint8_t ipv6_addr[NSS_WIFI_VDEV_IPV6_ADDR_LENGTH];
+			/**< IPv6 multicast group address. */
+	} u;	/**< Type of group addresses. */
+	uint32_t netmask;	/**< IP subnet netmask. */
+};
+
+/**
+ * nss_wifi_vdev_me_deny_ip_del_msg
+ *	Information for deleting an entry from the denylist.
+ */
+struct nss_wifi_vdev_me_deny_ip_del_msg {
+	uint32_t ether_type;	/**< IPv4 or IPv6. */
+	union {
+		uint32_t ipv4_addr;
+			/**< IPv4 multicast group address. */
+		uint8_t ipv6_addr[NSS_WIFI_VDEV_IPV6_ADDR_LENGTH];
+			/**< IPv6 multicast group address. */
+	} u;	/**< Type of group addresses. */
+	uint32_t netmask;	/**< IP subnet netmask. */
 };
 
 /**
@@ -697,6 +788,9 @@ struct nss_wifi_vdev_wds_per_packet_metadata {
 	enum wifi_vdev_ext_wds_info_type wds_type;
 				/**< WDS message type. */
 	uint8_t addr4_valid;	/**< 802.11 4th address valid flag. */
+	uint8_t rsvd;		/**< Reserve bytes for alignment. */
+	uint16_t sa_idx;	/**< Source address index. */
+	uint16_t sa_sw_peer_id;	/**< Software/Address-Search-Table peer ID. */
 };
 
 /**
@@ -758,7 +852,9 @@ struct nss_wifi_vdev_per_packet_metadata {
  *	Metadata payload for Mesh mode receive.
  */
 struct nss_wifi_vdev_meshmode_rx_metadata {
-	uint16_t rs_ratephy;	/**< PHY rate. */
+	uint16_t rs_ratephy_lo;	/**< PHY rate lower order bytes. */
+	uint16_t rs_ratephy_hi;	/**< PHY rate higher order bytes. */
+	uint16_t cntr_chan_freq;	/** Center channel frequency. */
 	uint16_t vdev_id;	/**< Virtual device ID. */
 	uint16_t peer_id;	/**< Peer ID. */
 	uint16_t rs_rssi;	/**< Received signal strength indication (noise floor adjusted). */
@@ -883,6 +979,17 @@ struct nss_wifi_vdev_mcast_enhance_stats {
 	 * Number of multicast bytes received for multicast enhancement.
 	 */
 	uint32_t mcast_rcvd_bytes;
+
+	/**
+	 * Number of IGMP packets received for conversion to unicast.
+	 */
+	uint32_t igmp_rcvd;
+
+	/**
+	 * Number of IGMP packets converted to unicast as a part of
+	 * VoW IGMP improvements.
+	 */
+	uint32_t igmp_ucast_converted;
 };
 
 /**
@@ -891,8 +998,8 @@ struct nss_wifi_vdev_mcast_enhance_stats {
  */
 struct nss_wifi_vdev_stats_sync_msg {
 	uint32_t dropped;			/**< Number of dropped packets. */
-	uint32_t tx_enqueue_cnt;		/**< Tx pnode enqueue count. */
-	uint32_t tx_enqueue_fail_cnt;		/**< Tx pnode enqueue count. */
+	uint32_t tx_enqueue_cnt;		/**< Transmit pnode enqueue count. */
+	uint32_t tx_enqueue_fail_cnt;		/**< Transmit pnode enqueue count. */
 	uint32_t tx_intra_bss_enqueue_cnt;	/**< Intra BSS enqueue count. */
 	uint32_t tx_intra_bss_enqueue_fail_cnt;
 						/**< Intra BSS enqueue fail count. */
@@ -900,12 +1007,12 @@ struct nss_wifi_vdev_stats_sync_msg {
 						/**< Virual device multicast/broadcast packet count in AP mode. */
 	uint32_t tx_intra_bss_mcast_send_fail_cnt;
 						/**< Virtual device multicast/broadcast packet count in AP mode. */
-	uint32_t tx_enqueue_bytes;		/**< Tx enqueue bytes count. */
+	uint32_t tx_enqueue_bytes;		/**< Transmit enqueue bytes count. */
 	uint32_t rx_enqueue_cnt;		/**< Ethernet node enqueue count. */
 	uint32_t rx_enqueue_fail_cnt;		/**< Ethernet node enqueue fail count. */
 	uint32_t rx_except_enqueue_cnt;		/**< N2H (NSS to Host) node enqueue count. */
 	uint32_t rx_except_enqueue_fail_cnt;	/**< N2H (NSS to Host) node enqueue fail count. */
-	uint32_t rx_enqueue_bytes;		/**< Rx enqueue bytes count. */
+	uint32_t rx_enqueue_bytes;		/**< Receive enqueue bytes count. */
 	uint32_t rx_wds_learn_send_cnt;		/**< Virtual device WDS source port learn count. */
 	uint32_t rx_wds_learn_send_fail_cnt;	/**< Virtual device WDS source count fail. */
 	struct nss_wifi_vdev_mcast_enhance_stats wvmes;
@@ -925,6 +1032,13 @@ struct nss_wifi_vdev_stats_sync_msg {
 	uint32_t tx_eapol_cnt;			/**< Number of EAPoL frames in transmit direction. */
 	uint32_t nawds_tx_mcast_cnt;		/**< Number of NAWDS packets sent. */
 	uint32_t nawds_tx_mcast_bytes;		/**< Number of NAWDS bytes sent. */
+	uint32_t per_pkt_vdev_check_fail;	/**< Number of packets that failed vdev id check in Tx. */
+	uint32_t rx_mcast_cnt;			/**< Receive multicast packet count. */
+	uint32_t rx_mcast_bytes;		/**< Receive multicast bytes count. */
+	uint32_t rx_decrypt_err;		/**< Receive decryption error */
+	uint32_t rx_mic_err;			/**< Receive MIC error */
+	uint32_t mcbc_exc_host_fail_cnt;
+			/**< Number of multicast/broadcast packets failed to send to host through exception path. */
 };
 
 /**
@@ -955,7 +1069,15 @@ struct nss_wifi_vdev_msg {
 		struct nss_wifi_vdev_me_snptbl_grp_mbr_update_msg vdev_grp_member_update;
 				/**< Updates a snooplist group member. */
 		struct nss_wifi_vdev_me_snptbl_deny_grp_add_msg vdev_deny_member_add;
-				/**< Adds a snooplist member to a deny list. */
+				/**< Add a snooplist member to the deny list. */
+		struct nss_wifi_vdev_me_hmmc_add_msg vdev_hmmc_member_add;
+				/**< Adds a member to the HMMC list. */
+		struct nss_wifi_vdev_me_hmmc_del_msg vdev_hmmc_member_del;
+				/**< Deletes a member from the HMMC list. */
+		struct nss_wifi_vdev_me_deny_ip_add_msg vdev_deny_list_member_add;
+				/**< Adds a member to the denylist. */
+		struct nss_wifi_vdev_me_deny_ip_del_msg vdev_deny_list_member_del;
+				/**< Deletes a member from the denylist. */
 		struct nss_wifi_vdev_txmsg vdev_txmsgext;
 				/**< Transmits special data. */
 		struct nss_wifi_vdev_vow_dbg_cfg_msg vdev_vow_dbg_cfg;

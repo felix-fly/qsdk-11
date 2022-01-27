@@ -28,6 +28,9 @@
  * #define CONFIG_RUMI
  */
 
+#define CONFIG_CMD_AES
+#define CONFIG_CMD_AES_256
+
 #define CONFIG_BOARD_EARLY_INIT_F
 #define CONFIG_IPQ_NO_RELOC
 #define CONFIG_BOARD_LATE_INIT
@@ -103,6 +106,8 @@
 
 #define CONFIG_OF_COMBINE		1
 
+#define CONFIG_QCA_UBOOT_OFFSET		0xA600000
+#define CONFIG_UBOOT_END_ADDR		0x4AA00000
 #define CONFIG_QCA_SMEM_BASE		0x4AB00000
 
 #define CONFIG_IPQ_FDT_HIGH		0x4A400000
@@ -329,7 +334,6 @@ extern loff_t board_env_size;
  * Cache flush and invalidation based on L1 cache, so the cache line
  * size is configured to 64 */
 #define CONFIG_SYS_CACHELINE_SIZE  64
-#define CONFIG_CMD_CACHE
 
 /* Enabling this flag will report any L2 errors.
  * By default we are disabling it */
@@ -342,6 +346,7 @@ extern loff_t board_env_size;
 #define CONFIG_CMD_RUN
 #define CONFIG_ARMV7_PSCI
 #undef CONFIG_IPQ_ROOTFS_AUTH
+#define CONFIG_SILENT_CONSOLE
 
 #endif /* _IPQCDP_H */
 

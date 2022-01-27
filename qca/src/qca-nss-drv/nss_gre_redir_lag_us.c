@@ -1,6 +1,6 @@
 /*
- **************************************************************************
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ ****************************************************************************
+ * Copyright (c) 2018, 2020-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -11,39 +11,19 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- **************************************************************************
+ ****************************************************************************
  */
 
 #include "nss_tx_rx_common.h"
 #include "nss_gre_redir_lag_us_stats.h"
 #include "nss_gre_redir_lag_us_log.h"
+#include "nss_gre_redir_lag_us_strings.h"
 
 #define NSS_GRE_REDIR_LAG_US_TX_TIMEOUT 3000 /* 3 Seconds */
 #define NSS_GRE_REDIR_LAG_US_STATS_SYNC_PERIOD msecs_to_jiffies(4000)
 #define NSS_GRE_REDIR_LAG_US_STATS_SYNC_UDELAY 4000
 
-/*
- * nss_gre_redir_lag_us_pvt_sync_stats
- *	Hash statistics synchronization context.
- */
-struct nss_gre_redir_lag_us_pvt_sync_stats {
-	struct delayed_work nss_gre_redir_lag_us_work;			/**< Delayed work per LAG US node. */
-	struct nss_gre_redir_lag_us_msg db_sync_msg;			/**< Hash statistics message. */
-	struct nss_gre_redir_lag_us_tunnel_stats tun_stats;		/**< GRE redirect LAG common statistics. */
-	nss_gre_redir_lag_us_msg_callback_t cb;				/**< Callback for hash query message. */
-	void *app_data;							/**< app_data for hash query message. */
-	uint32_t ifnum;							/**< NSS interface number. */
-	bool valid;							/**< Valid flag. */
-};
-
-/*
- * Common context for stats update.
- */
-static struct nss_gre_redir_lag_us_cmn_ctx {
-	spinlock_t nss_gre_redir_lag_us_stats_lock;			/**< Spin lock. */
-	struct workqueue_struct *nss_gre_redir_lag_us_wq;		/**< Work queue. */
-	struct nss_gre_redir_lag_us_pvt_sync_stats stats_ctx[NSS_GRE_REDIR_LAG_MAX_NODE];
-} cmn_ctx;
+struct nss_gre_redir_lag_us_cmn_ctx cmn_ctx;
 
 /*
  * Sync response context.
@@ -83,61 +63,6 @@ static void nss_gre_redir_lag_us_callback(void *app_data, struct nss_gre_redir_l
 }
 
 /*
- * nss_gre_redir_lag_us_get_node_idx()
- *	Returns index of statistics context.
- */
-static bool nss_gre_redir_lag_us_get_node_idx(uint32_t ifnum, uint32_t *idx)
-{
-	uint32_t node_idx;
-	for (node_idx = 0; node_idx < NSS_GRE_REDIR_LAG_MAX_NODE; node_idx++) {
-		if ((cmn_ctx.stats_ctx[node_idx].valid) && (cmn_ctx.stats_ctx[node_idx].ifnum == ifnum)) {
-			*idx = node_idx;
-			return true;
-		}
-	}
-
-	return false;
-}
-
-/*
- * nss_gre_redir_lag_us_update_sync_stats()
- *	Update synchonized statistics.
- */
-static void nss_gre_redir_lag_us_update_sync_stats(struct nss_ctx_instance *nss_ctx, struct nss_gre_redir_lag_us_cmn_sync_stats_msg *ngss,
-		uint32_t ifnum)
-{
-	int idx, j;
-
-	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-	if (!nss_gre_redir_lag_us_get_node_idx(ifnum, &idx)) {
-		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("%p: Unable to update hash stats msg. Stats context not found.\n", nss_ctx);
-		return;
-	}
-
-	cmn_ctx.stats_ctx[idx].tun_stats.tx_packets += ngss->node_stats.tx_packets;
-	cmn_ctx.stats_ctx[idx].tun_stats.tx_bytes += ngss->node_stats.tx_bytes;
-	cmn_ctx.stats_ctx[idx].tun_stats.rx_packets += ngss->node_stats.rx_packets;
-	cmn_ctx.stats_ctx[idx].tun_stats.rx_bytes += ngss->node_stats.rx_bytes;
-	for (j = 0; j < NSS_MAX_NUM_PRI; j++) {
-		cmn_ctx.stats_ctx[idx].tun_stats.rx_dropped[j] += ngss->node_stats.rx_dropped[j];
-	}
-	cmn_ctx.stats_ctx[idx].tun_stats.us_stats.amsdu_pkts += ngss->us_stats.amsdu_pkts;
-	cmn_ctx.stats_ctx[idx].tun_stats.us_stats.amsdu_pkts_enqueued += ngss->us_stats.amsdu_pkts_enqueued;
-	cmn_ctx.stats_ctx[idx].tun_stats.us_stats.amsdu_pkts_exceptioned += ngss->us_stats.amsdu_pkts_exceptioned;
-	cmn_ctx.stats_ctx[idx].tun_stats.us_stats.exceptioned += ngss->us_stats.exceptioned;
-	cmn_ctx.stats_ctx[idx].tun_stats.us_stats.freed += ngss->us_stats.freed;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.add_attempt += ngss->db_stats.add_attempt;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.add_success += ngss->db_stats.add_success;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.add_fail_table_full += ngss->db_stats.add_fail_table_full;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.add_fail_exists += ngss->db_stats.add_fail_exists;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.del_attempt += ngss->db_stats.del_attempt;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.del_success += ngss->db_stats.del_success;
-	cmn_ctx.stats_ctx[idx].tun_stats.db_stats.del_fail_not_found += ngss->db_stats.del_fail_not_found;
-	spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-}
-
-/*
  * nss_gre_redir_lag_us_hash_update_stats_req()
  *	Update query hash message's index for next request.
  */
@@ -150,7 +75,7 @@ static void nss_gre_redir_lag_us_hash_update_stats_req(struct nss_ctx_instance *
 	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
 	if (!nss_gre_redir_lag_us_get_node_idx(ifnum, &idx)) {
 		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("%p: Unable to update hash stats msg. Stats context not found.\n", nss_ctx);
+		nss_warning("%px: Unable to update hash stats msg. Stats context not found.\n", nss_ctx);
 		return;
 	}
 
@@ -167,22 +92,11 @@ static void nss_gre_redir_lag_us_hash_update_stats_req(struct nss_ctx_instance *
 	 * If more hash entries are to be fetched from FW, queue work with delay of one eighth of
 	 * the polling period. Else, schedule work with a delay of polling period.
 	 */
-	if (cmn_ctx.stats_ctx[idx].db_sync_msg.msg.hash_stats.db_entry_idx) {
+	if (cmn_ctx.stats_ctx[idx].db_sync_msg.msg.hash_stats.db_entry_idx)
 		sync_delay = NSS_GRE_REDIR_LAG_US_STATS_SYNC_PERIOD / 8;
-	}
 
-	queue_delayed_work(cmn_ctx.nss_gre_redir_lag_us_wq, &(cmn_ctx.stats_ctx[idx].nss_gre_redir_lag_us_work),
-				sync_delay);
+	queue_delayed_work(cmn_ctx.nss_gre_redir_lag_us_wq, &(cmn_ctx.stats_ctx[idx].nss_gre_redir_lag_us_work), sync_delay);
 	spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-}
-
-/*
- * nss_gre_redir_lag_us_verify_ifnum()
- *	Verify interface type.
- */
-static bool nss_gre_redir_lag_us_verify_ifnum(uint32_t if_num)
-{
-	return nss_dynamic_interface_get_type(nss_gre_redir_lag_us_get_context(), if_num) == NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US;
 }
 
 /*
@@ -209,12 +123,12 @@ static void nss_gre_redir_lag_us_msg_handler(struct nss_ctx_instance *nss_ctx, s
 	 * Is this a valid request/response packet?
 	 */
 	if (ncm->type >=  NSS_GRE_REDIR_LAG_US_MAX_MSG_TYPES) {
-		nss_warning("%p: received invalid message %d for gre interface\n", nss_ctx, ncm->type);
+		nss_warning("%px: received invalid message %d for gre interface\n", nss_ctx, ncm->type);
 		return;
 	}
 
 	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_gre_redir_lag_us_msg)) {
-		nss_warning("%p: Length of message is greater than required: %d\n", nss_ctx, nss_cmn_get_msg_len(ncm));
+		nss_warning("%px: Length of message is greater than required: %d\n", nss_ctx, nss_cmn_get_msg_len(ncm));
 		return;
 	}
 
@@ -223,8 +137,8 @@ static void nss_gre_redir_lag_us_msg_handler(struct nss_ctx_instance *nss_ctx, s
 	 * to the same callback/app_data.
 	 */
 	if (ncm->response == NSS_CMN_RESPONSE_NOTIFY) {
-		ncm->cb = (nss_ptr_t)nss_ctx->nss_top->if_rx_msg_callback[ncm->interface];
-		ncm->app_data = (nss_ptr_t)nss_ctx->nss_rx_interface_handlers[nss_ctx->id][ncm->interface].app_data;
+		ncm->cb = (nss_ptr_t)nss_core_get_msg_handler(nss_ctx, ncm->interface);
+		ncm->app_data = (nss_ptr_t)nss_ctx->nss_rx_interface_handlers[ncm->interface].app_data;
 	}
 
 	/*
@@ -234,7 +148,8 @@ static void nss_gre_redir_lag_us_msg_handler(struct nss_ctx_instance *nss_ctx, s
 
 	switch (ncm->type) {
 	case NSS_GRE_REDIR_LAG_US_CMN_STATS_SYNC_MSG:
-		nss_gre_redir_lag_us_update_sync_stats(nss_ctx, &ngrm->msg.us_sync_stats, ncm->interface);
+		nss_gre_redir_lag_us_stats_sync(nss_ctx, &ngrm->msg.us_sync_stats, ncm->interface);
+		nss_gre_redir_lag_us_stats_notify(nss_ctx, ncm->interface);
 		break;
 
 	case NSS_GRE_REDIR_LAG_US_DB_HASH_NODE_MSG:
@@ -274,12 +189,12 @@ static nss_tx_status_t nss_gre_redir_lag_us_tx_msg_with_size(struct nss_ctx_inst
 	 * interface of type NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US.
 	 */
 	if (!nss_gre_redir_lag_us_verify_ifnum(ncm->interface)) {
-		nss_warning("%p: tx request for another interface: %d\n", nss_ctx, ncm->interface);
+		nss_warning("%px: tx request for another interface: %d\n", nss_ctx, ncm->interface);
 		return NSS_TX_FAILURE;
 	}
 
 	if (ncm->type >= NSS_GRE_REDIR_LAG_US_MAX_MSG_TYPES) {
-		nss_warning("%p: message type out of range: %d\n", nss_ctx, ncm->type);
+		nss_warning("%px: message type out of range: %d\n", nss_ctx, ncm->type);
 		return NSS_TX_FAILURE;
 	}
 
@@ -311,14 +226,14 @@ static nss_tx_status_t nss_gre_redir_lag_us_tx_msg_sync_with_size(struct nss_ctx
 
 	status = nss_gre_redir_lag_us_tx_msg_with_size(nss_ctx, ngrm, size);
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: gre_tx_msg failed\n", nss_ctx);
+		nss_warning("%px: gre_tx_msg failed\n", nss_ctx);
 		up(&nss_gre_redir_lag_us_sync_ctx.sem);
 		return status;
 	}
 
 	ret = wait_for_completion_timeout(&nss_gre_redir_lag_us_sync_ctx.complete, msecs_to_jiffies(NSS_GRE_REDIR_LAG_US_TX_TIMEOUT));
 	if (!ret) {
-		nss_warning("%p: GRE LAG US tx sync failed due to timeout\n", nss_ctx);
+		nss_warning("%px: GRE LAG US tx sync failed due to timeout\n", nss_ctx);
 		nss_gre_redir_lag_us_sync_ctx.response = NSS_TX_FAILURE;
 	}
 
@@ -358,7 +273,7 @@ static void nss_gre_redir_lag_us_stats_sync_req_work(struct work_struct *work)
 		}
 
 		retry--;
-		nss_warning("%p: TX_NOT_OKAY, try again later\n", nss_ctx);
+		nss_warning("%px: TX_NOT_OKAY, try again later\n", nss_ctx);
 		usleep_range(100, 200);
 	}
 
@@ -383,7 +298,7 @@ static bool nss_gre_redir_lag_us_sync_work_init(uint32_t ifnum)
 	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
 	if (!nss_gre_redir_lag_us_get_node_idx(ifnum, &idx)) {
 		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("%p: Unable to init work. Stats context not found.\n", nss_ctx);
+		nss_warning("%px: Unable to init work. Stats context not found.\n", nss_ctx);
 		return false;
 	}
 
@@ -394,7 +309,7 @@ static bool nss_gre_redir_lag_us_sync_work_init(uint32_t ifnum)
 			&(cmn_ctx.stats_ctx[idx].nss_gre_redir_lag_us_work), NSS_GRE_REDIR_LAG_US_STATS_SYNC_PERIOD);
 	if (!ret) {
 		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("%p: Unable to queue work function to work queue\n", nss_ctx);
+		nss_warning("%px: Unable to queue work function to work queue\n", nss_ctx);
 		return false;
 	}
 
@@ -415,14 +330,19 @@ static enum nss_gre_redir_lag_err_types nss_gre_redir_lag_us_unregister_if(uint3
 	nss_assert(nss_ctx);
 	nss_assert(!nss_gre_redir_lag_us_verify_ifnum(if_num));
 
+	status = nss_core_unregister_msg_handler(nss_ctx, if_num);
+	if (status != NSS_CORE_STATUS_SUCCESS) {
+		nss_warning("%px: Not able to unregister handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
+		return NSS_GRE_REDIR_LAG_ERR_CORE_UNREGISTER_FAILED;
+	}
+
 	status = nss_core_unregister_handler(nss_ctx, if_num);
 	if (status != NSS_CORE_STATUS_SUCCESS) {
-		nss_warning("%p: Not able to unregister handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
+		nss_warning("%px: Not able to unregister handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
 		return NSS_GRE_REDIR_LAG_ERR_CORE_UNREGISTER_FAILED;
 	}
 
 	nss_core_unregister_subsys_dp(nss_ctx, if_num);
-	nss_top_main.if_rx_msg_callback[if_num] = NULL;
 
 	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
 	if (!nss_gre_redir_lag_us_get_node_idx(if_num, &idx)) {
@@ -479,7 +399,22 @@ static struct nss_ctx_instance *nss_gre_redir_lag_us_register_if(uint32_t if_num
 	 */
 	status = nss_core_register_handler(nss_ctx, if_num, nss_gre_redir_lag_us_msg_handler, app_ctx);
 	if (status != NSS_CORE_STATUS_SUCCESS) {
-		nss_warning("%p: Not able to register handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
+		nss_warning("%px: Not able to register handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
+		spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
+		cmn_ctx.stats_ctx[i].valid = false;
+		cmn_ctx.stats_ctx[i].cb = NULL;
+		cmn_ctx.stats_ctx[i].app_data = NULL;
+		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
+		return NULL;
+	}
+
+	/*
+	 * Registering handler for sending tunnel interface msgs to NSS.
+	 */
+	status = nss_core_register_msg_handler(nss_ctx, if_num, cb_func_msg);
+	if (status != NSS_CORE_STATUS_SUCCESS) {
+		nss_core_unregister_handler(nss_ctx, if_num);
+		nss_warning("%px: Not able to register handler for gre_lag interface %d with NSS core\n", nss_ctx, if_num);
 		spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
 		cmn_ctx.stats_ctx[i].valid = false;
 		cmn_ctx.stats_ctx[i].cb = NULL;
@@ -490,8 +425,33 @@ static struct nss_ctx_instance *nss_gre_redir_lag_us_register_if(uint32_t if_num
 
 	nss_core_register_subsys_dp(nss_ctx, if_num, cb_func_data, NULL, NULL, netdev, features);
 	nss_core_set_subsys_dp_type(nss_ctx, netdev, if_num, type);
-	nss_top_main.if_rx_msg_callback[if_num] = cb_func_msg;
 	return nss_ctx;
+}
+
+/*
+ * nss_gre_redir_lag_us_get_node_idx()
+ *	Returns index of statistics context.
+ */
+bool nss_gre_redir_lag_us_get_node_idx(uint32_t ifnum, uint32_t *idx)
+{
+	uint32_t node_idx;
+	for (node_idx = 0; node_idx < NSS_GRE_REDIR_LAG_MAX_NODE; node_idx++) {
+		if ((cmn_ctx.stats_ctx[node_idx].valid) && (cmn_ctx.stats_ctx[node_idx].ifnum == ifnum)) {
+			*idx = node_idx;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+ * nss_gre_redir_lag_us_verify_ifnum()
+ *	Verify interface type.
+ */
+bool nss_gre_redir_lag_us_verify_ifnum(uint32_t if_num)
+{
+	return nss_dynamic_interface_get_type(nss_gre_redir_lag_us_get_context(), if_num) == NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US;
 }
 
 /*
@@ -512,7 +472,7 @@ bool nss_gre_redir_lag_us_configure_node(uint32_t ifnum,
 		struct nss_gre_redir_lag_us_config_msg *ngluc)
 {
 	struct nss_gre_redir_lag_us_msg *config;
-	uint32_t len, iftype, idx, i;
+	uint32_t len, iftype, idx = 0, i;
 	bool ret;
 	nss_tx_status_t status;
 	struct nss_ctx_instance *nss_ctx __maybe_unused = nss_ctx = nss_gre_redir_lag_us_get_context();
@@ -524,32 +484,32 @@ bool nss_gre_redir_lag_us_configure_node(uint32_t ifnum,
 
 	config = (struct nss_gre_redir_lag_us_msg *) kzalloc(sizeof(struct nss_gre_redir_lag_us_msg), GFP_KERNEL);
 	if (!config) {
-		nss_warning("%p: Unable to allocate memory to send configure message.\n", nss_ctx);
+		nss_warning("%px: Unable to allocate memory to send configure message.\n", nss_ctx);
 		return false;
 	}
 
 	iftype = nss_dynamic_interface_get_type(nss_ctx, ifnum);
 	if (iftype != NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US) {
-		nss_warning("%p: Incorrect interface type %u\n", nss_ctx, iftype);
+		nss_warning("%px: Incorrect interface type %u\n", nss_ctx, iftype);
 		kfree(config);
 		return false;
 	}
 
 	if (!ngluc) {
-		nss_warning("%p: Pointer to GRE redir LAG US message is NULL.\n", nss_ctx);
+		nss_warning("%px: Pointer to GRE redir LAG US message is NULL.\n", nss_ctx);
 		kfree(config);
 		return false;
 	}
 
 	if ((ngluc->num_slaves < NSS_GRE_REDIR_LAG_MIN_SLAVE) || (ngluc->num_slaves > NSS_GRE_REDIR_LAG_MAX_SLAVE)) {
-		nss_warning("%p: Number of slaves is not in reange\n", nss_ctx);
+		nss_warning("%px: Number of slaves is not in reange\n", nss_ctx);
 		kfree(config);
 		return false;
 	}
 
 	ret = nss_gre_redir_lag_us_sync_work_init(ifnum);
 	if (!ret) {
-		nss_warning("%p: Unable to initialize work queue\n", nss_ctx);
+		nss_warning("%px: Unable to initialize work queue\n", nss_ctx);
 		kfree(config);
 		return false;
 	}
@@ -571,7 +531,7 @@ bool nss_gre_redir_lag_us_configure_node(uint32_t ifnum,
 	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
 	if (nss_gre_redir_lag_us_get_node_idx(ifnum, &idx)) {
 		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("%p: Stats context not found.\n", nss_ctx);
+		nss_warning("%px: Stats context not found.\n", nss_ctx);
 		return false;
 	}
 
@@ -581,33 +541,10 @@ bool nss_gre_redir_lag_us_configure_node(uint32_t ifnum,
 	 * Work is per LAG US node. Cancel work as configuration failed.
 	 */
 	cancel_delayed_work_sync(&(cmn_ctx.stats_ctx[idx].nss_gre_redir_lag_us_work));
-	nss_warning("%p: Unable to configure upstream lag node %d.\n", nss_ctx, ifnum);
+	nss_warning("%px: Unable to configure upstream lag node %d.\n", nss_ctx, ifnum);
 	return false;
 }
 EXPORT_SYMBOL(nss_gre_redir_lag_us_configure_node);
-
-/*
- * nss_gre_redir_lag_us_get_cmn_stats()
- *	Common upstream statistics.
- */
-bool nss_gre_redir_lag_us_get_cmn_stats(struct nss_gre_redir_lag_us_tunnel_stats *cmn_stats, uint32_t index)
-{
-	if (index >= NSS_GRE_REDIR_LAG_MAX_NODE) {
-		nss_warning("Index is out of valid range %u\n", index);
-		return false;
-	}
-
-	spin_lock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-	if (!cmn_ctx.stats_ctx[index].valid) {
-		spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-		nss_warning("Common context not found for the index %u\n", index);
-		return false;
-	}
-
-	memcpy((void *)cmn_stats, (void *)&(cmn_ctx.stats_ctx[index].tun_stats), sizeof(*cmn_stats));
-	spin_unlock_bh(&cmn_ctx.nss_gre_redir_lag_us_stats_lock);
-	return true;
-}
 
 /*
  * nss_gre_redir_lag_us_tx_msg()
@@ -645,19 +582,19 @@ enum nss_gre_redir_lag_err_types nss_gre_redir_lag_us_unregister_and_dealloc(uin
 	nss_tx_status_t status;
 
 	if (!nss_gre_redir_lag_us_verify_ifnum(ifnum)) {
-		nss_warning("%p: Unknown interface type %u.\n", nss_ctx, ifnum);
+		nss_warning("%px: Unknown interface type %u.\n", nss_ctx, ifnum);
 		return NSS_GRE_REDIR_LAG_ERR_INCORRECT_IFNUM;
 	}
 
 	ret = nss_gre_redir_lag_us_unregister_if(ifnum);
 	if (ret) {
-		nss_warning("%p: Unable to unregister interface %u.\n", nss_ctx, ifnum);
+		nss_warning("%px: Unable to unregister interface %u.\n", nss_ctx, ifnum);
 		return ret;
 	}
 
 	status = nss_dynamic_interface_dealloc_node(ifnum, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: Unable to deallocate node %u\n", nss_ctx, ifnum);
+		nss_warning("%px: Unable to deallocate node %u\n", nss_ctx, ifnum);
 		return NSS_GRE_REDIR_LAG_ERR_DEALLOC_FAILED;
 	}
 
@@ -679,17 +616,17 @@ int nss_gre_redir_lag_us_alloc_and_register_node(struct net_device *dev,
 
 	ifnum = nss_dynamic_interface_alloc_node(NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
 	if (ifnum == -1) {
-		nss_warning("%p: Unable to allocate GRE_LAG node of type = %u\n", dev, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
+		nss_warning("%px: Unable to allocate GRE_LAG node of type = %u\n", dev, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
 		return -1;
 	}
 
 	nss_ctx = nss_gre_redir_lag_us_register_if(ifnum, dev, cb_func_data,
 			cb_func_msg, 0, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US, app_ctx);
 	if (!nss_ctx) {
-		nss_warning("%p: Unable to register GRE_LAG node of type = %u\n", dev, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
+		nss_warning("%px: Unable to register GRE_LAG node of type = %u\n", dev, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
 		status = nss_dynamic_interface_dealloc_node(ifnum, NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_LAG_US);
 		if (status != NSS_TX_SUCCESS) {
-			nss_warning("%p: Unable to deallocate node.\n", dev);
+			nss_warning("%px: Unable to deallocate node.\n", dev);
 		}
 
 		return -1;
@@ -719,6 +656,7 @@ void nss_gre_redir_lag_us_register_handler(void)
 		return;
 	}
 
+	nss_gre_redir_lag_us_strings_dentry_create();
 	nss_gre_redir_lag_us_sync_ctx.cb = NULL;
 	nss_gre_redir_lag_us_sync_ctx.app_data = NULL;
 	sema_init(&nss_gre_redir_lag_us_sync_ctx.sem, 1);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2020-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -24,16 +24,19 @@
 #include "qca808x_ptp.h"
 #endif
 #include "qca808x.h"
+#ifdef IN_LED
+#include "qca808x_led.h"
+#endif
+
+static a_bool_t phy_dev_drv_init_flag = A_FALSE;
 /*qca808x_start*/
-
-#define PHY_INVALID_DATA 0xffff
-#define PHY_RTN_ON_READ_ERROR(phy_data) \
-    do { if (phy_data == PHY_INVALID_DATA) return(SW_READ_ERROR); } while(0);
-
-#define PHY_RTN_ON_ERROR(rv) \
-    do { if (rv != SW_OK) return(rv); } while(0);
-
 static a_bool_t phy_ops_flag = A_FALSE;
+
+static struct mutex qca808x_reg_lock;
+
+#define QCA808X_LOCKER_INIT		mutex_init(&qca808x_reg_lock)
+#define QCA808X_REG_LOCK		mutex_lock(&qca808x_reg_lock)
+#define QCA808X_REG_UNLOCK		mutex_unlock(&qca808x_reg_lock)
 
 /******************************************************************************
 *
@@ -106,10 +109,23 @@ qca808x_phy_debug_write(a_uint32_t dev_id, a_uint32_t phy_id, a_uint16_t reg_id,
 {
 	sw_error_t rv = SW_OK;
 
+	QCA808X_REG_LOCK;
 	rv = qca808x_phy_reg_write(dev_id, phy_id, QCA808X_DEBUG_PORT_ADDRESS, reg_id);
-	PHY_RTN_ON_ERROR(rv);
+	if (rv != SW_OK)
+	{
+		QCA808X_REG_UNLOCK;
+		SSDK_ERROR("qca808x_phy_reg_write failed\n");
+		return SW_FAIL;
+	}
 
 	rv = qca808x_phy_reg_write(dev_id, phy_id, QCA808X_DEBUG_PORT_DATA, reg_val);
+	if (rv != SW_OK)
+	{
+		QCA808X_REG_UNLOCK;
+		SSDK_ERROR("qca808x_phy_reg_write failed\n");
+		return SW_FAIL;
+	}
+	QCA808X_REG_UNLOCK;
 
 	return rv;
 }
@@ -124,13 +140,24 @@ a_uint16_t
 qca808x_phy_debug_read(a_uint32_t dev_id, a_uint32_t phy_id, a_uint16_t reg_id)
 {
 	sw_error_t rv = SW_OK;
+	a_uint16_t phy_data = 0;
 
+	QCA808X_REG_LOCK;
 	rv = qca808x_phy_reg_write(dev_id, phy_id, QCA808X_DEBUG_PORT_ADDRESS, reg_id);
 	if (rv != SW_OK) {
+		QCA808X_REG_UNLOCK;
+		SSDK_DEBUG("qca808x_phy_reg_write failed\n");
 		return PHY_INVALID_DATA;
 	}
+	phy_data = qca808x_phy_reg_read(dev_id, phy_id, QCA808X_DEBUG_PORT_DATA);
+	if (phy_data == PHY_INVALID_DATA) {
+		QCA808X_REG_UNLOCK;
+		SSDK_DEBUG("qca808x_phy_reg_read failed\n");
+		return PHY_INVALID_DATA;
+	}
+	QCA808X_REG_UNLOCK;
 
-	return qca808x_phy_reg_read(dev_id, phy_id, QCA808X_DEBUG_PORT_DATA);
+	return phy_data;
 }
 
 /******************************************************************************
@@ -234,6 +261,22 @@ qca808x_phy_ms_seed_enable(a_uint32_t dev_id, a_uint32_t phy_id,
 	return rv;
 }
 
+a_bool_t
+qca808x_phy_2500caps(a_uint32_t dev_id, a_uint32_t phy_id)
+{
+	a_uint16_t phy_data;
+
+	phy_data = qca808x_phy_mmd_read(dev_id, phy_id, QCA808X_PHY_MMD1_NUM,
+							QCA808X_MMD1_PMA_CAP_REG);
+
+	if (phy_data & QCA808X_STATUS_2500T_FD_CAPS) {
+		return A_TRUE;
+	}
+
+	return A_FALSE;
+
+}
+
 /******************************************************************************
 *
 * qca808x_phy_get status
@@ -255,17 +298,19 @@ qca808x_phy_get_status(a_uint32_t dev_id, a_uint32_t phy_id,
 	}
 	else {
 		phy_status->link_status = A_FALSE;
-		SW_RTN_ON_ERROR(
-			qca808x_phy_ms_random_seed_set (dev_id, phy_id));
-		/*protect logic, if MASTER_SLAVE_CONFIG_FAULT is 1,
-			then disable this logic*/
-		phy_data = qca808x_phy_reg_read(dev_id, phy_id,
-			QCA808X_1000BASET_STATUS);
-		if((phy_data & QCA808X_MASTER_SLAVE_CONFIG_FAULT) >> 15)
-		{
+		if (qca808x_phy_2500caps(dev_id, phy_id) == A_TRUE) {
 			SW_RTN_ON_ERROR(
-				qca808x_phy_ms_seed_enable (dev_id, phy_id, A_FALSE));
-			SSDK_INFO("master_slave_config_fault was set\n");
+				qca808x_phy_ms_random_seed_set (dev_id, phy_id));
+			/*protect logic, if MASTER_SLAVE_CONFIG_FAULT is 1,
+				then disable this logic*/
+			phy_data = qca808x_phy_reg_read(dev_id, phy_id,
+				QCA808X_1000BASET_STATUS);
+			if ((phy_data & QCA808X_MASTER_SLAVE_CONFIG_FAULT) >> 15)
+			{
+				SW_RTN_ON_ERROR(
+					qca808x_phy_ms_seed_enable (dev_id, phy_id, A_FALSE));
+				SSDK_INFO("master_slave_config_fault was set\n");
+			}
 		}
 
 		return SW_OK;
@@ -987,7 +1032,9 @@ qca808x_phy_set_autoneg_adv(a_uint32_t dev_id, a_uint32_t phy_id,
 			phy_data);
 	PHY_RTN_ON_ERROR(rv);
 
-	rv = _qca808x_phy_set_autoneg_adv_ext(dev_id, phy_id, autoneg);
+	if (qca808x_phy_2500caps(dev_id, phy_id) == A_TRUE) {
+		rv = _qca808x_phy_set_autoneg_adv_ext(dev_id, phy_id, autoneg);
+	}
 
 	return rv;
 }
@@ -1051,11 +1098,12 @@ qca808x_phy_get_autoneg_adv(a_uint32_t dev_id, a_uint32_t phy_id,
 		*autoneg |= FAL_PHY_ADV_1000T_FD;
 	}
 
-	rv = _qca808x_phy_get_autoneg_adv_ext(dev_id, phy_id, &phy_data);
-
-	if ((rv == SW_OK) &&
-			(phy_data & QCA808X_ADVERTISE_2500FULL)) {
-		*autoneg |= FAL_PHY_ADV_2500T_FD;
+	if (qca808x_phy_2500caps(dev_id, phy_id) == A_TRUE) {
+		rv = _qca808x_phy_get_autoneg_adv_ext(dev_id, phy_id, &phy_data);
+		if ((rv == SW_OK) &&
+				(phy_data & QCA808X_ADVERTISE_2500FULL)) {
+			*autoneg |= FAL_PHY_ADV_2500T_FD;
+		}
 	}
 
 	return rv;
@@ -1063,9 +1111,8 @@ qca808x_phy_get_autoneg_adv(a_uint32_t dev_id, a_uint32_t phy_id,
 
 /******************************************************************************
 *
-* qca808x_phy_autoneg_status
+* qca808x_phy_autoneg_status - get the phy autoneg status
 *
-* Power off the phy
 */
 a_bool_t qca808x_phy_autoneg_status(a_uint32_t dev_id, a_uint32_t phy_id)
 {
@@ -2000,6 +2047,36 @@ qca808x_phy_fast_retrain_cfg(a_uint32_t dev_id, a_uint32_t phy_id)
 	return rv;
 }
 
+void qca808x_phy_lock_init(void)
+{
+	static a_bool_t is_init = A_FALSE;
+
+	if(!is_init)
+	{
+		QCA808X_LOCKER_INIT;
+		is_init = A_TRUE;
+	}
+
+	return;
+}
+
+static sw_error_t
+qca808x_phy_adc_threshold_set(a_uint32_t dev_id, a_uint32_t phy_id,
+	a_uint32_t adc_thresold)
+{
+	sw_error_t rv = SW_OK;
+	a_uint16_t phy_data = 0;
+
+	phy_data = qca808x_phy_debug_read(dev_id, phy_id,
+		QCA808X_PHY_ADC_THRESHOLD);
+	PHY_RTN_ON_READ_ERROR(phy_data);
+	phy_data &= ~(BITS(0, 8));
+	rv = qca808x_phy_debug_write (dev_id, phy_id,
+		QCA808X_PHY_ADC_THRESHOLD, phy_data | adc_thresold);
+
+	return rv;
+}
+
 static sw_error_t
 qca808x_phy_hw_init(a_uint32_t dev_id,  a_uint32_t port_bmp)
 {
@@ -2036,6 +2113,10 @@ qca808x_phy_hw_init(a_uint32_t dev_id,  a_uint32_t port_bmp)
 			rv = qca808x_phy_ms_seed_enable(dev_id, phy_addr, A_TRUE);
 			SW_RTN_ON_ERROR(rv);
 			rv = qca808x_phy_ms_random_seed_set(dev_id, phy_addr);
+			SW_RTN_ON_ERROR(rv);
+			/*set adc threshold as 100mv for 10M*/
+			rv = qca808x_phy_adc_threshold_set(dev_id, phy_addr,
+				QCA808X_PHY_ADC_THRESHOLD_100MV);
 			SW_RTN_ON_ERROR(rv);
 		}
 	}
@@ -2113,7 +2194,9 @@ static sw_error_t qca808x_phy_api_ops_init(void)
 	qca808x_phy_api_ops->phy_eee_partner_adv_get = qca808x_phy_get_eee_partner_adv;
 	qca808x_phy_api_ops->phy_eee_cap_get = qca808x_phy_get_eee_cap;
 	qca808x_phy_api_ops->phy_eee_status_get = qca808x_phy_get_eee_status;
-
+#ifdef IN_LED
+	qca808x_phy_led_api_ops_init(qca808x_phy_api_ops);
+#endif
 /*qca808x_end*/
 #if defined(IN_PTP)
 	qca808x_phy_ptp_api_ops_init(&qca808x_phy_api_ops->phy_ptp_ops);
@@ -2144,19 +2227,23 @@ int qca808x_phy_init(a_uint32_t dev_id, a_uint32_t port_bmp)
 
 	if(phy_ops_flag == A_FALSE &&
 			qca808x_phy_api_ops_init() == SW_OK) {
+		qca808x_phy_lock_init();
 		phy_ops_flag = A_TRUE;
 	}
 	qca808x_phy_hw_init(dev_id, port_bmp);
 
 /*qca808x_end*/
-	for (port_id = 0; port_id < SW_MAX_NR_PORT; port_id ++)
+	if(phy_dev_drv_init_flag == A_FALSE)
 	{
-		if (port_bmp & (0x1 << port_id)) {
-			qca808x_phydev_init(dev_id, port_id);
+		for (port_id = 0; port_id < SW_MAX_NR_PORT; port_id ++)
+		{
+			if (port_bmp & (0x1 << port_id)) {
+				qca808x_phydev_init(dev_id, port_id);
+			}
 		}
+		ret = qca808x_phy_driver_register();
+		phy_dev_drv_init_flag = A_TRUE;
 	}
-	ret = qca808x_phy_driver_register();
-
 /*qca808x_start*/
 	return ret;
 }

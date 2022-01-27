@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (c) 2018, The Linux Foundation. All rights reserved.
+# Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
 # Permission to use, copy, modify, and/or distribute this software for
 # any purpose with or without fee is hereby granted, provided that the
 # above copyright notice and this permission notice appear in all copies.
@@ -123,7 +123,6 @@ sub qca808x_drv_spec_copy {
 		"include/hsl/phy/qca808x_phy.h",
 		"include/hsl/hsl_port_prop.h",
 		"include/hsl/scomphy/scomphy_init.h",
-		"include/hsl/scomphy/scomphy_reg_access.h",
 		"include/common/sw_error.h",
 		"include/common/sw.h",
 		"include/common/shared_func.h",
@@ -137,7 +136,6 @@ sub qca808x_drv_spec_copy {
 		"src/hsl/hsl_lock.c",
 		"src/hsl/hsl_api.c",
 		"src/hsl/scomphy/scomphy_init.c",
-		"src/hsl/scomphy/scomphy_reg_access.c"
 	);
 
 	qca808x_copy_spec_files($src, $dst, \@files2copy);

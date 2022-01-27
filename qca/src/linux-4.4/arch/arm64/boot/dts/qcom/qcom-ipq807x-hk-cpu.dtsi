@@ -14,6 +14,17 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+&soc {
+	dummy_reg: dummy-regulator@0 {
+		compatible = "regulator-fixed";
+		regulator-name = "dummy-reg";
+		regulator-min-microvolt = <848000>;
+		regulator-max-microvolt = <848000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
 &CPU0 {
 	operating-points-v2 = <&cpu0_opp_table>;
 	voltage-tolerance = <1>;

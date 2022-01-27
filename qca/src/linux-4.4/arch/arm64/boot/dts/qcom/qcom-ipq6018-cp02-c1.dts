@@ -16,6 +16,9 @@
  */
 
 #include "qcom-ipq6018.dtsi"
+#include "qcom-ipq6018-rpm-regulator.dtsi"
+#include "qcom-ipq6018-cpr-regulator.dtsi"
+#include "qcom-ipq6018-cp-cpu.dtsi"
 
 / {
 	#address-cells = <0x2>;
@@ -23,6 +26,7 @@
 	model = "Qualcomm Technologies, Inc. IPQ6018/AP-CP02-C1";
 	compatible = "qcom,ipq6018-cp02", "qcom,ipq6018";
 	interrupt-parent = <&intc>;
+	qcom,msm-id = <0x192 0x0>, <0x193 0x0>;
 
 	aliases {
 		serial0 = &blsp1_uart3;
@@ -38,7 +42,11 @@
 
 	chosen {
 		bootargs = "console=ttyMSM0,115200,n8 rw init=/init";
+#ifdef __IPQ_MEM_PROFILE_256_MB__
+		bootargs-append = " swiotlb=1";
+#else
 		bootargs-append = " swiotlb=1 coherent_pool=2M";
+#endif
 	};
 
 	/*
@@ -51,27 +59,29 @@
 	 * |        |              |                         |
 	 * |        |              |                         |
 	 * |        |              |                         |
-	 * | Linux  |  0x41000000  |         139MB           |
+	 * | Linux  |  0x41000000  |         119MB           |
 	 * |        |              |                         |
 	 * |        |              |                         |
 	 * |        |              |                         |
 	 * +--------+--------------+-------------------------+
-	 * | TZ App |  0x49B00000  |           6MB           |
+	 * |        |              |                         |
+	 * | LPASS  |              |                         |
+	 * |   Q6   |  0x48700000  |          26MB           |
+	 * |        |              |                         |
 	 * +--------+--------------+-------------------------+
 	 *
 	 * From the available 145 MB for Linux in the first 256 MB,
-	 * we are reserving 6 MB for TZAPP.
+	 * we are reserving 26 MB for LPASS.
 	 *
 	 * Refer arch/arm64/boot/dts/qcom/qcom-ipq6018-memory.dtsi
 	 * for memory layout.
 	 */
 
-/* TZAPP is enabled only in default memory profile */
 #if !defined(__IPQ_MEM_PROFILE_256_MB__) && !defined(__IPQ_MEM_PROFILE_512_MB__)
 	reserved-memory {
-		tzapp:tzapp@49B00000 {	/* TZAPPS */
+		lpass_q6_region: lpass@48700000 {
 			no-map;
-			reg = <0x0 0x49B00000 0x0 0x00600000>;
+			reg = <0x0 0x48700000 0x0 0x01a00000>;
 		};
 	};
 #endif
@@ -377,12 +387,3 @@
 &pcie0 {
 	status = "ok";
 };
-
-/* TZAPP is enabled in default memory profile only */
-#if !defined(__IPQ_MEM_PROFILE_256_MB__) && !defined(__IPQ_MEM_PROFILE_512_MB__)
-&qseecom {
-	mem-start = <0x49B00000>;
-	mem-size = <0x600000>;
-	status = "ok";
-};
-#endif

@@ -6,8 +6,6 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=$(grep -e "^${USER:-root}:" /etc/passwd | cut -d ":" -f 6)
 export HOME=${HOME:-/root}
 export PS1='\u@\h:\w\$ '
-[ -f /tmp/BTHOST_BD_ADDR ] && export BTHOST_BD_ADDR=$(cat /tmp/BTHOST_BD_ADDR)
-[ -f /tmp/BTHOST_XCAL_TRIM ] && export BTHOST_XCAL_TRIM=$(cat /tmp/BTHOST_XCAL_TRIM)
 
 [ -x /bin/more ] || alias more=less
 [ -x /usr/bin/vim ] && alias vi=vim || alias vim=vi

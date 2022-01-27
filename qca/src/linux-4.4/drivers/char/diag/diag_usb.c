@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, 2018 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -35,6 +35,9 @@
 #define DIAG_USB_MAX_SIZE	16384
 #ifndef CONFIG_DIAG_OVER_USB
 #define DIAG_LEGACY             "diag"
+#define DIAG_MDM		"diag_mdm"
+#define DIAG_QSC		"diag_qsc"
+#define DIAG_MDM2		"diag_mdm2"
 #endif
 
 struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
@@ -225,7 +228,7 @@ static void usb_disconnect(struct diag_usb_info *ch)
 
 	if (!atomic_read(&ch->connected) &&
 		driver->usb_connected && diag_mask_param())
-		diag_clear_masks(NULL);
+		diag_clear_masks(0);
 
 	if (ch && ch->ops && ch->ops->close)
 		ch->ops->close(ch->ctxt, DIAG_USB_MODE);

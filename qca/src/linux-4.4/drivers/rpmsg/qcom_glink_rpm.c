@@ -30,6 +30,7 @@
 #define RPM_RX_FIFO_ID		0x72326170 /* r2ap */
 
 #define to_rpm_pipe(p) container_of(p, struct glink_rpm_pipe, native)
+#define ALIGN_DOWN(addr, size)  ((addr)&(~((size)-1)))
 
 struct rpm_toc_entry {
 	__le32 id;

@@ -726,15 +726,25 @@ static struct hash_testvec crct10dif_tv_template[] = {
  * SHA1 test vectors  from from FIPS PUB 180-1
  * Long vector from CAVS 5.0
  */
+#ifdef CONFIG_CRYPTO_NO_ZERO_LEN_HASH
+#define SHA1_TEST_VECTORS	5
+#else
 #define SHA1_TEST_VECTORS	6
+#endif
 
 static struct hash_testvec sha1_tv_template[] = {
+#ifndef CONFIG_CRYPTO_NO_ZERO_LEN_HASH
+	/*
+	 * zero-length input data length is not supported in ipq50xx
+	 */
 	{
 		.plaintext = "",
 		.psize	= 0,
 		.digest	= "\xda\x39\xa3\xee\x5e\x6b\x4b\x0d\x32\x55"
 			  "\xbf\xef\x95\x60\x18\x90\xaf\xd8\x07\x09",
-	}, {
+	},
+#endif
+	{
 		.plaintext = "abc",
 		.psize	= 3,
 		.digest	= "\xa9\x99\x3e\x36\x47\x06\x81\x6a\xba\x3e"
@@ -1091,9 +1101,17 @@ static struct hash_testvec sha224_tv_template[] = {
 /*
  * SHA256 test vectors from from NIST
  */
+#ifdef CONFIG_CRYPTO_NO_ZERO_LEN_HASH
+#define SHA256_TEST_VECTORS	4
+#else
 #define SHA256_TEST_VECTORS	5
+#endif
 
 static struct hash_testvec sha256_tv_template[] = {
+#ifndef CONFIG_CRYPTO_NO_ZERO_LEN_HASH
+	/*
+	 * zero-length input data length is not supported in ipq50xx
+	 */
 	{
 		.plaintext = "",
 		.psize	= 0,
@@ -1101,7 +1119,9 @@ static struct hash_testvec sha256_tv_template[] = {
 			  "\x9a\xfb\xf4\xc8\x99\x6f\xb9\x24"
 			  "\x27\xae\x41\xe4\x64\x9b\x93\x4c"
 			  "\xa4\x95\x99\x1b\x78\x52\xb8\x55",
-	}, {
+	},
+#endif
+	{
 		.plaintext = "abc",
 		.psize	= 3,
 		.digest	= "\xba\x78\x16\xbf\x8f\x01\xcf\xea"
@@ -2430,7 +2450,7 @@ static struct hash_testvec hmac_sha1_tv_template[] = {
 /*
  * SHA224 HMAC test vectors from RFC4231
  */
-#define HMAC_SHA224_TEST_VECTORS    4
+#define HMAC_SHA224_TEST_VECTORS   2
 
 static struct hash_testvec hmac_sha224_tv_template[] = {
 	{
@@ -2460,84 +2480,6 @@ static struct hash_testvec hmac_sha224_tv_template[] = {
 			"\x8f\xd0\x5e\x44",
 		.np = 4,
 		.tap    = { 7, 7, 7, 7 }
-	}, {
-		.key    = "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa",
-		.ksize  = 131,
-		/* ("Test Using Larger Than Block-Size Key - Hash Key First") */
-		.plaintext = "\x54\x65\x73\x74\x20\x55\x73\x69"
-			"\x6e\x67\x20\x4c\x61\x72\x67\x65"
-			"\x72\x20\x54\x68\x61\x6e\x20\x42"
-			"\x6c\x6f\x63\x6b\x2d\x53\x69\x7a"
-			"\x65\x20\x4b\x65\x79\x20\x2d\x20"
-			"\x48\x61\x73\x68\x20\x4b\x65\x79"
-			"\x20\x46\x69\x72\x73\x74",
-		.psize  = 54,
-		.digest = "\x95\xe9\xa0\xdb\x96\x20\x95\xad"
-			"\xae\xbe\x9b\x2d\x6f\x0d\xbc\xe2"
-			"\xd4\x99\xf1\x12\xf2\xd2\xb7\x27"
-			"\x3f\xa6\x87\x0e",
-	}, {
-		.key    = "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
-			"\xaa\xaa\xaa",
-		.ksize  = 131,
-		/* ("This is a test using a larger than block-size key and a")
-		(" larger than block-size data. The key needs to be")
-			(" hashed before being used by the HMAC algorithm.") */
-		.plaintext = "\x54\x68\x69\x73\x20\x69\x73\x20"
-			"\x61\x20\x74\x65\x73\x74\x20\x75"
-			"\x73\x69\x6e\x67\x20\x61\x20\x6c"
-			"\x61\x72\x67\x65\x72\x20\x74\x68"
-			"\x61\x6e\x20\x62\x6c\x6f\x63\x6b"
-			"\x2d\x73\x69\x7a\x65\x20\x6b\x65"
-			"\x79\x20\x61\x6e\x64\x20\x61\x20"
-			"\x6c\x61\x72\x67\x65\x72\x20\x74"
-			"\x68\x61\x6e\x20\x62\x6c\x6f\x63"
-			"\x6b\x2d\x73\x69\x7a\x65\x20\x64"
-			"\x61\x74\x61\x2e\x20\x54\x68\x65"
-			"\x20\x6b\x65\x79\x20\x6e\x65\x65"
-			"\x64\x73\x20\x74\x6f\x20\x62\x65"
-			"\x20\x68\x61\x73\x68\x65\x64\x20"
-			"\x62\x65\x66\x6f\x72\x65\x20\x62"
-			"\x65\x69\x6e\x67\x20\x75\x73\x65"
-			"\x64\x20\x62\x79\x20\x74\x68\x65"
-			"\x20\x48\x4d\x41\x43\x20\x61\x6c"
-			"\x67\x6f\x72\x69\x74\x68\x6d\x2e",
-		.psize  = 152,
-		.digest = "\x3a\x85\x41\x66\xac\x5d\x9f\x02"
-			"\x3f\x54\xd5\x17\xd0\xb3\x9d\xbd"
-			"\x94\x67\x70\xdb\x9c\x2b\x95\xc9"
-			"\xf6\xf5\x65\xd1",
 	},
 };
 
@@ -13909,16 +13851,28 @@ static struct cipher_testvec cast6_xts_dec_tv_template[] = {
 /*
  * AES test vectors.
  */
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
 #define AES_ENC_TEST_VECTORS 4
 #define AES_DEC_TEST_VECTORS 4
 #define AES_CBC_ENC_TEST_VECTORS 5
 #define AES_CBC_DEC_TEST_VECTORS 5
+#else
+#define AES_ENC_TEST_VECTORS 3
+#define AES_DEC_TEST_VECTORS 3
+#define AES_CBC_ENC_TEST_VECTORS 4
+#define AES_CBC_DEC_TEST_VECTORS 4
+#endif
 #define HMAC_MD5_ECB_CIPHER_NULL_ENC_TEST_VECTORS 2
 #define HMAC_MD5_ECB_CIPHER_NULL_DEC_TEST_VECTORS 2
 #define HMAC_SHA1_ECB_CIPHER_NULL_ENC_TEST_VEC 2
 #define HMAC_SHA1_ECB_CIPHER_NULL_DEC_TEST_VEC 2
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
 #define HMAC_SHA1_AES_CBC_ENC_TEST_VEC 7
 #define HMAC_SHA256_AES_CBC_ENC_TEST_VEC 7
+#else
+#define HMAC_SHA1_AES_CBC_ENC_TEST_VEC 6
+#define HMAC_SHA256_AES_CBC_ENC_TEST_VEC 6
+#endif
 #define HMAC_SHA384_AES_CBC_ENC_TEST_VEC 7
 #define HMAC_SHA512_AES_CBC_ENC_TEST_VEC 7
 #define AES_LRW_ENC_TEST_VECTORS 8
@@ -13929,8 +13883,13 @@ static struct cipher_testvec cast6_xts_dec_tv_template[] = {
 #define AES_CTR_DEC_TEST_VECTORS 5
 #define AES_OFB_ENC_TEST_VECTORS 1
 #define AES_OFB_DEC_TEST_VECTORS 1
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
 #define AES_CTR_3686_ENC_TEST_VECTORS 7
 #define AES_CTR_3686_DEC_TEST_VECTORS 6
+#else
+#define AES_CTR_3686_ENC_TEST_VECTORS 5
+#define AES_CTR_3686_DEC_TEST_VECTORS 4
+#endif
 #define AES_GCM_ENC_TEST_VECTORS 9
 #define AES_GCM_DEC_TEST_VECTORS 8
 #define AES_GCM_4106_ENC_TEST_VECTORS 23
@@ -13953,7 +13912,9 @@ static struct cipher_testvec aes_enc_tv_template[] = {
 		.result	= "\x69\xc4\xe0\xd8\x6a\x7b\x04\x30"
 			  "\xd8\xcd\xb7\x80\x70\xb4\xc5\x5a",
 		.rlen	= 16,
-	}, {
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{
 		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
 			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
 			  "\x10\x11\x12\x13\x14\x15\x16\x17",
@@ -13964,7 +13925,9 @@ static struct cipher_testvec aes_enc_tv_template[] = {
 		.result	= "\xdd\xa9\x7c\xa4\x86\x4c\xdf\xe0"
 			  "\x6e\xaf\x70\xa0\xec\x0d\x71\x91",
 		.rlen	= 16,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
 			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
 			  "\x10\x11\x12\x13\x14\x15\x16\x17"
@@ -14125,7 +14088,9 @@ static struct cipher_testvec aes_dec_tv_template[] = {
 		.result	= "\x00\x11\x22\x33\x44\x55\x66\x77"
 			  "\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
 		.rlen	= 16,
-	}, {
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{
 		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
 			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
 			  "\x10\x11\x12\x13\x14\x15\x16\x17",
@@ -14136,7 +14101,9 @@ static struct cipher_testvec aes_dec_tv_template[] = {
 		.result	= "\x00\x11\x22\x33\x44\x55\x66\x77"
 			  "\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
 		.rlen	= 16,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x00\x01\x02\x03\x04\x05\x06\x07"
 			  "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
 			  "\x10\x11\x12\x13\x14\x15\x16\x17"
@@ -14317,7 +14284,9 @@ static struct cipher_testvec aes_cbc_enc_tv_template[] = {
 			  "\x75\x86\x60\x2d\x25\x3c\xff\xf9"
 			  "\x1b\x82\x66\xbe\xa6\xd6\x1a\xb1",
 		.rlen   = 32,
-	}, { /* From NIST SP800-38A */
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{ /* From NIST SP800-38A */
 		.key	= "\x8e\x73\xb0\xf7\xda\x0e\x64\x52"
 			  "\xc8\x10\xf3\x2b\x80\x90\x79\xe5"
 			  "\x62\xf8\xea\xd2\x52\x2c\x6b\x7b",
@@ -14342,7 +14311,9 @@ static struct cipher_testvec aes_cbc_enc_tv_template[] = {
 			  "\x08\xb0\xe2\x79\x88\x59\x88\x81"
 			  "\xd9\x20\xa9\xe6\x4f\x56\x15\xcd",
 		.rlen	= 64,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x60\x3d\xeb\x10\x15\xca\x71\xbe"
 			  "\x2b\x73\xae\xf0\x85\x7d\x77\x81"
 			  "\x1f\x35\x2c\x07\x3b\x61\x08\xd7"
@@ -14539,7 +14510,9 @@ static struct cipher_testvec aes_cbc_dec_tv_template[] = {
 			  "\x10\x11\x12\x13\x14\x15\x16\x17"
 			  "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
 		.rlen   = 32,
-	}, { /* From NIST SP800-38A */
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{ /* From NIST SP800-38A */
 		.key	= "\x8e\x73\xb0\xf7\xda\x0e\x64\x52"
 			  "\xc8\x10\xf3\x2b\x80\x90\x79\xe5"
 			  "\x62\xf8\xea\xd2\x52\x2c\x6b\x7b",
@@ -14564,7 +14537,9 @@ static struct cipher_testvec aes_cbc_dec_tv_template[] = {
 			  "\xf6\x9f\x24\x45\xdf\x4f\x9b\x17"
 			  "\xad\x2b\x41\x7b\xe6\x6c\x37\x10",
 		.rlen	= 64,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x60\x3d\xeb\x10\x15\xca\x71\xbe"
 			  "\x2b\x73\xae\xf0\x85\x7d\x77\x81"
 			  "\x1f\x35\x2c\x07\x3b\x61\x08\xd7"
@@ -14995,7 +14970,9 @@ static struct aead_testvec hmac_sha1_aes_cbc_enc_tv_temp[] = {
 			  "\xe1\xc5\x0b\x73\x4d\x82\x55\xa8"
 			  "\x85\xe1\x59\xf7",
 		.rlen   = 80 + 20,
-       }, { /* NIST SP800-38A F.2.3 CBC-AES192.Encrypt */
+       },
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{ /* NIST SP800-38A F.2.3 CBC-AES192.Encrypt */
 #ifdef __LITTLE_ENDIAN
 		.key    = "\x08\x00"            /* rta length */
 			  "\x01\x00"		/* rta type */
@@ -15037,7 +15014,9 @@ static struct aead_testvec hmac_sha1_aes_cbc_enc_tv_temp[] = {
 			  "\x5a\xf1\x5b\xa8\x98\x07\xc5\x36"
 			  "\x47\x4c\xfc\x36",
 		.rlen   = 64 + 20,
-	}, { /* NIST SP800-38A F.2.5 CBC-AES256.Encrypt */
+	},
+#endif
+	{ /* NIST SP800-38A F.2.5 CBC-AES256.Encrypt */
 #ifdef __LITTLE_ENDIAN
 		.key    = "\x08\x00"		/* rta length */
 			  "\x01\x00"		/* rta type */
@@ -15366,7 +15345,9 @@ static struct aead_testvec hmac_sha256_aes_cbc_enc_tv_temp[] = {
 			  "\x73\xc3\x46\x20\x2c\xb1\xef\x68"
 			  "\xbb\x8a\x32\x7e\x12\x8c\x69\xcf",
 		.rlen   = 80 + 32,
-       }, { /* NIST SP800-38A F.2.3 CBC-AES192.Encrypt */
+       },
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{ /* NIST SP800-38A F.2.3 CBC-AES192.Encrypt */
 #ifdef __LITTLE_ENDIAN
 		.key    = "\x08\x00"            /* rta length */
 			  "\x01\x00"		/* rta type */
@@ -15410,7 +15391,9 @@ static struct aead_testvec hmac_sha256_aes_cbc_enc_tv_temp[] = {
 			  "\xca\x71\x85\x93\xf7\x85\x55\x8b"
 			  "\x7a\xe4\x94\xca\x8b\xba\x19\x33",
 		.rlen   = 64 + 32,
-	}, { /* NIST SP800-38A F.2.5 CBC-AES256.Encrypt */
+	},
+#endif
+	{ /* NIST SP800-38A F.2.5 CBC-AES256.Encrypt */
 #ifdef __LITTLE_ENDIAN
 		.key    = "\x08\x00"		/* rta length */
 			  "\x01\x00"		/* rta type */
@@ -18694,7 +18677,9 @@ static struct cipher_testvec aes_ctr_rfc3686_enc_tv_template[] = {
 			  "\xeb\x2e\x1e\xfc\x46\xda\x57\xc8"
 			  "\xfc\xe6\x30\xdf\x91\x41\xbe\x28",
 		.rlen	= 32,
-	}, {
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{
 		.key	= "\x16\xaf\x5b\x14\x5f\xc9\xf5\x79"
 			  "\xc1\x75\xf9\x3e\x3b\xfb\x0e\xed"
 			  "\x86\x3d\x06\xcc\xfd\xb7\x85\x15"
@@ -18723,7 +18708,9 @@ static struct cipher_testvec aes_ctr_rfc3686_enc_tv_template[] = {
 			  "\x84\x90\x70\x1c\x5a\xd4\xa7\x9c"
 			  "\xfc\x1f\xe0\xff\x42\xf4\xfb\x00",
 		.rlen	= 32,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x77\x6b\xef\xf2\x85\x1d\xb0\x6f"
 			  "\x4c\x8a\x05\x42\xc8\x69\x6f\x6c"
 			  "\x6a\x81\xaf\x1e\xec\x96\xb4\xd3"
@@ -19826,7 +19813,9 @@ static struct cipher_testvec aes_ctr_rfc3686_dec_tv_template[] = {
 			  "\x10\x11\x12\x13\x14\x15\x16\x17"
 			  "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
 		.rlen	= 32,
-	}, {
+	},
+#ifndef CONFIG_CRYPTO_DISABLE_AES192_TEST
+	{
 		.key	= "\x16\xaf\x5b\x14\x5f\xc9\xf5\x79"
 			  "\xc1\x75\xf9\x3e\x3b\xfb\x0e\xed"
 			  "\x86\x3d\x06\xcc\xfd\xb7\x85\x15"
@@ -19855,7 +19844,9 @@ static struct cipher_testvec aes_ctr_rfc3686_dec_tv_template[] = {
 			  "\x10\x11\x12\x13\x14\x15\x16\x17"
 			  "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
 		.rlen	= 32,
-	}, {
+	},
+#endif
+	{
 		.key	= "\x77\x6b\xef\xf2\x85\x1d\xb0\x6f"
 			  "\x4c\x8a\x05\x42\xc8\x69\x6f\x6c"
 			  "\x6a\x81\xaf\x1e\xec\x96\xb4\xd3"

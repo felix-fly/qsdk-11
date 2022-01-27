@@ -45,6 +45,19 @@
 nss_tx_status_t nss_freq_change(struct nss_ctx_instance *nss_ctx, uint32_t eng, uint32_t stats_enable, uint32_t start_or_end);
 
 /**
+ * nss_freq_get_cpu_usage
+ *	Returns the CPU usage value in percentage at any instance for a required core. Range of usage is 0-100.
+ *
+ * @param[in] core_id       NSS Core ID.
+ *
+ * @return
+ * CPU usage value in percentage averaged over 1 second. -1 in case of error.
+ * @note
+ * This API does not support gathering CPU usage data for core 1.
+ */
+extern int8_t nss_freq_get_cpu_usage(uint32_t core_id);
+
+/**
  * @}
  */
 

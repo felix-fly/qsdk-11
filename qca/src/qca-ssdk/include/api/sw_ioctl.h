@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015-2019, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -142,6 +142,8 @@ extern "C" {
 #define SW_API_VLAN_MEMBER_DEL     (10 + SW_API_VLAN_OFFSET)
 #define SW_API_VLAN_LEARN_STATE_SET (11 + SW_API_VLAN_OFFSET)
 #define SW_API_VLAN_LEARN_STATE_GET (12 + SW_API_VLAN_OFFSET)
+#define SW_API_LAN_WAN_CFG_SET      (13 + SW_API_VLAN_OFFSET)
+#define SW_API_LAN_WAN_CFG_GET      (14 + SW_API_VLAN_OFFSET)
 
     /*port ctrl extend*/
 #define SW_API_PORT_EXT_OFFSET		160
@@ -845,6 +847,8 @@ extern "C" {
 #define SW_API_POLICER_ACL_ENTRY_SET               (8  + SW_API_POLICER_OFFSET)
 #define SW_API_POLICER_ACL_ENTRY_GET               (9  + SW_API_POLICER_OFFSET)
 #define SW_API_POLICER_GLOBAL_COUNTER_GET               (10  + SW_API_POLICER_OFFSET)
+#define SW_API_POLICER_BYPASS_EN_SET              (11  + SW_API_POLICER_OFFSET)
+#define SW_API_POLICER_BYPASS_EN_GET              (12  + SW_API_POLICER_OFFSET)
 
 
 /* SHAPER */

@@ -1,6 +1,6 @@
 /*
  ******************************************************************************
- * Copyright (c) 2017, 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017,2019-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -20,6 +20,7 @@
 /*
  * PPPoE statistics APIs
  */
+extern void nss_pppoe_stats_notify(struct nss_ctx_instance *nss_ctx, uint32_t if_num);
 extern void nss_pppoe_stats_dentry_create(void);
 extern void nss_pppoe_stats_sync(struct nss_ctx_instance *nss_ctx, struct nss_pppoe_sync_stats_msg *stats_msg, uint16_t if_num);
 extern bool nss_pppoe_stats_pppoe_session_init(uint32_t if_num, struct net_device *dev);

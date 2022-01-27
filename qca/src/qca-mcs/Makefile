@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (c) 2012, 2015 The Linux Foundation. All rights reserved.
+# Copyright (c) 2012, 2015, 2020 The Linux Foundation. All rights reserved.
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
 # copyright notice and this permission notice appear in all copies.
@@ -24,23 +24,19 @@ ifndef KERNELPATH
 KERNELPATH := /lib/modules/$(shell uname -r)/build
 endif
 
-# Include directories
-INCLUDES := -I$(CURDIR) \
-    -I$(KERNELPATH)/include/linux \
-    -I$(KERNELPATH)/include/asm \
-    -I$(KERNELPATH)/net/bridge \
-    -I$(KBUILDPATH)/include/linux \
-    -I$(KBUILDPATH)/include/asm \
-    -I$(KBUILDPATH)/net/bridge
+ccflags-y += -I$(CURDIR) \
+	     -I$(KERNELPATH)/include/linux \
+	     -I$(KERNELPATH)/include/asm \
+	     -I$(KERNELPATH)/net/bridge \
+	     -I$(KBUILDPATH)/include/linux \
+	     -I$(KBUILDPATH)/include/asm \
+	     -I$(KBUILDPATH)/net/bridge
 
-export EXTRA_CFLAGS += $(INCLUDES)
+ccflags-$(CONFIG_SUPPORT_MLD) += -DMC_SUPPORT_MLD
 
 # Module extra compilation flags
-EXTRA_CFLAGS += -Werror -Wall -g
+ccflags-y += -Werror -Wall -g
 
-ifeq ($(strip ${MC_SUPPORT_MLD}),1)
-ccflags-y+=-DMC_SUPPORT_MLD
-endif
 
 ifneq ($(KERNELRELEASE),)
 obj-m += $(TARGET).o
@@ -53,6 +49,10 @@ $(TARGET)-objs := \
 	mc_snooping.o \
 	mc_forward.o \
 	mc_ecm.o
+
+$(TARGET)-$(CONFIG_SUPPORT_OVS) += mc_ovs.o
+ccflags-$(CONFIG_SUPPORT_OVS) += -I$(STAGING_DIR)/usr/include/qca-ovsmgr \
+				 -DMC_SUPPORT_OVS
 
 else
 

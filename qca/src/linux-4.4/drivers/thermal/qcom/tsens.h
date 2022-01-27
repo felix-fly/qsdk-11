@@ -99,9 +99,12 @@ struct tsens_device {
 
 char *qfprom_read(struct device *, const char *);
 void compute_intercept_slope(struct tsens_device *, u32 *, u32 *, u32);
+int code_to_degc(u32 adc_code, const struct tsens_sensor *s);
 void __iomem *init_common(struct tsens_device *);
 int get_temp_common(struct tsens_device *, int, int *);
 
 extern const struct tsens_data data_8960, data_ipq8064, data_ipq807x;
+
+extern const struct tsens_data data_ipq5018;
 
 #endif /* __QCOM_TSENS_H__ */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013, 2015, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -73,7 +73,11 @@ static inline struct net_bridge_port *os_br_port_get(const struct net_device *de
 
 static inline void os_br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	br_forward(to, skb, false, false);
+#else
 	br_forward(to, skb, NULL);
+#endif
 }
 
 static inline void mc_ipv6_addr_copy(struct in6_addr *a1, const struct in6_addr *a2)
@@ -141,7 +145,12 @@ static inline int mc_ipv6_skip_exthdr(const struct sk_buff *skb, int start,
 	(void)pos; \
 	hlist_for_each_entry(tpos, head, member)
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+#define os_br_fdb_get(a, b) br_fdb_find_rcu(a, b, 0)
+#else
 #define os_br_fdb_get(a, b) __br_fdb_get(a, b, 0)
+#endif
+
 #else
 
 #define os_hlist_for_each_entry_rcu(tpos, pos, head, member) \

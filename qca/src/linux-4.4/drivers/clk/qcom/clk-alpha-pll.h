@@ -94,12 +94,18 @@ struct alpha_pll_config {
 	u32 post_div_mask;
 	u32 vco_val;
 	u32 vco_mask;
+	u32 test_ctl_val;
+	u32 test_ctl_hi_val;
+	u32 status_reg_val;
+	u32 status_reg_mask;
+	u32 lock_det;
 };
 
 extern const struct clk_ops clk_alpha_pll_ops;
 extern const struct clk_ops clk_alpha_pll_hwfsm_ops;
 extern const struct clk_ops clk_alpha_pll_huayra_ops;
 extern const struct clk_ops clk_alpha_pll_brammo_ops;
+extern const struct clk_ops clk_alpha_pll_stromer_ops;
 extern const struct clk_ops clk_alpha_pll_postdiv_ops;
 extern const struct clk_ops clk_alpha_pll_postdiv_ro_ops;
 

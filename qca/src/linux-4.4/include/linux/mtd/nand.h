@@ -23,7 +23,6 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/flashchip.h>
 #include <linux/mtd/bbm.h>
-
 struct mtd_info;
 struct nand_flash_dev;
 struct device_node;
@@ -89,6 +88,14 @@ extern int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len);
 #define NAND_CMD_SET_FEATURES	0xef
 #define NAND_CMD_RESET		0xff
 
+/*
+ * Serial NAND flash commands
+ */
+#define NAND_CMD_READID_SERIAL		0x9F
+#define NAND_CMD_ERASE_SERIAL		0xd8
+#define NAND_CMD_SET_FEATURE_SERIAL	0x1F
+#define NAND_CMD_GET_FEATURE_SERIAL	0x0F
+
 #define NAND_CMD_LOCK		0x2a
 #define NAND_CMD_UNLOCK1	0x23
 #define NAND_CMD_UNLOCK2	0x24
@@ -106,6 +113,10 @@ extern int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len);
 #define NAND_STATUS_TRUE_READY	0x20
 #define NAND_STATUS_READY	0x40
 #define NAND_STATUS_WP		0x80
+
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+#define MAX_MULTI_PAGE		64
+#endif
 
 /*
  * Constants for ECC_MODES
@@ -507,6 +518,10 @@ struct nand_ecc_ctrl {
 			const uint8_t *buf, int oob_required, int page);
 	int (*read_page)(struct mtd_info *mtd, struct nand_chip *chip,
 			uint8_t *buf, int oob_required, int page);
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+	int (*read_multi_page)(struct mtd_info *mtd, struct nand_chip *chip,
+			uint8_t *buf, int oob_required, int page, int no_pages);
+#endif
 	int (*read_subpage)(struct mtd_info *mtd, struct nand_chip *chip,
 			uint32_t offs, uint32_t len, uint8_t *buf, int page);
 	int (*write_subpage)(struct mtd_info *mtd, struct nand_chip *chip,
@@ -762,6 +777,7 @@ static inline struct mtd_info *nand_to_mtd(struct nand_chip *chip)
 #define NAND_MFR_GIGA		0xc8
 #define NAND_MFR_ATO		0x9b
 #define NAND_MFR_WINBOND	0xef
+#define NAND_MFR_FIDELIX	0xe5
 
 /* The maximum expected count of bytes in the NAND ID sequence */
 #define NAND_MAX_ID_LEN 8

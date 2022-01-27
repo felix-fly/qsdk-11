@@ -250,7 +250,11 @@
 	 * Set the exception vectors.
 	 * ---------------------------------------------------------------------
 	 */
+#if QTI_6018_PLATFORM || QTI_5018_PLATFORM
+	ldr	x0, =\_exception_vectors
+#else
 	adr	x0, \_exception_vectors
+#endif
 	msr	vbar_el3, x0
 	isb
 

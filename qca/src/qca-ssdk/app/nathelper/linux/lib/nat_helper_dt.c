@@ -60,7 +60,7 @@ extern int nat_chip_ver;
 struct napt_ct
 {
     struct napt_ct *next;
-    a_uint32_t ct_addr;
+    uintptr_t ct_addr;
     a_uint64_t ct_packets;
     a_uint8_t in_hw;
     a_uint16_t hw_index;
@@ -119,17 +119,21 @@ napt_hash_buf_init(struct napt_ct **hash, struct nhlist_head **hash_head)
     return 0;
 }
 
+#include <linux/hash.h>
 static a_uint32_t
-napt_ct_hash(a_uint32_t ct_addr)
+napt_ct_hash(uintptr_t ct_addr)
 {
+	/*
 	if(nf_athrs17_hnat_sync_counter_en == 0)
 		return (((ct_addr) * (0x9e370001UL)) >> 22);
 	else
 		return (((ct_addr) * (0x9e370001UL)) >> 29);
+	*/
+	return hash_long(ct_addr, NAPT_TABLE_BITS);
 }
 
 static struct napt_ct *
-napt_hash_add(a_uint32_t ct_addr, a_uint32_t *hash_cnt,
+napt_hash_add(uintptr_t ct_addr, a_uint32_t *hash_cnt,
               struct napt_ct *hash, struct nhlist_head *hash_head)
 {
     struct napt_ct *entry = 0,*last = 0,*node = 0;
@@ -194,7 +198,7 @@ napt_hash_add(a_uint32_t ct_addr, a_uint32_t *hash_cnt,
 }
 
 static struct napt_ct *
-napt_hash_find(a_uint32_t ct_addr, a_uint32_t *hash_cnt,
+napt_hash_find(uintptr_t ct_addr, a_uint32_t *hash_cnt,
                struct napt_ct *hash, struct nhlist_head *hash_head)
 {
     struct napt_ct *entry = 0;
@@ -264,7 +268,7 @@ napt_ct_cnt_get(void)
 }
 
 static struct napt_ct *
-napt_ct_buf_ct_find(a_uint32_t ct_addr)
+napt_ct_buf_ct_find(uintptr_t ct_addr)
 {
     return napt_hash_find(ct_addr, &ct_buf_ct_cnt,
                           ct_buf, ct_buf_hash_head);
@@ -345,7 +349,7 @@ napt_ct_buf_ct_info_clear(struct napt_ct *napt_ct)
 }
 
 static struct napt_ct *
-napt_ct_buf_ct_add(a_uint32_t ct_addr)
+napt_ct_buf_ct_add(uintptr_t ct_addr)
 {
     struct napt_ct *napt_ct;
     napt_ct = napt_hash_add(ct_addr, &ct_buf_ct_cnt,
@@ -361,7 +365,7 @@ napt_ct_buf_ct_add(a_uint32_t ct_addr)
 }
 
 #define NAPT_CT_PERMANENT_DENY 5
-static a_uint32_t napt_ct_addr[NAPT_TABLE_SIZE] = {0};
+static uintptr_t napt_ct_addr[NAPT_TABLE_SIZE] = {0};
 a_uint32_t napt_cookie[NAPT_TABLE_SIZE*2] = {0};
 
 a_uint32_t packet_thres_base = 50;
@@ -375,7 +379,7 @@ before(a_uint64_t seq1, a_uint64_t seq2)
 }
 
 static a_uint8_t
-napt_ct_pkts_reach_thres(a_uint32_t ct_addr, struct napt_ct *napt_ct,
+napt_ct_pkts_reach_thres(uintptr_t ct_addr, struct napt_ct *napt_ct,
                          a_uint8_t pkts_sum)
 {
     a_uint64_t packets_bdir_old = napt_ct_buf_pkts_get(napt_ct);
@@ -448,7 +452,7 @@ a_uint8_t napt_snat_flow_find_del(
 
 
 static a_int32_t
-napt_ct_hw_add(a_uint32_t ct_addr, a_uint16_t *hw_index)
+napt_ct_hw_add(uintptr_t ct_addr, a_uint16_t *hw_index)
 {
     napt_entry_t napt = {0};
     a_uint32_t index, i, dcookie = 0, scookie = 0;
@@ -539,7 +543,7 @@ napt_ct_hw_del (napt_entry_t *napt)
 void nat_helper_cookie_del(a_uint32_t hw_index)
 {
 	struct napt_ct *napt_ct = NULL;
-	a_uint32_t ct_addr;
+	uintptr_t ct_addr;
 	ct_addr = napt_ct_addr[hw_index];
 	if(ct_addr) {
 		napt_ct = napt_ct_buf_ct_find(ct_addr);
@@ -643,7 +647,8 @@ napt_ct_hw_aging(void)
 {
 #define NAPT_AGEOUT_STATUS 1
 
-    a_uint32_t ct_addr, cnt= 0;
+    uintptr_t ct_addr;
+	a_uint32_t cnt= 0;
     napt_entry_t napt = {0};
 
 
@@ -669,7 +674,7 @@ napt_ct_hw_aging(void)
 
             if((nf_athrs17_hnat_sync_counter_en == 0) && (napt_ct_pkts_reach_thres(ct_addr, napt_ct, 0)))
             {
-                printk("<aging>set PERMANENT deny ct:%x\n", ct_addr);
+                printk("<aging>set PERMANENT deny ct:%lx\n", (a_ulong_t)ct_addr);
                 napt_ct_buf_deny_set(napt_ct, NAPT_CT_PERMANENT_DENY);
             }
         }
@@ -711,7 +716,7 @@ napt_ct_counter_sync(a_uint32_t hw_index)
 	if((nf_athrs17_hnat_sync_counter_en == 0) || (napt_ct_addr[hw_index] == 0) || (hw_index >= NAPT_TABLE_SIZE))
 		return -1;
 
-	ct = (struct nf_conn *)napt_ct_addr[hw_index];
+	ct = (struct nf_conn *)(uintptr_t)napt_ct_addr[hw_index];
 	cct = (struct nf_conn_counter *)nf_conn_acct_find(ct);
 	napt_ct = napt_ct_buf_ct_find(ct_addr);
 	if (napt_ct) {
@@ -754,13 +759,13 @@ napt_ct_timer_update(a_uint32_t hw_index)
 	struct nf_conn *ct = NULL;
 	struct nf_conn_counter *cct = NULL;
 	a_uint64_t delta_jiffies = 0, now_jiffies;
-	a_uint32_t ct_addr = napt_ct_addr[hw_index];
+	uintptr_t ct_addr = napt_ct_addr[hw_index];
 	struct napt_ct *napt_ct;
 
 	if((napt_ct_addr[hw_index] == 0) || (hw_index >= NAPT_TABLE_SIZE))
 		return -1;
 
-	ct = (struct nf_conn *)napt_ct_addr[hw_index];
+	ct = (struct nf_conn *)(uintptr_t)napt_ct_addr[hw_index];
 	cct = (struct nf_conn_counter *)nf_conn_acct_find(ct);
 	napt_ct = napt_ct_buf_ct_find(ct_addr);
 	if (napt_ct) {
@@ -799,7 +804,7 @@ napt_ct_hw_sync(a_uint8_t napt_ct_valid[])
         if(NAPT_INVALID_CT_NEED_HW_CLEAR(hw_index))
         {
 
-            a_uint32_t ct_addr = napt_ct_addr[hw_index];
+            uintptr_t ct_addr = napt_ct_addr[hw_index];
             struct napt_ct *napt_ct = napt_ct_buf_ct_find(ct_addr);
 
 			HNAT_INFO_PRINTK("should hw clear for  %d\n", hw_index);
@@ -858,7 +863,7 @@ napt_ct_frag_hw_yield(struct napt_ct *napt_ct, a_uint16_t hw_index)
 #define NAPT_CT_IS_REUSED_BY_OS(in_hw, ct_addr)   ((in_hw) && \
                                     NAPT_CT_AGING_IS_ENABLE(ct_addr))
 static a_int32_t
-napt_ct_check_add_one(a_uint32_t ct_addr, a_uint8_t *napt_ct_valid)
+napt_ct_check_add_one(uintptr_t ct_addr, a_uint8_t *napt_ct_valid)
 {
     struct napt_ct *napt_ct = NULL;
     a_uint16_t hw_index;
@@ -1035,10 +1040,10 @@ a_uint8_t napt_ct_valid_tbl[NAPT_TABLE_SIZE] = {0};
 static a_int32_t
 napt_ct_check_add(void)
 {
-	a_uint32_t ct_addr = 0;
+	uintptr_t ct_addr = 0;
 	a_uint32_t ct_buf_valid_cnt = 0, care_cnt = 0, ct_cnt = 0;
 	static a_uint32_t hash = 0;
-	a_uint32_t iterate = 0;
+	uintptr_t iterate = 0;
 	a_uint32_t napt_ct_offload_cnt = 0;
 	a_uint16_t hw_index;
 
@@ -1082,7 +1087,7 @@ napt_ct_check_add(void)
 }
 
 static a_int32_t
-napt_ct_add(a_uint32_t ct_addr, a_uint8_t *napt_ct_valid)
+napt_ct_add(uintptr_t ct_addr, a_uint8_t *napt_ct_valid)
 {
     struct napt_ct *napt_ct;
 
@@ -1098,9 +1103,9 @@ napt_ct_add(a_uint32_t ct_addr, a_uint8_t *napt_ct_valid)
 static a_int32_t
 napt_ct_buffer_ct_status_update(void)
 {
-    a_uint32_t ct_addr = 0;
+    uintptr_t ct_addr = 0;
     a_uint32_t hash = 0;
-    a_uint32_t iterate = 0;
+    uintptr_t iterate = 0;
 
     NAPT_CT_LIST_LOCK();
 
@@ -1124,7 +1129,7 @@ napt_ct_buffer_hw_status_update(void)
 
     for(hw_index = 0; hw_index < NAPT_TABLE_SIZE; hw_index++)
     {
-        a_uint32_t ct_addr = napt_ct_addr[hw_index];
+        uintptr_t ct_addr = napt_ct_addr[hw_index];
         if(ct_addr)
         {
             struct napt_ct *napt_ct = napt_ct_buf_ct_find(ct_addr);
@@ -1196,7 +1201,7 @@ void napt_wan_switch_prehandle(void)
 {
 	if (wan_switch) {
 		napt_thread_pending = 1;
-		napt_l3_status_set(0, A_FALSE);
+		L3_STATUS_SET(0, A_FALSE);
 		napt_ct_hw_exit();
 		napt_hw_flush();
 		qcaswitch_hostentry_flush();
@@ -1208,7 +1213,7 @@ void napt_wan_switch_prehandle(void)
 		ip_conflict_del_acl_rules();
 		#endif
 		if_mac_cleanup();
-		napt_l3_status_set(0, A_TRUE);
+		L3_STATUS_SET(0, A_TRUE);
 		napt_thread_pending = 0;
 	}
 }
@@ -1224,7 +1229,7 @@ napt_ct_init(void)
 	else
 	{
 		napt_buffer_hash_size = 8;
-		napt_buffer_size = napt_buffer_hash_size;
+		napt_buffer_size = NAPT_TABLE_SIZE;
 	}
 
     napt_hw_mode_init();
@@ -1325,7 +1330,7 @@ void napt_helper_show(void)
 	a_uint16_t hw_index;
 	for(hw_index = 0; hw_index < NAPT_TABLE_SIZE; hw_index++) {
 		if (napt_ct_addr[hw_index]) {
-			printk("index[%d] exist: 0x%x\n", hw_index, napt_ct_addr[hw_index]);
+			printk("index[%d] exist: 0x%lx\n", hw_index, (a_ulong_t)napt_ct_addr[hw_index]);
 		}
 	}
 	printk("current hardware offload count: 0x%x\n", napt_ct_hw_cnt);

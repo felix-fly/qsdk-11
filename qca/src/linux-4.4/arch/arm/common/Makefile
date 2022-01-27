@@ -2,6 +2,8 @@
 # Makefile for the linux kernel.
 #
 
+KASAN_SANITIZE := n
+
 obj-y				+= firmware.o
 
 obj-$(CONFIG_ICST)		+= icst.o

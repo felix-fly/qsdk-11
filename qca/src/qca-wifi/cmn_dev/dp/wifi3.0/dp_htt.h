@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -31,7 +31,8 @@
 #else
 struct htt_logger;
 static inline
-void htt_interface_logging_init(struct htt_logger **htt_logger_handle)
+void htt_interface_logging_init(struct htt_logger **htt_logger_handle,
+				struct cdp_ctrl_objmgr_psoc *ctrl_psoc)
 {
 }
 
@@ -62,6 +63,8 @@ int htt_wbm_event_record(struct htt_logger *h, uint8_t tx_status,
 }
 
 #endif
+
+void htt_htc_pkt_pool_free(struct htt_soc *soc);
 
 #define HTT_TX_MUTEX_TYPE qdf_spinlock_t
 
@@ -95,10 +98,74 @@ int htt_wbm_event_record(struct htt_logger *h, uint8_t tx_status,
 #define HTT_PPDU_DESC_MAX_DEPTH 16
 #define DP_SCAN_PEER_ID 0xFFFF
 
-#define DP_HTT_HTC_PKT_MISCLIST_SIZE          256
+#define HTT_RX_DELBA_WIN_SIZE_M    0x0000FC00
+#define HTT_RX_DELBA_WIN_SIZE_S    10
+
+#define HTT_RX_DELBA_WIN_SIZE_GET(word)		\
+	(((word) & HTT_RX_DELBA_WIN_SIZE_M) >> HTT_RX_DELBA_WIN_SIZE_S)
+
+/*
+ * Set the base misclist size to HTT copy engine source ring size
+ * to guarantee that a packet on the misclist wont be freed while it
+ * is sitting in the copy engine.
+ */
+#define DP_HTT_HTC_PKT_MISCLIST_SIZE          2048
 #define HTT_T2H_MAX_MSG_SIZE 2048
 
 #define HTT_T2H_EXT_STATS_TLV_START_OFFSET    3
+
+/*
+ * Below offset are based on htt_ppdu_stats_common_tlv
+ * defined in htt_ppdu_stats.h
+ */
+#define HTT_PPDU_STATS_COMMON_TLV_TLV_HDR_OFFSET 0
+#define HTT_PPDU_STATS_COMMON_TLV_PPDU_ID_OFFSET 1
+#define HTT_PPDU_STATS_COMMON_TLV_RING_ID_SCH_CMD_ID_OFFSET 2
+#define HTT_PPDU_STATS_COMMON_TLV_QTYPE_FRM_TYPE_OFFSET 3
+#define HTT_PPDU_STATS_COMMON_TLV_CHAIN_MASK_OFFSET 4
+#define HTT_PPDU_STATS_COMMON_TLV_FES_DUR_US_OFFSET 5
+#define HTT_PPDU_STATS_COMMON_TLV_SCH_EVAL_START_TSTMP_L32_US_OFFSET 6
+#define HTT_PPDU_STATS_COMMON_TLV_SCH_END_TSTMP_US_OFFSET 7
+#define HTT_PPDU_STATS_COMMON_TLV_START_TSTMP_L32_US_OFFSET 8
+#define HTT_PPDU_STATS_COMMON_TLV_CHAN_MHZ_PHY_MODE_OFFSET 9
+#define HTT_PPDU_STATS_COMMON_TLV_CCA_DELTA_TIME_US_OFFSET 10
+#define HTT_PPDU_STATS_COMMON_TLV_RXFRM_DELTA_TIME_US_OFFSET 11
+#define HTT_PPDU_STATS_COMMON_TLV_TXFRM_DELTA_TIME_US_OFFSET 12
+#define HTT_PPDU_STATS_COMMON_TLV_RESV_NUM_UL_BEAM_OFFSET 13
+#define HTT_PPDU_STATS_COMMON_TLV_START_TSTMP_U32_US_OFFSET 14
+
+/* get index for field in htt_ppdu_stats_common_tlv */
+#define HTT_GET_STATS_CMN_INDEX(index) \
+	HTT_PPDU_STATS_COMMON_TLV_##index##_OFFSET
+
+#define MAX_SCHED_STARVE 100000
+#define WRAP_DROP_TSF_DELTA 10000
+#define MAX_TSF_32 0xFFFFFFFF
+
+#define dp_htt_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_DP_HTT, params)
+#define dp_htt_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_DP_HTT, params)
+#define dp_htt_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_DP_HTT, params)
+#define dp_htt_info(params...) \
+	__QDF_TRACE_FL(QDF_TRACE_LEVEL_INFO_HIGH, QDF_MODULE_ID_DP_HTT, ## params)
+#define dp_htt_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_DP_HTT, params)
+
+#define dp_htt_tx_stats_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_DP_HTT_TX_STATS, params)
+#define dp_htt_tx_stats_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_DP_HTT_TX_STATS, params)
+#define dp_htt_tx_stats_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_DP_HTT_TX_STATS, params)
+#define dp_htt_tx_stats_info(params...) \
+	__QDF_TRACE_FL(QDF_TRACE_LEVEL_INFO_HIGH, QDF_MODULE_ID_DP_HTT_TX_STATS, ## params)
+#define dp_htt_tx_stats_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_DP_HTT_TX_STATS, params)
+
+/**
+ * enum dp_full_mon_config - enum to enable/disable full monitor mode
+ *
+ * @DP_FULL_MON_DISABLE: Disable full monitor mode
+ * @DP_FULL_MON_ENABLE: Enable full monitor mode
+ */
+enum dp_full_mon_config {
+	DP_FULL_MON_DISABLE,
+	DP_FULL_MON_ENABLE,
+};
 
 struct dp_htt_htc_pkt {
 	void *soc_ctxt;
@@ -142,6 +209,10 @@ struct htt_soc {
 	struct {
 		int htc_err_cnt;
 		int htc_pkt_free;
+		int skip_count;
+		int fail_count;
+		/* rtpm put skip count for ver req msg */
+		int htt_ver_req_put_skip;
 	} stats;
 
 	HTT_TX_MUTEX_TYPE htt_tx_mutex;
@@ -176,6 +247,8 @@ struct htt_soc {
  * @rx_msdu_end_offset: Offset of rx_msdu_end tlv
  * @rx_msdu_start_offset: Offset of rx_msdu_start tlv
  * @rx_attn_offset: Offset of rx_attention tlv
+ *
+ * NOTE: Do not change the layout of this structure
  */
 struct htt_rx_ring_tlv_filter {
 	u_int32_t mpdu_start:1,
@@ -262,6 +335,19 @@ struct dp_htt_rx_flow_fst_operation {
 	enum dp_htt_flow_fst_operation op_code;
 	struct cdp_rx_flow_info *rx_flow;
 };
+
+/**
+ * struct dp_htt_rx_fisa_config - Rx fisa config
+ * @pdev_id: DP Pdev identifier
+ * @fisa_timeout: fisa aggregation timeout
+ */
+struct dp_htt_rx_fisa_cfg {
+	uint8_t pdev_id;
+	uint32_t fisa_timeout;
+};
+
+QDF_STATUS dp_htt_rx_fisa_config(struct dp_pdev *pdev,
+				 struct dp_htt_rx_fisa_cfg *fisa_config);
 
 /*
  * htt_soc_initialize() - SOC level HTT initialization
@@ -403,4 +489,17 @@ dp_htt_rx_flow_fst_setup(struct dp_pdev *pdev,
 QDF_STATUS
 dp_htt_rx_flow_fse_operation(struct dp_pdev *pdev,
 			     struct dp_htt_rx_flow_fst_operation *op_info);
+
+/**
+ * htt_h2t_full_mon_cfg() - Send full monitor configuarion msg to FW
+ *
+ * @htt_soc: HTT Soc handle
+ * @pdev_id: Radio id
+ * @dp_full_mon_config: enabled/disable configuration
+ *
+ * Return: Success when HTT message is sent, error on failure
+ */
+int htt_h2t_full_mon_cfg(struct htt_soc *htt_soc,
+			 uint8_t pdev_id,
+			 enum dp_full_mon_config);
 #endif /* _DP_HTT_H_ */

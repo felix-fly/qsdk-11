@@ -1,7 +1,7 @@
 /*
  * AQ105 PHY driver header file
  *
- * Copyright (c) 2015-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -83,6 +83,13 @@ struct aq_phy_platform_data {
 
 /* Autonegotiation Vendor Status register */
 #define AQ_PHY_LINK_REG		0xC800
+
+/*
+ * Mask and Bit definitions for Auto-negotiation
+ * standard control register 1
+ */
+#define AQ_PHY_AUTONEG_ENABLE	0x1000
+#define AQ_PHY_AUTONEG_RESTART	0x200
 
 /* Mask and Bit definition for AQ_PHY_LINK_REG */
 #define AQ_PHY_LINK_DUPLEX_MASK	0x1

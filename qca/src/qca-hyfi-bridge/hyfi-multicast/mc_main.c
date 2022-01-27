@@ -24,13 +24,8 @@ int __init mc_init(void)
     if (mc_netfilter_init())
         goto err1;
 
-    if (mc_snooping_init())
-        goto err2;
-
     printk("QCA Hy-Fi multicast installation successfully\n");
 	return 0;
-err2:
-    mc_netfilter_exit();
 err1:
     mc_netlink_exit();
 err0:

@@ -23,9 +23,9 @@ class Modules(RamParser):
 
     #simple light function which prints only the skb count;not module sysmbols
     def mod_light_func(self, mod_list):
-        if(self.ramdump.isELF64() and (mod_list & 0xfff0000000 != 0xbff0000000)):
+        if(self.ramdump.isELF64() and (mod_list & 0xfff0000000 != self.ramdump.mod_start_addr)):
             return
-        elif(self.ramdump.isELF32() and mod_list & 0xff000000 !=  0xbf000000):
+        elif(self.ramdump.isELF32() and mod_list & 0xff000000 != self.ramdump.mod_start_addr):
             return
         name = self.ramdump.read_cstring(mod_list + self.name_offset, 30)
         if (name is None):
@@ -43,13 +43,13 @@ class Modules(RamParser):
         high_mem_addr = self.ramdump.addr_lookup('high_memory')
         vmalloc_offset = 0x800000
         vmalloc_start = self.ramdump.read_u32(high_mem_addr) + vmalloc_offset & (~int(vmalloc_offset - 0x1))
-        if(self.ramdump.isELF64() and (mod_list & 0xfff0000000 != 0xbff0000000)):
+        if(self.ramdump.isELF64() and (mod_list & 0xfff0000000 != self.ramdump.mod_start_addr)):
             self.module_out.write('module list reached end: 0x{0:x}'.format(mod_list))
             return
-        elif (self.ramdump.isELF32() and self.ramdump.Is_Hawkeye() and mod_list & 0xff000000 != 0x7f000000 and not ((vmalloc_start & 0xff000000 <= mod_list & 0xff000000) and (mod_list & 0xff000000 <= 0xff000000))):
+        elif (self.ramdump.isELF32() and self.ramdump.Is_Hawkeye() and mod_list & 0xff000000 != self.ramdump.mod_start_addr and not ((vmalloc_start & 0xff000000 <= mod_list & 0xff000000) and (mod_list & 0xff000000 <= 0xff000000))):
             self.module_out.write('module list reached end: 0x{0:x}'.format(mod_list))
             return
-        elif (self.ramdump.isELF32() and not self.ramdump.Is_Hawkeye() and mod_list & 0xff000000 !=  0xbf000000):
+        elif (self.ramdump.isELF32() and not self.ramdump.Is_Hawkeye() and mod_list & 0xff000000 != self.ramdump.mod_start_addr):
             self.module_out.write('module list reached end: 0x{0:x}'.format(mod_list))
             return
 
@@ -61,23 +61,41 @@ class Modules(RamParser):
         if len(name) < 1 and name.isalpha() is False:
            return
 
-        module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_size_offset)
-        module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_size_offset)
+        if (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (5, 4):
+           module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_init_offset + self.ramdump.module_size_offset)
+           module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_core_offset + self.ramdump.module_size_offset)
+           module_core = self.ramdump.read_word(mod_list + self.ramdump.module_layout_core_offset + self.ramdump.module_offset)
+        else:
+           module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_size_offset)
+           module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_size_offset)
+           module_core = self.ramdump.read_word(mod_list + self.ramdump.module_core_offset)
         mod_size = module_init_size + module_core_size
 
         self.module_out.write('------------------------------------------------------\n')
-        self.module_out.write('{0:12} {1:25} {2:7}\n'.format("Address","Name","Size"))
+        self.module_out.write('{0:20} {1:25} {2:7} {3:12}\n'.format("Address","Name","Size","Core"))
         self.module_out.write('------------------------------------------------------\n')
         mod_nm = name+'.ko'
-        self.module_out.write('0x{0:8x}   {1:25} {2}\n\n'.format(mod_list, mod_nm, mod_size))
+        self.module_out.write('0x{0:<18x} {1:25} {2:<7} 0x{3:x}\n\n'.format(mod_list, mod_nm, mod_size, module_core))
+
         self.module_out.write('------------------------------------------\n')
         self.module_out.write('module symbol information\n')
         self.module_out.write('------------------------------------------\n')
         if (re.search('3.14.77', self.ramdump.version) is not None or (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (4, 4)):
-            kallsyms = self.ramdump.read_word(mod_list + self.kallsyms_offset)
-            module_symtab_count = self.ramdump.read_u32(kallsyms + self.module_symtab_count_offset)
-            module_symtab = self.ramdump.read_word(kallsyms + self.module_symtab_offset)
-            module_strtab = self.ramdump.read_word(kallsyms + self.module_strtab_offset)
+            if self.kallsyms_offset >= 0:
+                kallsyms = self.ramdump.read_word(mod_list + self.kallsyms_offset)
+                module_symtab_count = self.ramdump.read_u32(kallsyms + self.module_symtab_count_offset)
+                module_symtab = self.ramdump.read_word(kallsyms + self.module_symtab_offset)
+                module_strtab = self.ramdump.read_word(kallsyms + self.module_strtab_offset)
+            else:
+                kallsyms = -1
+                module_symtab_count = -1
+                module_symtab = -1
+                module_strtab = -1
+                print_out_str("CONFIG_KALLSYMS not available, tryin syms")
+                syms_offset = self.ramdump.field_offset('struct module', 'syms')
+                num_syms_offset = self.ramdump.field_offset('struct module', 'num_syms')
+                module_sym_count = self.ramdump.read_u32(mod_list + num_syms_offset)
+                module_sym = self.ramdump.read_u32(mod_list + syms_offset)
         else:
             module_symtab_count = self.ramdump.read_word(mod_list + self.module_symtab_count_offset)
             module_symtab = self.ramdump.read_word(mod_list + self.module_symtab_offset)
@@ -103,6 +121,23 @@ class Modules(RamParser):
                     self.module_out.write('{0:4}  0x{1:8x}  {2}/0x{3:x}\n'.format(i, symtab_st_value, strtab_name, symtab_st_size))
                 except:
                     self.module_out.write('{0:4} 0x{1:8} {2}/0x{3}\n'.format(i, symtab_st_value, strtab_name, symtab_st_size))
+
+            if module_symtab_count < 0:
+                for i in range(1, module_sym_count):
+                    if (self.ramdump.isELF32()):
+                        name = self.ramdump.read_u32(module_sym + 4)
+                        val = self.ramdump.read_u32(module_sym)
+                        module_sym += 8
+                    else:
+                        name = self.ramdump.read_u32(module_sym + 8)
+                        val = self.ramdump.read_u32(module_sym)
+                        module_sym += 16
+
+                    strtab_name = self.ramdump.read_cstring(name, 40)
+                    try:
+                        self.module_out.write('{0:4}  0x{1:8x}  {2}\n'.format(i, val, strtab_name))
+                    except:
+                        self.module_out.write('{0:4} 0x{1:8} {2}\n'.format(i, val, strtab_name))
 
 	except MemoryError:
 	    self.module_out.write ('MemoryError caught at module\n')

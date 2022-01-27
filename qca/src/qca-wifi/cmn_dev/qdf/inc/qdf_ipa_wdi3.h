@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, 2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,9 @@
 #include <qdf_ipa.h>
 #include <i_qdf_ipa_wdi3.h>
 
-#ifdef CONFIG_IPA_WDI_UNIFIED_API
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)) || \
+	defined(CONFIG_IPA_WDI_UNIFIED_API)
+
 /**
  * qdf_ipa_wdi_version_t - IPA WDI version
  */
@@ -170,6 +172,10 @@ typedef __qdf_ipa_wdi_reg_intf_in_params_t qdf_ipa_wdi_reg_intf_in_params_t;
 	__QDF_IPA_WDI_REG_INTF_IN_PARAMS_META_DATA(in)
 #define QDF_IPA_WDI_REG_INTF_IN_PARAMS_META_DATA_MASK(in)	\
 	__QDF_IPA_WDI_REG_INTF_IN_PARAMS_META_DATA_MASK(in)
+#ifdef IPA_WDI3_TX_TWO_PIPES
+#define QDF_IPA_WDI_REG_INTF_IN_PARAMS_IS_TX1_USED(in)	\
+	__QDF_IPA_WDI_REG_INTF_IN_PARAMS_IS_TX1_USED(in)
+#endif
 
 /**
  * qdf_ipa_wdi_pipe_setup_info_t - WDI TX/Rx configuration
@@ -247,6 +253,16 @@ typedef __qdf_ipa_wdi_conn_in_params_t qdf_ipa_wdi_conn_in_params_t;
 	__QDF_IPA_WDI_CONN_IN_PARAMS_RX(pipe_in)
 #define QDF_IPA_WDI_CONN_IN_PARAMS_RX_SMMU(pipe_in)	\
 	__QDF_IPA_WDI_CONN_IN_PARAMS_RX_SMMU(pipe_in)
+#ifdef IPA_WDI3_TX_TWO_PIPES
+#define QDF_IPA_WDI_CONN_IN_PARAMS_IS_TX1_USED(pipe_in)	\
+	__QDF_IPA_WDI_CONN_IN_PARAMS_IS_TX1_USED(pipe_in)
+#define QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE(pipe_in)	\
+	__QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE(pipe_in)
+#define QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE_SMMU(pipe_in)	\
+	__QDF_IPA_WDI_CONN_IN_PARAMS_TX_ALT_PIPE_SMMU(pipe_in)
+#define QDF_IPA_WDI_CONN_OUT_PARAMS_TX_UC_ALT_DB_PA(pipe_out)	\
+	__QDF_IPA_WDI_CONN_OUT_PARAMS_TX_UC_ALT_DB_PA(pipe_out)
+#endif
 
 /**
  * qdf_ipa_wdi_conn_out_params_t - information provided
@@ -260,6 +276,8 @@ typedef __qdf_ipa_wdi_conn_out_params_t qdf_ipa_wdi_conn_out_params_t;
 	__QDF_IPA_WDI_CONN_OUT_PARAMS_TX_UC_DB_VA(pipe_out)
 #define QDF_IPA_WDI_CONN_OUT_PARAMS_RX_UC_DB_PA(pipe_out)	\
 	__QDF_IPA_WDI_CONN_OUT_PARAMS_RX_UC_DB_PA(pipe_out)
+#define QDF_IPA_WDI_CONN_OUT_PARAMS_IS_DB_DDR_MAPPED(pipe_out)	\
+	__QDF_IPA_WDI_CONN_OUT_PARAMS_IS_DB_DDR_MAPPED(pipe_out)
 
 /**
  * qdf_ipa_wdi_perf_profile_t - To set BandWidth profile
@@ -397,6 +415,31 @@ static inline int qdf_ipa_wdi_release_smmu_mapping(uint32_t num_buffers,
 {
 	return __qdf_ipa_wdi_release_smmu_mapping(num_buffers, info);
 }
+
+#ifdef WDI3_STATS_UPDATE
+/**
+ * qdf_ipa_wdi_wlan_stats() - Client should call this function to
+ *		send Tx byte counts to IPA driver
+ * @tx_count: number of Tx bytes
+ *
+ * Returns: 0 on success, negative on failure
+ */
+static inline int qdf_ipa_wdi_wlan_stats(qdf_ipa_wdi_tx_info_t *tx_stats)
+{
+	return __qdf_ipa_wdi_wlan_stats(tx_stats);
+}
+
+/**
+ * qdf_ipa_uc_bw_monitor() - start/stop uc bw monitoring
+ * @bw_info: set bw info levels to monitor
+ *
+ * Returns: 0 on success, negative on failure
+ */
+static inline int qdf_ipa_uc_bw_monitor(qdf_ipa_wdi_bw_info_t *bw_info)
+{
+	return __qdf_ipa_uc_bw_monitor(bw_info);
+}
+#endif
 
 #endif /* IPA_OFFLOAD */
 #endif /* _QDF_IPA_WDI3_H */

@@ -26,9 +26,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 24,
@@ -36,9 +36,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 25,
@@ -46,9 +46,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 26,
@@ -56,9 +56,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 27,
@@ -66,9 +66,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 28,
@@ -76,9 +76,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 29,
@@ -86,9 +86,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 30,
@@ -96,9 +96,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 31,
@@ -106,9 +106,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 32,
@@ -116,9 +116,9 @@ gpio_func_data_t mmc_ap_dk04[] = {
 		.pull = GPIO_NO_PULL,
 		.drvstr = GPIO_10MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -130,9 +130,9 @@ gpio_func_data_t spi_nor_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 13,
@@ -140,9 +140,9 @@ gpio_func_data_t spi_nor_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 14,
@@ -150,9 +150,9 @@ gpio_func_data_t spi_nor_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 15,
@@ -160,9 +160,9 @@ gpio_func_data_t spi_nor_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -173,9 +173,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 53,
@@ -183,9 +183,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 54,
@@ -193,9 +193,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 55,
@@ -203,9 +203,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 56,
@@ -213,9 +213,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 57,
@@ -223,9 +223,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 58,
@@ -233,9 +233,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 59,
@@ -243,9 +243,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 60,
@@ -253,9 +253,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 61,
@@ -263,9 +263,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 62,
@@ -273,9 +273,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 63,
@@ -283,9 +283,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 64,
@@ -293,9 +293,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 65,
@@ -303,9 +303,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 66,
@@ -313,9 +313,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 67,
@@ -323,9 +323,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 68,
@@ -333,9 +333,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 69,
@@ -343,9 +343,9 @@ gpio_func_data_t nand_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 
 };
@@ -357,9 +357,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 23,
@@ -367,9 +367,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 24,
@@ -377,9 +377,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 25,
@@ -387,9 +387,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 26,
@@ -397,9 +397,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 27,
@@ -407,9 +407,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 28,
@@ -417,9 +417,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 29,
@@ -427,9 +427,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 30,
@@ -437,9 +437,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 31,
@@ -447,9 +447,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 32,
@@ -457,9 +457,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 	{
 		.gpio = 33,
@@ -467,9 +467,9 @@ gpio_func_data_t rgmii_gpio_cfg[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_16MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_DISABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES0
+		.vm = GPIO_VM_DISABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES0
 	},
 };
 
@@ -480,9 +480,9 @@ gpio_func_data_t sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 7,
@@ -490,9 +490,9 @@ gpio_func_data_t sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 47,
@@ -500,9 +500,9 @@ gpio_func_data_t sw_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -513,9 +513,9 @@ gpio_func_data_t ap_dk04_1_c2_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 7,
@@ -523,9 +523,9 @@ gpio_func_data_t ap_dk04_1_c2_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 67,
@@ -533,9 +533,9 @@ gpio_func_data_t ap_dk04_1_c2_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -546,9 +546,9 @@ gpio_func_data_t ap_dk06_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 7,
@@ -556,9 +556,9 @@ gpio_func_data_t ap_dk06_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 19,
@@ -566,9 +566,9 @@ gpio_func_data_t ap_dk06_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -579,9 +579,9 @@ gpio_func_data_t ap_dk07_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 7,
@@ -589,9 +589,9 @@ gpio_func_data_t ap_dk07_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 41,
@@ -599,9 +599,9 @@ gpio_func_data_t ap_dk07_1_c1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_DOWN,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -612,9 +612,9 @@ gpio_func_data_t db_dk_2_1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 7,
@@ -622,9 +622,9 @@ gpio_func_data_t db_dk_2_1_sw_gpio_bga[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -635,9 +635,9 @@ gpio_func_data_t sw_gpio_qfn[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 53,
@@ -645,9 +645,9 @@ gpio_func_data_t sw_gpio_qfn[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 59,
@@ -655,9 +655,9 @@ gpio_func_data_t sw_gpio_qfn[] = {
 		.pull = GPIO_NO_PULL,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 
@@ -668,9 +668,9 @@ gpio_func_data_t ap_dk01_1_c2_sw_gpio_qfn[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 53,
@@ -678,9 +678,9 @@ gpio_func_data_t ap_dk01_1_c2_sw_gpio_qfn[] = {
 		.pull = GPIO_PULL_UP,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_DISABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 	{
 		.gpio = 62,
@@ -688,9 +688,9 @@ gpio_func_data_t ap_dk01_1_c2_sw_gpio_qfn[] = {
 		.pull = GPIO_NO_PULL,
 		.drvstr = GPIO_2MA,
 		.oe = GPIO_OE_ENABLE,
-		.gpio_vm = GPIO_VM_ENABLE,
-		.gpio_od_en = GPIO_OD_DISABLE,
-		.gpio_pu_res = GPIO_PULL_RES2
+		.vm = GPIO_VM_ENABLE,
+		.od_en = GPIO_OD_DISABLE,
+		.pu_res = GPIO_PULL_RES2
 	},
 };
 

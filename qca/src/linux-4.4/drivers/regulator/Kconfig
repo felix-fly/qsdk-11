@@ -821,7 +821,7 @@ config REGULATOR_WM8994
 config REGULATOR_RPM_GLINK
 	bool "RPM GLINK regulator driver"
 	depends on OF
-	depends on MSM_RPM_GLINK
+	depends on (MSM_RPM_GLINK || MSM_RPM_RPMSG)
 	help
 	  Compile in support for the RPM GLINK regulator driver which is used for
 	  setting voltages and other parameters of the various power rails

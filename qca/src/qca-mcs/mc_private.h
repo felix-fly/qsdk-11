@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015, 2017, 2019 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -118,12 +118,6 @@ struct mld2_query {
 
 #define MC_DEBUG
 #ifdef MC_DEBUG
-#define MC_IP4_FMT(ip4)		(ip4)[0], (ip4)[1], (ip4)[2], (ip4)[3]
-#define MC_IP4_STR			"%d.%d.%d.%d"
-#define MC_IP6_FMT(ip6)		ntohs((ip6)[0]), ntohs((ip6)[1]), ntohs((ip6)[2]), ntohs((ip6)[3]), ntohs((ip6)[4]), ntohs((ip6)[5]), ntohs((ip6)[6]), ntohs((ip6)[7])
-#define MC_IP6_STR			"%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x"
-#define MC_MAC_FMT(addr)	(addr)[0], (addr)[1], (addr)[2], (addr)[3], (addr)[4], (addr)[5]
-#define MC_MAC_STR			"%02x:%02x:%02x:%02x:%02x:%02x"
 #define MC_PRINT(fmt, ...)	do {if (mc->debug) printk(fmt, ##__VA_ARGS__); } while (0)
 #else
 #define MC_PRINT(fmt, ...)
@@ -148,7 +142,8 @@ struct mc_querier_entry {
 	struct hlist_node rlist;	/* attach to router port list */
 	struct rcu_head rcu;
 	unsigned long ageing_timer;
-	const void *port;
+	const void *dev;
+	__be32 ifindex;
 	struct mc_ip sip;
 	unsigned long max_resp_time;	/* Max Resp Code */
 	unsigned long qqic;	/* Querier's Query Interval Code */
@@ -225,12 +220,11 @@ struct mc_struct {
 
 	struct mc_router_port rp;	/* router port */
 	struct timer_list qtimer;	/* for sending query packet */
-	struct timer_list atimer;	/* for time aging */
+	struct timer_list agingtimer;	/* for time aging */
 	struct timer_list rtimer;	/* for router port time aging */
 	struct timer_list evtimer;	/* for event delay timer */
 	unsigned long ageing_query;
 
-	__be32 event_pid;
 	unsigned char multicast_router;
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -18,6 +18,7 @@
 
 #include "hal_hw_headers.h"
 #include "dp_types.h"
+#include "dp_peer.h"
 #include "qdf_nbuf.h"
 #include "qdf_atomic.h"
 #include "qdf_types.h"
@@ -77,7 +78,7 @@ dp_tx_me_init(struct dp_pdev *pdev)
 		p->next = NULL;
 		qdf_spin_unlock_bh(&pdev->tx_mutex);
 		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
-			  "ME Pool successfully initialized vaddr - %x",
+			  "ME Pool successfully initialized vaddr - %pK",
 			  pdev->me_buf.vaddr);
 		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
 			  "paddr - %x\n", (unsigned int)pdev->me_buf.paddr);
@@ -96,14 +97,19 @@ dp_tx_me_init(struct dp_pdev *pdev)
 
 /**
  * dp_tx_me_alloc_descriptor():Allocate ME descriptor
- * @pdev_handle: DP PDEV handle
+ * @soc: DP SOC handle
+ * @pdev_id: id of DP PDEV handle
  *
  * Return:void
  */
-void
-dp_tx_me_alloc_descriptor(struct cdp_pdev *pdev_handle)
+void dp_tx_me_alloc_descriptor(struct cdp_soc_t *soc, uint8_t pdev_id)
 {
-	struct dp_pdev *pdev = (struct dp_pdev *)pdev_handle;
+	struct dp_pdev *pdev =
+		dp_get_pdev_from_soc_pdev_id_wifi3((struct dp_soc *)soc,
+						   pdev_id);
+
+	if (!pdev)
+		return;
 
 	if (qdf_atomic_read(&pdev->mc_num_vap_attached) == 0) {
 		dp_tx_me_init(pdev);
@@ -162,20 +168,27 @@ dp_tx_me_exit(struct dp_pdev *pdev)
 
 /**
  * dp_tx_me_free_descriptor():free ME descriptor
- * @pdev_handle:DP_PDEV handle
+ * @soc: DP SOC handle
+ * @pdev_id: id of DP PDEV handle
  *
  * Return:void
  */
 void
-dp_tx_me_free_descriptor(struct cdp_pdev *pdev_handle)
+dp_tx_me_free_descriptor(struct cdp_soc_t *soc, uint8_t pdev_id)
 {
-	struct dp_pdev *pdev = (struct dp_pdev *)pdev_handle;
+	struct dp_pdev *pdev =
+		dp_get_pdev_from_soc_pdev_id_wifi3((struct dp_soc *)soc,
+						   pdev_id);
 
-	qdf_atomic_dec(&pdev->mc_num_vap_attached);
-	if (atomic_read(&pdev->mc_num_vap_attached) == 0) {
-		dp_tx_me_exit(pdev);
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
-			  "Disable MCAST_TO_UCAST");
+	if (!pdev)
+		return;
+
+	if (atomic_read(&pdev->mc_num_vap_attached)) {
+		if (qdf_atomic_dec_and_test(&pdev->mc_num_vap_attached)) {
+			dp_tx_me_exit(pdev);
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
+				  "Disable MCAST_TO_UCAST");
+		}
 	}
 }
 
@@ -189,10 +202,28 @@ dp_tx_me_free_descriptor(struct cdp_pdev *pdev_handle)
 QDF_STATUS
 dp_tx_prepare_send_me(struct dp_vdev *vdev, qdf_nbuf_t nbuf)
 {
-	if (vdev->me_convert) {
-		if (vdev->me_convert(vdev->osif_vdev, nbuf) > 0)
-			return QDF_STATUS_SUCCESS;
-	}
+	if (dp_me_mcast_convert((struct cdp_soc_t *)(vdev->pdev->soc),
+				vdev->vdev_id, vdev->pdev->pdev_id,
+				nbuf) > 0)
+		return QDF_STATUS_SUCCESS;
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * dp_tx_prepare_send_igmp_me(): Call to check igmp ,convert mcast to ucast
+ * @vdev: DP VDEV handle
+ * @nbuf: Multicast buffer
+ *
+ * Return: no of packets transmitted
+ */
+QDF_STATUS
+dp_tx_prepare_send_igmp_me(struct dp_vdev *vdev, qdf_nbuf_t nbuf)
+{
+	if (dp_igmp_me_mcast_convert((struct cdp_soc_t *)(vdev->pdev->soc),
+				     vdev->vdev_id, vdev->pdev->pdev_id,
+				     nbuf) > 0)
+		return QDF_STATUS_SUCCESS;
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -231,19 +262,25 @@ static void dp_tx_me_mem_free(struct dp_pdev *pdev,
 
 /**
  * dp_tx_me_send_convert_ucast(): function to convert multicast to unicast
- * @vdev: DP VDEV handle
+ * @soc: Datapath soc handle
+ * @vdev_id: vdev id
  * @nbuf: Multicast nbuf
  * @newmac: Table of the clients to which packets have to be sent
  * @new_mac_cnt: No of clients
+ * @tid: desired tid
+ * @is_igmp: flag to indicate if packet is igmp
  *
  * return: no of converted packets
  */
 uint16_t
-dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
-		uint8_t newmac[][QDF_MAC_ADDR_SIZE], uint8_t new_mac_cnt)
+dp_tx_me_send_convert_ucast(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
+			    qdf_nbuf_t nbuf,
+			    uint8_t newmac[][QDF_MAC_ADDR_SIZE],
+			    uint8_t new_mac_cnt, uint8_t tid,
+			    bool is_igmp)
 {
-	struct dp_vdev *vdev = (struct dp_vdev *) vdev_handle;
-	struct dp_pdev *pdev = vdev->pdev;
+	struct dp_soc *soc = cdp_soc_t_to_dp_soc(soc_hdl);
+	struct dp_pdev *pdev;
 	qdf_ether_header_t *eh;
 	uint8_t *data;
 	uint16_t len;
@@ -265,12 +302,23 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 	qdf_dma_addr_t paddr_mcbuf = 0;
 	uint8_t empty_entry_mac[QDF_MAC_ADDR_SIZE] = {0};
 	QDF_STATUS status;
+	uint8_t curr_mac_cnt = 0;
+	struct dp_vdev *vdev = dp_vdev_get_ref_by_id(soc, vdev_id,
+						     DP_MOD_ID_MCAST2UCAST);
+
+	if (!vdev)
+		goto free_return;
+
+	pdev = vdev->pdev;
+
+	if (!pdev)
+		goto free_return;
 
 	qdf_mem_zero(&msdu_info, sizeof(msdu_info));
 
 	dp_tx_get_queue(vdev, nbuf, &msdu_info.tx_queue);
 
-	eh = (qdf_ether_header_t *)nbuf;
+	eh = (qdf_ether_header_t *)qdf_nbuf_data(nbuf);
 	qdf_mem_copy(srcmac, eh->ether_shost, QDF_MAC_ADDR_SIZE);
 
 	len = qdf_nbuf_len(nbuf);
@@ -349,9 +397,10 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
 					"Mapping failure Error:%d", status);
 			DP_STATS_INC(vdev, tx_i.mcast_en.dropped_map_error, 1);
+			mc_uc_buf->paddr_macbuf = 0;
 			goto fail_map;
 		}
-
+		mc_uc_buf->paddr_macbuf = paddr_mcbuf;
 		seg_info_new->frags[0].vaddr =  (uint8_t *)mc_uc_buf;
 		seg_info_new->frags[0].paddr_lo = (uint32_t) paddr_mcbuf;
 		seg_info_new->frags[0].paddr_hi =
@@ -371,6 +420,7 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 		seg_info_new->total_len = len;
 
 		seg_info_new->next = NULL;
+		curr_mac_cnt++;
 
 		if (!seg_info_head)
 			seg_info_head = seg_info_new;
@@ -381,19 +431,29 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 	}
 
 	if (!seg_info_head) {
-		goto free_return;
+		goto unmap_free_return;
 	}
 
 	msdu_info.u.sg_info.curr_seg = seg_info_head;
-	msdu_info.num_seg = new_mac_cnt;
+	msdu_info.num_seg = curr_mac_cnt;
 	msdu_info.frm_type = dp_tx_frm_me;
 
-	msdu_info.tid = HTT_INVALID_TID;
-	if (qdf_unlikely(vdev->mcast_enhancement_en > 0) &&
-	    qdf_unlikely(pdev->hmmc_tid_override_en))
-		msdu_info.tid = pdev->hmmc_tid;
+	if (tid == HTT_INVALID_TID) {
+		msdu_info.tid = HTT_INVALID_TID;
+		if (qdf_unlikely(vdev->mcast_enhancement_en > 0) &&
+		    qdf_unlikely(pdev->hmmc_tid_override_en))
+			msdu_info.tid = pdev->hmmc_tid;
+	} else {
+		msdu_info.tid = tid;
+	}
 
-	DP_STATS_INC(vdev, tx_i.mcast_en.ucast, new_mac_cnt);
+	if (is_igmp) {
+		DP_STATS_INC(vdev, tx_i.igmp_mcast_en.igmp_ucast_converted,
+			     curr_mac_cnt);
+	} else {
+		DP_STATS_INC(vdev, tx_i.mcast_en.ucast, curr_mac_cnt);
+	}
+
 	dp_tx_send_msdu_multiple(vdev, nbuf, &msdu_info);
 
 	while (seg_info_head->next) {
@@ -403,8 +463,8 @@ dp_tx_me_send_convert_ucast(struct cdp_vdev *vdev_handle, qdf_nbuf_t nbuf,
 	}
 	qdf_mem_free(seg_info_head);
 
-	qdf_nbuf_unmap(pdev->soc->osdev, nbuf, QDF_DMA_TO_DEVICE);
 	qdf_nbuf_free(nbuf);
+	dp_vdev_unref_delete(soc, vdev, DP_MOD_ID_MCAST2UCAST);
 	return new_mac_cnt;
 
 fail_map:
@@ -419,8 +479,11 @@ fail_buf_alloc:
 fail_seg_alloc:
 	dp_tx_me_mem_free(pdev, seg_info_head);
 
-free_return:
+unmap_free_return:
 	qdf_nbuf_unmap(pdev->soc->osdev, nbuf, QDF_DMA_TO_DEVICE);
+free_return:
+	if (vdev)
+		dp_vdev_unref_delete(soc, vdev, DP_MOD_ID_MCAST2UCAST);
 	qdf_nbuf_free(nbuf);
 	return 1;
 }

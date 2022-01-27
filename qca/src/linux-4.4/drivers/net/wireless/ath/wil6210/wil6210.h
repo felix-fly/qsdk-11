@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: ISC */
 /*
  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef __WIL6210_H__
@@ -110,6 +110,7 @@ static inline u32 WIL_GET_BITS(u32 x, int b0, int b1)
 #define WIL6210_MAX_STATUS_RINGS	(8)
 #define WIL6210_MAX_HEADROOM_SIZE      (256)
 #define WIL_WMI_CALL_GENERAL_TO_MS 100
+#define WIL_DEFAULT_TX_RESERVED_ENTRIES (16)
 
 /* Hardware offload block adds the following:
  * 26 bytes - 3-address QoS data header
@@ -420,9 +421,9 @@ enum {
 
 /* Hardware definitions end */
 #define SPARROW_FW_MAPPING_TABLE_SIZE 10
-#define TALYN_FW_MAPPING_TABLE_SIZE 13
-#define TALYN_MB_FW_MAPPING_TABLE_SIZE 19
-#define MAX_FW_MAPPING_TABLE_SIZE 19
+#define TALYN_FW_MAPPING_TABLE_SIZE 14
+#define TALYN_MB_FW_MAPPING_TABLE_SIZE 20
+#define MAX_FW_MAPPING_TABLE_SIZE 20
 
 /* Common representation of physical address in wil ring */
 struct wil_ring_dma_addr {
@@ -479,7 +480,7 @@ static inline void parse_cidxtid(u8 cidxtid, u8 *cid, u8 *tid)
  */
 static inline bool wil_cid_valid(int cid)
 {
-	return (cid >= 0 && cid < max_assoc_sta);
+	return (cid >= 0 && cid < max_assoc_sta && cid < WIL6210_MAX_CID);
 }
 
 struct wil6210_mbox_ring {
@@ -529,13 +530,17 @@ enum { /* for wil_ctx.mapped_as */
 	wil_mapped_as_page = 2,
 };
 
+/* for wil_ctx.flags */
+#define WIL_CTX_FLAG_RESERVED_USED 0x01
+
 /**
  * struct wil_ctx - software context for ring descriptor
  */
 struct wil_ctx {
 	struct sk_buff *skb;
 	u8 nr_frags;
-	u8 mapped_as;
+	u8 mapped_as:4;
+	u8 flags:4;
 };
 
 struct wil_desc_ring_rx_swtail { /* relevant for enhanced DMA only */
@@ -609,6 +614,7 @@ struct wil_net_stats {
 	unsigned long	rx_amsdu_error; /* eDMA specific */
 	unsigned long	rx_csum_err;
 	u16 last_mcs_rx;
+	u8 last_cb_mode_rx;
 	u64 rx_per_mcs[WIL_MCS_MAX + 1];
 	u32 ft_roams; /* relevant in STA mode */
 };
@@ -667,6 +673,9 @@ struct wil_ring_tx_data {
 	bool addba_in_progress; /* if set, agg_xxx is for request in progress */
 	u8 mid;
 	spinlock_t lock;
+	u32 tx_reserved_count; /* available reserved tx entries */
+	u32 tx_reserved_count_used;
+	u32 tx_reserved_count_not_avail;
 };
 
 enum { /* for wil6210_priv.status */
@@ -781,6 +790,11 @@ struct wil_sta_info {
 	u8 aid; /* 1-254; 0 if unknown/not reported */
 	bool fst_link_loss;
 	bool net_queue_stopped; /* used when q_per_sta enabled */
+
+	/* amsdu frame related info to check if the frame is valid */
+	int amsdu_drop_sn;
+	int amsdu_drop_tid;
+	u8 amsdu_drop;
 };
 
 enum {
@@ -872,6 +886,7 @@ struct wil6210_vif {
 	DECLARE_BITMAP(status, wil_vif_status_last);
 	u32 privacy; /* secure connection? */
 	u16 channel; /* relevant in AP mode */
+	u8 wmi_edmg_channel; /* relevant in AP mode */
 	u8 hidden_ssid; /* relevant in AP mode */
 	u32 ap_isolate; /* no intra-BSS communication */
 	bool pbss;
@@ -951,6 +966,17 @@ struct wil_ftm_offsets {
 	u8 enabled;
 	unsigned int tx_offset;
 	unsigned int rx_offset;
+};
+
+enum wil_fw_state {
+	/* When driver loaded with debug_fw the FW state is unknown */
+	WIL_FW_STATE_UNKNOWN,
+	WIL_FW_STATE_DOWN, /* FW not loaded or not ready yet */
+	WIL_FW_STATE_READY,/* FW is ready*/
+	/* Detected FW error before FW sent ready indication */
+	WIL_FW_STATE_ERROR_BEFORE_READY,
+	/* Detected FW error after FW sent ready indication */
+	WIL_FW_STATE_ERROR,
 };
 
 struct wil6210_priv {
@@ -1108,6 +1134,7 @@ struct wil6210_priv {
 	u32 rgf_ucode_assert_code_addr;
 	u32 iccm_base;
 
+	enum wil_fw_state fw_state;
 	void *umac_handle;
 	struct wil_umac_ops umac_ops;
 	struct wil_umac_rops umac_rops;
@@ -1131,6 +1158,10 @@ struct wil6210_priv {
 	u32 max_ampdu_size;
 
 	struct work_struct pci_linkdown_recovery_worker;
+
+	u32 tx_reserved_entries; /* Used only in Talyn code-path */
+
+	u8 fail_iface_updown_on_fw_assert;
 };
 
 #define wil_to_wiphy(i) (i->wiphy)
@@ -1401,6 +1432,9 @@ int wil_cfg80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 			 struct cfg80211_mgmt_tx_params *params,
 			 u64 *cookie);
 void wil_cfg80211_ap_recovery(struct wil6210_priv *wil);
+
+void wil_nl_60g_fw_state_change(struct wil6210_priv *wil,
+				enum wil_fw_state fw_state);
 int wil_cfg80211_iface_combinations_from_fw(
 	struct wil6210_priv *wil,
 	const struct wil_fw_record_concurrency *conc);
@@ -1436,7 +1470,7 @@ void wil_p2p_wdev_free(struct wil6210_priv *wil);
 
 int wmi_set_mac_address(struct wil6210_priv *wil, void *addr);
 int wmi_pcp_start(struct wil6210_vif *vif, int bi, u8 wmi_nettype, u8 chan,
-		  u8 hidden_ssid, u8 is_go);
+		  u8 edmg_chan, u8 hidden_ssid, u8 is_go);
 int wmi_pcp_stop(struct wil6210_vif *vif);
 int wmi_led_cfg(struct wil6210_priv *wil, bool enable);
 int wmi_abort_scan(struct wil6210_vif *vif);
@@ -1580,10 +1614,10 @@ int wmi_addba_rx_resp_edma(struct wil6210_priv *wil, u8 mid, u8 cid,
 
 int wil_wmi2spec_ch(u8 wmi_ch, u8 *spec_ch);
 int wil_spec2wmi_ch(u8 spec_ch, u8 *wmi_ch);
-
 void update_supported_bands(struct wil6210_priv *wil);
 
 void wil_clear_fw_log_addr(struct wil6210_priv *wil);
 int wmi_lo_power_calib_from_otp(struct wil6210_priv *wil, u8 index);
 
+void wil_sta_info_amsdu_init(struct wil_sta_info *sta);
 #endif /* __WIL6210_H__ */

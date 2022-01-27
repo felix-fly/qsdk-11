@@ -265,7 +265,8 @@ include lib/compiler-rt/compiler-rt.mk
 BL_COMMON_SOURCES	+=	common/bl_common.c			\
 				common/tf_log.c				\
 				common/${ARCH}/debug.S			\
-				drivers/console/multi_console.c		\
+				drivers/console/multi_console.c 	\
+				drivers/console/uart.c			\
 				lib/${ARCH}/cache_helpers.S		\
 				lib/${ARCH}/misc_helpers.S		\
 				plat/common/plat_bl_common.c		\

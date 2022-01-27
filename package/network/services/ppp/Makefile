@@ -9,14 +9,18 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=ppp
-PKG_VERSION:=2.4.7
-PKG_RELEASE:=6
+PKG_RELEASE:=3
 
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://download.samba.org/pub/ppp/
-PKG_MD5SUM:=78818f40e6d33a1d1de68a1551f6595a
-PKG_MAINTAINER:=Felix Fietkau <nbd@openwrt.org>
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/paulusmack/ppp
+PKG_SOURCE_DATE:=2019-05-25
+PKG_SOURCE_VERSION:=8e77984ac5d7acbe68b2b2f590abd17564c9730d
+PKG_MIRROR_HASH:=7e7e74f0261db2c45770d79c6114e768382e85bfeb3f5a83179f270d6c15006d
+PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 PKG_LICENSE:=BSD-4-Clause
+
+PKG_RELEASE_VERSION:=2.4.7
+PKG_VERSION:=$(PKG_RELEASE_VERSION).git-$(PKG_SOURCE_DATE)
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(BUILD_VARIANT)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -30,7 +34,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/ppp/Default
   SECTION:=net
   CATEGORY:=Network
-  URL:=http://ppp.samba.org/
+  URL:=https://ppp.samba.org/
 endef
 
 define Package/ppp
@@ -120,6 +124,17 @@ define Package/ppp-mod-pptp/description
 This package contains a PPtP plugin for ppp.
 endef
 
+define Package/ppp-mod-passwordfd
+$(call Package/ppp/Default)
+  DEPENDS:=@(PACKAGE_ppp||PACKAGE_ppp-multilink)
+  TITLE:=pap/chap secret from filedescriptor
+endef
+
+define Package/ppp-mod-passwordfd/description
+This package allows to pass the PAP/CHAP secret from a filedescriptor.
+Eliminates the need for a secrets file.
+endef
+
 define Package/chat
 $(call Package/ppp/Default)
   TITLE:=Establish conversation with a modem
@@ -150,6 +165,17 @@ define Package/pppstats/description
 This package contains an utility to report PPP statistics.
 endef
 
+define Package/pppoe-discovery
+$(call Package/ppp/Default)
+  DEPENDS:=@(PACKAGE_ppp||PACKAGE_ppp-multilink) +ppp-mod-pppoe
+  TITLE:=Perform a PPPoE-discovery process
+endef
+
+define Package/pppoe-discovery/description
+This tool performs the same discovery process as pppoe, but does
+not initiate a session. Can be useful to debug pppoe.
+endef
+
 
 define Build/Configure
 $(call Build/Configure/Default,, \
@@ -158,11 +184,19 @@ $(call Build/Configure/Default,, \
 	UNAME_M="$(ARCH)" \
 )
 	mkdir -p $(PKG_BUILD_DIR)/pppd/plugins/pppoatm/linux
-	cp \
+	$(CP) \
 		$(LINUX_DIR)/include/linux/compiler.h \
 		$(LINUX_DIR)/include/$(LINUX_UAPI_DIR)linux/atm*.h \
 		$(PKG_BUILD_DIR)/pppd/plugins/pppoatm/linux/
+
+	# Kernel 4.14.9+ only, ignore the exit status of cp in case the file
+	# doesn't exits
+	-$(CP) $(LINUX_DIR)/include/linux/compiler_types.h \
+		$(PKG_BUILD_DIR)/pppd/plugins/pppoatm/linux/
 endef
+
+TARGET_CFLAGS += -ffunction-sections -fdata-sections -flto
+TARGET_LDFLAGS += -Wl,--gc-sections -flto -fuse-linker-plugin
 
 MAKE_FLAGS += COPTS="$(TARGET_CFLAGS)" \
 		PRECOMPILED_FILTER=1 \
@@ -187,7 +221,7 @@ define Package/ppp/script_install
 endef
 
 define Package/ppp/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/sbin/pppd $(1)/usr/sbin/
 	$(INSTALL_DIR) $(1)/etc/ppp
@@ -198,6 +232,7 @@ define Package/ppp/install
 	$(INSTALL_DIR) $(1)/lib/netifd/proto
 	$(INSTALL_BIN) ./files/ppp.sh $(1)/lib/netifd/proto/
 	$(INSTALL_BIN) ./files/lib/netifd/ppp-up $(1)/lib/netifd/
+	$(INSTALL_BIN) ./files/lib/netifd/ppp6-up $(1)/lib/netifd/
 	$(INSTALL_BIN) ./files/lib/netifd/ppp-down $(1)/lib/netifd/
 	$(INSTALL_DIR) $(1)/etc/ppp/ip-up.d
 	$(INSTALL_DIR) $(1)/etc/ppp/ip-down.d
@@ -207,21 +242,21 @@ endef
 Package/ppp-multilink/install=$(Package/ppp/install)
 
 define Package/ppp-mod-pppoa/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_VERSION)/pppoatm.so \
-		$(1)/usr/lib/pppd/$(PKG_VERSION)/
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/pppoatm.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 endef
 
 define Package/ppp-mod-pppoe/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_VERSION)/rp-pppoe.so \
-		$(1)/usr/lib/pppd/$(PKG_VERSION)/
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/rp-pppoe.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 endef
 
 define Package/ppp-mod-radius/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_VERSION)/radius.so \
-		$(1)/usr/lib/pppd/$(PKG_VERSION)/
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/radius.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 	$(INSTALL_DIR) $(1)/etc/ppp
 	$(INSTALL_DATA) ./files/etc/ppp/radius.conf $(1)/etc/ppp/
 	$(INSTALL_DIR) $(1)/etc/ppp/radius
@@ -232,17 +267,23 @@ define Package/ppp-mod-radius/install
 endef
 
 define Package/ppp-mod-pppol2tp/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_VERSION)/pppol2tp.so \
-		$(1)/usr/lib/pppd/$(PKG_VERSION)/
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/pppol2tp.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 endef
 
 define Package/ppp-mod-pptp/install
-	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_VERSION)
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_VERSION)/pptp.so \
-		$(1)/usr/lib/pppd/$(PKG_VERSION)/
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/pptp.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 	$(INSTALL_DIR) $(1)/etc/ppp
 	$(INSTALL_DATA) ./files/etc/ppp/options.pptp $(1)/etc/ppp/
+endef
+
+define Package/ppp-mod-passwordfd/install
+	$(INSTALL_DIR) $(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/lib/pppd/$(PKG_RELEASE_VERSION)/passwordfd.so \
+		$(1)/usr/lib/pppd/$(PKG_RELEASE_VERSION)/
 endef
 
 define Package/chat/install
@@ -260,6 +301,11 @@ define Package/pppstats/install
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/sbin/pppstats $(1)/usr/sbin/
 endef
 
+define Package/pppoe-discovery/install
+	$(INSTALL_DIR) $(1)/usr/sbin
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/sbin/pppoe-discovery $(1)/usr/sbin/
+endef
+
 $(eval $(call BuildPackage,ppp))
 $(eval $(call BuildPackage,ppp-multilink))
 $(eval $(call BuildPackage,ppp-mod-pppoa))
@@ -267,6 +313,8 @@ $(eval $(call BuildPackage,ppp-mod-pppoe))
 $(eval $(call BuildPackage,ppp-mod-radius))
 $(eval $(call BuildPackage,ppp-mod-pppol2tp))
 $(eval $(call BuildPackage,ppp-mod-pptp))
+$(eval $(call BuildPackage,ppp-mod-passwordfd))
 $(eval $(call BuildPackage,chat))
 $(eval $(call BuildPackage,pppdump))
 $(eval $(call BuildPackage,pppstats))
+$(eval $(call BuildPackage,pppoe-discovery))

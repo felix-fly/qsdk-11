@@ -445,6 +445,18 @@ int kasan_module_alloc(void *addr, size_t size)
 	size_t shadow_size;
 	unsigned long shadow_start;
 
+	/* If size < KASAN_SHADOW_SCALE_SHIFT, then size will become ZERO
+	 * on doing size >> KASAN_SHADOW_SCALE_SHIFT. With this,
+	 * shadow_size = round_up(0, PAGE_SIZE) will give ZERO.
+	 * Hence we need to make sure that size >> KASAN_SHADOW_SCALE_SHIFT
+	 * is a non-zero value. Hence if size is less than
+	 * KASAN_SHADOW_SCALE_SIZE, set size as KASAN_SHADOW_SCALE_SIZE, so
+	 * that round_up(size >> KASAN_SHADOW_SCALE_SIZE, PAGE_SIZE) will
+	 * give a non-zero value
+	 */
+	if (size < KASAN_SHADOW_SCALE_SIZE)
+		size = KASAN_SHADOW_SCALE_SIZE;
+
 	shadow_start = (unsigned long)kasan_mem_to_shadow(addr);
 	shadow_size = round_up(size >> KASAN_SHADOW_SCALE_SHIFT,
 			PAGE_SIZE);

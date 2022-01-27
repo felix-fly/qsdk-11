@@ -29,7 +29,7 @@
 
 #define HOMEPLUG 0x88E1
 #define HYFI_AGGR_REORD_FLUSH_QUOTA 2
-#define HYFI_BRIDGE_MAX 2 /* max number of hyfi bridges supported */
+#define HYFI_BRIDGE_MAX 4 /* max number of hyfi bridges supported */
 
 struct hyfi_net_bridge {
 	spinlock_t lock;
@@ -56,6 +56,7 @@ struct hyfi_net_bridge {
 
 	struct net_device *dev;
 	char linux_bridge[IFNAMSIZ]; /* Linux bridge name */
+	u_int8_t TSEnabled;
 };
 
 struct hyfi_net_bridge_port {

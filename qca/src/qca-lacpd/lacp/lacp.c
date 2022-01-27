@@ -413,7 +413,7 @@ struct lacp_in_api *lacp_new(const char *name, struct lacp_out_api *lacp_user, s
 		return NULL;
 	}
 
-	snprintf(lacp->name, sizeof(lacp->name), name);
+	snprintf(lacp->name, sizeof(lacp->name), "%s", name);
 	lacp->param = *param;
 	lacp->actor_system_priority = lacp->param.priority;
 	lacp->next_port_agg_id = 1;

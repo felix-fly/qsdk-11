@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2017, 2019-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -36,8 +36,6 @@ extern "C" {
 
 #define HPPE_GCC_UNIPHY_PSGMII_SOFT_RESET 0x3ff2
 #define HPPE_GCC_UNIPHY_USXGMII_SOFT_RESET 0x36
-#define PORT_LINK_UP 1
-#define PORT_LINK_DOWN 0
 #define HPPE_MAX_PORT_NUM 6
 #define HPPE_GCC_UNIPHY_USXGMII_XPCS_RESET 0x4
 #define HPPE_GCC_UNIPHY_USXGMII_XPCS_RELEASE_RESET 0x0
@@ -71,7 +69,7 @@ extern "C" {
 #define UNIPHY_SGMII_CHANNEL1_ENABLE    0x1
 #define UNIPHY_SGMII_CHANNEL4_DISABLE   0x0
 #define UNIPHY_SGMII_CHANNEL4_ENABLE    0x1
-
+#define UNIPHY_FORCE_SPEED_ENABLE       0x1
 
 #define SGMII_1000M_SOURCE1_CLOCK1 0x101
 #define SGMII_100M_SOURCE1_CLOCK1 0x109
@@ -89,6 +87,7 @@ extern "C" {
 #define UNIPHY_PLL_RESET_REG_VALUE 0x02bf
 #define UNIPHY_PLL_RESET_REG_DEFAULT_VALUE 0x02ff
 #define UNIPHY_MISC2_REG_SGMII_MODE 0x30
+#define UNIPHY_FORCE_SPEED_MODE_ENABLE       0x1
 
 #define AQ_PHY_AUTO_STATUS_REG 0x70001
 #define AQ_PHY_LINK_STATUS_REG 0x7c800

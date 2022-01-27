@@ -253,6 +253,7 @@ enum ovs_vport_attr {
 	OVS_VPORT_ATTR_UPCALL_PID, /* array of u32 Netlink socket PIDs for */
 				/* receiving upcalls */
 	OVS_VPORT_ATTR_STATS,	/* struct ovs_vport_stats */
+	OVS_VPORT_ATTR_MASTER,	/* Master device for this vport, device name */
 	__OVS_VPORT_ATTR_MAX
 };
 

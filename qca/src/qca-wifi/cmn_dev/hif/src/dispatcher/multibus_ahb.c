@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018,2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -60,6 +60,8 @@ QDF_STATUS hif_initialize_ahb_ops(struct hif_bus_ops *bus_ops)
 	bus_ops->hif_irq_enable = &hif_ahb_irq_enable;
 	bus_ops->hif_dump_registers = &hif_ahb_dump_registers;
 	bus_ops->hif_dump_target_memory = &hif_dummy_dump_target_memory;
+	bus_ops->hif_reg_read32 = &hif_dummy_bus_reg_read32;
+	bus_ops->hif_reg_write32 = &hif_dummy_bus_reg_write32;
 	bus_ops->hif_ipa_get_ce_resource = &hif_dummy_ipa_get_ce_resource;
 	bus_ops->hif_mask_interrupt_call = &hif_dummy_mask_interrupt_call;
 	bus_ops->hif_enable_power_management =
@@ -67,8 +69,15 @@ QDF_STATUS hif_initialize_ahb_ops(struct hif_bus_ops *bus_ops)
 	bus_ops->hif_disable_power_management =
 		&hif_dummy_disable_power_management;
 	bus_ops->hif_grp_irq_configure = &hif_ahb_configure_grp_irq;
+	bus_ops->hif_grp_irq_deconfigure = &hif_ahb_deconfigure_grp_irq;
 	bus_ops->hif_addr_in_boundary = &hif_dummy_addr_in_boundary;
 	bus_ops->hif_needs_bmi = &hif_ahb_needs_bmi;
+	bus_ops->hif_display_stats = &hif_ahb_display_stats;
+	bus_ops->hif_clear_stats = &hif_ahb_clear_stats;
+	bus_ops->hif_config_irq_affinity =
+		&hif_dummy_config_irq_affinity;
+	bus_ops->hif_config_irq_by_ceid = &hif_ahb_configure_irq_by_ceid;
+	bus_ops->hif_log_bus_info = &hif_dummy_log_bus_info;
 
 	return QDF_STATUS_SUCCESS;
 }

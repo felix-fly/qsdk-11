@@ -17,6 +17,30 @@
 #define WIL_BRD_SUFFIX_CN "CN"
 #define WIL_BRD_SUFFIX_FCC "FCC"
 
+#define WIL_EDMG_CHANNEL_9_SUBCHANNELS	(BIT(0) | BIT(1))
+#define WIL_EDMG_CHANNEL_10_SUBCHANNELS	(BIT(1) | BIT(2))
+#define WIL_EDMG_CHANNEL_11_SUBCHANNELS	(BIT(2) | BIT(3))
+
+/* WIL_EDMG_BW_CONFIGURATION define the allowed channel bandwidth
+ * configurations as defined by IEEE 802.11 section 9.4.2.251, Table 13.
+ * The value 5 allowing CB1 and CB2 of adjacent channels.
+ */
+#define WIL_EDMG_BW_CONFIGURATION 5
+
+/* WIL_EDMG_CHANNELS is a bitmap that indicates the 2.16 GHz channel(s) that
+ * are allowed to be used for EDMG transmissions in the BSS as defined by
+ * IEEE 802.11 section 9.4.2.251.
+ */
+#define WIL_EDMG_CHANNELS (BIT(0) | BIT(1) | BIT(2) | BIT(3))
+
+enum wil_edmg_channel {
+	WIL_EDMG_CHANNEL_9 = 9,
+	WIL_EDMG_CHANNEL_10 = 10,
+	WIL_EDMG_CHANNEL_11 = 11,
+	WIL_EDMG_CHANNEL_12 = 12,
+	WIL_EDMG_CHANNEL_13 = 13,
+};
+
 bool disable_ap_sme;
 module_param(disable_ap_sme, bool, 0444);
 MODULE_PARM_DESC(disable_ap_sme, " let user space handle AP mode SME");
@@ -85,6 +109,43 @@ static struct ieee80211_channel wil_60ghz_channels[] = {
 	CHAN60G(4, 0),
 };
 
+/* this must be in sync with wil_60ghz_channels */
+#define WIL_MAX_SINGLE_CHANNEL 4
+
+/* Rx channel bonding mode */
+enum wil_rx_cb_mode {
+	WIL_RX_CB_MODE_DMG,
+	WIL_RX_CB_MODE_EDMG,
+	WIL_RX_CB_MODE_WIDE,
+};
+
+static int wil_rx_cb_mode_to_n_bonded(u8 cb_mode)
+{
+	switch (cb_mode) {
+	case WIL_RX_CB_MODE_DMG:
+	case WIL_RX_CB_MODE_EDMG:
+		return 1;
+	case WIL_RX_CB_MODE_WIDE:
+		return 2;
+	default:
+		return 1;
+	}
+}
+
+static int wil_tx_cb_mode_to_n_bonded(u8 cb_mode)
+{
+	switch (cb_mode) {
+	case WMI_TX_MODE_DMG:
+	case WMI_TX_MODE_EDMG_CB1:
+		return 1;
+	case WMI_TX_MODE_EDMG_CB2:
+		return 2;
+	default:
+		return 1;
+	}
+}
+
+/* Note: The destination and source pointers should not overlap */
 static void
 wil_memdup_ie(u8 **pdst, size_t *pdst_len, const u8 *src, size_t src_len)
 {
@@ -130,12 +191,28 @@ enum wil_nl_60g_evt_type {
 	NL_60G_EVT_FW_WMI,
 	NL_60G_EVT_DRIVER_SHUTOWN,
 	NL_60G_EVT_DRIVER_DEBUG_EVENT,
+	NL_60G_EVT_DRIVER_GENERIC,
 };
+
+enum wil_nl_60g_generic_evt {
+	NL_60G_GEN_EVT_FW_STATE,
+};
+
+struct wil_nl_60g_generic_event { /* NL_60G_EVT_DRIVER_GENERIC */
+	u32 evt_id; /* wil_nl_60g_generic_evt */
+} __packed;
+
+struct wil_nl_60g_fw_state_event {
+	struct wil_nl_60g_generic_event hdr;
+	u32 fw_state; /* wil_fw_state */
+} __packed;
 
 enum wil_nl_60g_debug_cmd {
 	NL_60G_DBG_FORCE_WMI_SEND,
 	NL_60G_GEN_RADAR_ALLOC_BUFFER,
 	NL_60G_GEN_FW_RESET,
+	NL_60G_GEN_GET_DRIVER_CAPA,
+	NL_60G_GEN_GET_FW_STATE,
 };
 
 struct wil_nl_60g_send_receive_wmi {
@@ -145,6 +222,21 @@ struct wil_nl_60g_send_receive_wmi {
 	u16 buf_len;
 	u8 buf[0];
 } __packed;
+
+enum wil_nl_60g_driver_capa {
+	NL_60G_DRIVER_CAPA_WMI_OVER_NL, /* NL command for WMI */
+	NL_60G_DRIVER_CAPA_FW_STATE, /* notifications of FW state changes */
+	/* ioctl to write to the device address space */
+	NL_60G_DRIVER_CAPA_IOCTL_WRITE,
+};
+
+struct wil_nl_60g_driver_capabilities_reply {
+	u32 drv_cap[0]; /* bit mask of wil_nl_60g_driver_capa */
+} __packed;
+
+enum qca_wlan_vendor_driver_capa {
+	QCA_WLAN_VENDOR_ATTR_DRIVER_CAPA,
+};
 
 struct wil_nl_60g_event {
 	u32 evt_type; /* wil_nl_60g_evt_type */
@@ -180,6 +272,13 @@ void update_supported_bands(struct wil6210_priv *wil)
 
 	wiphy->bands[NL80211_BAND_60GHZ]->n_channels =
 						wil_num_supported_channels(wil);
+
+	if (test_bit(WMI_FW_CAPABILITY_CHANNEL_BONDING, wil->fw_capabilities)) {
+		wiphy->bands[NL80211_BAND_60GHZ]->edmg_cap.channels =
+							WIL_EDMG_CHANNELS;
+		wiphy->bands[NL80211_BAND_60GHZ]->edmg_cap.bw_config =
+						      WIL_EDMG_BW_CONFIGURATION;
+	}
 }
 
 /* Vendor id to be used in vendor specific command and events
@@ -194,11 +293,23 @@ void update_supported_bands(struct wil6210_priv *wil)
 
 enum qca_wlan_vendor_attr_acs_offload {
 	QCA_WLAN_VENDOR_ATTR_ACS_CHANNEL_INVALID = 0,
-	QCA_WLAN_VENDOR_ATTR_ACS_PRIMARY_CHANNEL,
-	QCA_WLAN_VENDOR_ATTR_ACS_SECONDARY_CHANNEL,
-	QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE,
-	QCA_WLAN_VENDOR_ATTR_ACS_HT_ENABLED,
-	QCA_WLAN_VENDOR_ATTR_ACS_HT40_ENABLED,
+	QCA_WLAN_VENDOR_ATTR_ACS_PRIMARY_CHANNEL = 1,
+	QCA_WLAN_VENDOR_ATTR_ACS_SECONDARY_CHANNEL = 2,
+	QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE = 3,
+	QCA_WLAN_VENDOR_ATTR_ACS_HT_ENABLED = 4,
+	QCA_WLAN_VENDOR_ATTR_ACS_HT40_ENABLED = 5,
+	QCA_WLAN_VENDOR_ATTR_ACS_VHT_ENABLED = 6,
+	QCA_WLAN_VENDOR_ATTR_ACS_CHWIDTH = 7,
+	QCA_WLAN_VENDOR_ATTR_ACS_CH_LIST = 8,
+	QCA_WLAN_VENDOR_ATTR_ACS_VHT_SEG0_CENTER_CHANNEL = 9,
+	QCA_WLAN_VENDOR_ATTR_ACS_VHT_SEG1_CENTER_CHANNEL = 10,
+	QCA_WLAN_VENDOR_ATTR_ACS_FREQ_LIST = 11,
+	QCA_WLAN_VENDOR_ATTR_ACS_PRIMARY_FREQUENCY = 12,
+	QCA_WLAN_VENDOR_ATTR_ACS_SECONDARY_FREQUENCY = 13,
+	QCA_WLAN_VENDOR_ATTR_ACS_VHT_SEG0_CENTER_FREQUENCY = 14,
+	QCA_WLAN_VENDOR_ATTR_ACS_VHT_SEG1_CENTER_FREQUENCY = 15,
+	QCA_WLAN_VENDOR_ATTR_ACS_EDMG_ENABLED = 16,
+	QCA_WLAN_VENDOR_ATTR_ACS_EDMG_CHANNEL = 17,
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_ACS_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_ACS_MAX =
@@ -215,6 +326,8 @@ enum qca_wlan_vendor_acs_hw_mode {
 static const struct
 nla_policy qca_wlan_acs_vendor_attr[QCA_WLAN_VENDOR_ATTR_ACS_MAX + 1] = {
 	[QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE] = { .type = NLA_U8 },
+	[QCA_WLAN_VENDOR_ATTR_ACS_EDMG_ENABLED] = { .type = NLA_FLAG },
+	[QCA_WLAN_VENDOR_ATTR_ACS_EDMG_CHANNEL] = { .type = NLA_U8 },
 };
 
 #define WIL_MAX_RF_SECTORS (128)
@@ -646,6 +759,7 @@ int wil_cid_fill_sinfo(struct wil6210_vif *vif, int cid,
 	} __packed reply;
 	struct wil_net_stats *stats = &wil->sta[cid].stats;
 	int rc;
+	u8 rate_flag = RATE_INFO_FLAGS_DMG;
 
 	memset(&reply, 0, sizeof(reply));
 
@@ -659,7 +773,8 @@ int wil_cid_fill_sinfo(struct wil6210_vif *vif, int cid,
 		    "  MCS %d TSF 0x%016llx\n"
 		    "  BF status 0x%08x RSSI %d SQI %d%%\n"
 		    "  Tx Tpt %d goodput %d Rx goodput %d\n"
-		    "  Sectors(rx:tx) my %d:%d peer %d:%d\n""}\n",
+		    "  Sectors(rx:tx) my %d:%d peer %d:%d\n"
+		    "  Tx mode %d}\n",
 		    cid, vif->mid, le16_to_cpu(reply.evt.bf_mcs),
 		    le64_to_cpu(reply.evt.tsf), reply.evt.status,
 		    reply.evt.rssi,
@@ -670,7 +785,8 @@ int wil_cid_fill_sinfo(struct wil6210_vif *vif, int cid,
 		    le16_to_cpu(reply.evt.my_rx_sector),
 		    le16_to_cpu(reply.evt.my_tx_sector),
 		    le16_to_cpu(reply.evt.other_rx_sector),
-		    le16_to_cpu(reply.evt.other_tx_sector));
+		    le16_to_cpu(reply.evt.other_tx_sector),
+		    reply.evt.tx_mode);
 
 	sinfo->generation = wil->sinfo_gen;
 
@@ -683,10 +799,18 @@ int wil_cid_fill_sinfo(struct wil6210_vif *vif, int cid,
 			BIT(NL80211_STA_INFO_RX_DROP_MISC) |
 			BIT(NL80211_STA_INFO_TX_FAILED);
 
-	sinfo->txrate.flags = RATE_INFO_FLAGS_MCS | RATE_INFO_FLAGS_60G;
+	if (wil->use_enhanced_dma_hw && reply.evt.tx_mode != WMI_TX_MODE_DMG)
+		rate_flag = RATE_INFO_FLAGS_EDMG;
+	rate_flag |= RATE_INFO_FLAGS_MCS;
+
+	sinfo->txrate.flags = rate_flag;
+	sinfo->rxrate.flags = rate_flag;
 	sinfo->txrate.mcs = le16_to_cpu(reply.evt.bf_mcs);
-	sinfo->rxrate.flags = RATE_INFO_FLAGS_MCS | RATE_INFO_FLAGS_60G;
 	sinfo->rxrate.mcs = stats->last_mcs_rx;
+	sinfo->txrate.n_bonded_ch =
+				  wil_tx_cb_mode_to_n_bonded(reply.evt.tx_mode);
+	sinfo->rxrate.n_bonded_ch =
+			     wil_rx_cb_mode_to_n_bonded(stats->last_cb_mode_rx);
 	sinfo->rx_bytes = stats->rx_bytes;
 	sinfo->rx_packets = stats->rx_packets;
 	sinfo->rx_dropped_misc = stats->rx_dropped;
@@ -1364,6 +1488,33 @@ static int wil_ft_connect(struct wiphy *wiphy,
 	return rc;
 }
 
+static int wil_get_wmi_edmg_channel(struct wil6210_priv *wil, u8 edmg_bw_config,
+				    u8 edmg_channels, u8 *wmi_ch)
+{
+	if (!edmg_bw_config) {
+		*wmi_ch = 0;
+		return 0;
+	} else if (edmg_bw_config == WIL_EDMG_BW_CONFIGURATION) {
+		/* convert from edmg channel bitmap into edmg channel number */
+		switch (edmg_channels) {
+		case WIL_EDMG_CHANNEL_9_SUBCHANNELS:
+			return wil_spec2wmi_ch(9, wmi_ch);
+		case WIL_EDMG_CHANNEL_10_SUBCHANNELS:
+			return wil_spec2wmi_ch(10, wmi_ch);
+		case WIL_EDMG_CHANNEL_11_SUBCHANNELS:
+			return wil_spec2wmi_ch(11, wmi_ch);
+		default:
+			wil_err(wil, "Unsupported edmg channel bitmap 0x%x\n",
+				edmg_channels);
+			return -EINVAL;
+		}
+	} else {
+		wil_err(wil, "Unsupported EDMG BW configuration %d\n",
+			edmg_bw_config);
+		return -EINVAL;
+	}
+}
+
 static int wil_cfg80211_connect(struct wiphy *wiphy,
 				struct net_device *ndev,
 				struct cfg80211_connect_params *sme)
@@ -1509,14 +1660,22 @@ static int wil_cfg80211_connect(struct wiphy *wiphy,
 	memcpy(conn.ssid, ssid_eid+2, conn.ssid_len);
 	conn.channel = ch - 1;
 
-	if (test_bit(WMI_FW_CAPABILITY_CHANNEL_BONDING, wil->fw_capabilities))
+	if (test_bit(WMI_FW_CAPABILITY_CHANNEL_BONDING, wil->fw_capabilities)) {
 		if (wil->force_edmg_channel) {
 			rc = wil_spec2wmi_ch(wil->force_edmg_channel,
 					     &conn.edmg_channel);
 			if (rc)
 				wil_err(wil, "wmi channel for channel %d not found",
 					wil->force_edmg_channel);
+		} else {
+			rc = wil_get_wmi_edmg_channel(wil,
+						      sme->edmg.bw_config,
+						      sme->edmg.channels,
+						      &conn.edmg_channel);
+			if (rc < 0)
+				return rc;
 		}
+	}
 
 	ether_addr_copy(conn.bssid, bss->bssid);
 	ether_addr_copy(conn.dst_mac, bss->bssid);
@@ -2175,7 +2334,7 @@ out:
 static int _wil_cfg80211_start_ap(struct wiphy *wiphy,
 				  struct net_device *ndev,
 				  const u8 *ssid, size_t ssid_len, u32 privacy,
-				  int bi, u8 chan,
+				  int bi, u8 chan, u8 wmi_edmg_channel,
 				  struct cfg80211_beacon_data *bcon,
 				  u8 hidden_ssid, u32 pbss)
 {
@@ -2238,6 +2397,7 @@ static int _wil_cfg80211_start_ap(struct wiphy *wiphy,
 
 	vif->privacy = privacy;
 	vif->channel = chan;
+	vif->wmi_edmg_channel = wmi_edmg_channel;
 	vif->hidden_ssid = hidden_ssid;
 	vif->pbss = pbss;
 	vif->bi = bi;
@@ -2270,7 +2430,8 @@ static int _wil_cfg80211_start_ap(struct wiphy *wiphy,
 	}
 
 
-	rc = wmi_pcp_start(vif, bi, wmi_nettype, chan, hidden_ssid, is_go);
+	rc = wmi_pcp_start(vif, bi, wmi_nettype, chan, wmi_edmg_channel,
+			   hidden_ssid, is_go);
 	if (rc)
 		goto err_pcp_start;
 
@@ -2318,6 +2479,13 @@ void wil_cfg80211_ap_recovery(struct wil6210_priv *wil)
 		bcon.assocresp_ies_len = vif->assocresp_ies_len;
 		bcon.probe_resp_len = vif->proberesp_len;
 
+		vif->proberesp = NULL;
+		vif->proberesp_len = 0;
+		vif->proberesp_ies = NULL;
+		vif->proberesp_ies_len = 0;
+		vif->assocresp_ies = NULL;
+		vif->assocresp_ies_len = 0;
+
 		wil_info(wil,
 			 "AP (vif %d) recovery: privacy %d, bi %d, channel %d, hidden %d, pbss %d\n",
 			 i, vif->privacy, vif->bi, vif->channel,
@@ -2327,8 +2495,14 @@ void wil_cfg80211_ap_recovery(struct wil6210_priv *wil)
 		rc = _wil_cfg80211_start_ap(wiphy, ndev,
 					    vif->ssid, vif->ssid_len,
 					    vif->privacy, vif->bi,
-					    vif->channel, &bcon,
+					    vif->channel,
+					    vif->wmi_edmg_channel, &bcon,
 					    vif->hidden_ssid, vif->pbss);
+
+		kfree(bcon.probe_resp);
+		kfree(bcon.proberesp_ies);
+		kfree(bcon.assocresp_ies);
+
 		if (rc) {
 			wil_err(wil, "vif %d recovery failed (%d)\n", i, rc);
 			continue;
@@ -2403,7 +2577,8 @@ static int wil_cfg80211_change_beacon(struct wiphy *wiphy,
 		rc = _wil_cfg80211_start_ap(wiphy, ndev, vif->ssid,
 					    vif->ssid_len, privacy,
 					    wdev->beacon_interval,
-					    vif->channel, bcon,
+					    vif->channel,
+					    vif->wmi_edmg_channel, bcon,
 					    vif->hidden_ssid,
 					    vif->pbss);
 	} else {
@@ -2433,9 +2608,16 @@ static int wil_cfg80211_start_ap(struct wiphy *wiphy,
 	struct ieee80211_channel *channel = info->chandef.chan;
 	struct cfg80211_beacon_data *bcon = &info->beacon;
 	struct cfg80211_crypto_settings *crypto = &info->crypto;
+	u8 wmi_edmg_channel;
 	u8 hidden_ssid;
 
 	wil_dbg_misc(wil, "start_ap\n");
+
+	rc = wil_get_wmi_edmg_channel(wil, info->chandef.edmg.bw_config,
+				      info->chandef.edmg.channels,
+				      &wmi_edmg_channel);
+	if (rc < 0)
+		return rc;
 
 	if (!channel) {
 		wil_err(wil, "AP: No channel???\n");
@@ -2476,7 +2658,8 @@ static int wil_cfg80211_start_ap(struct wiphy *wiphy,
 	rc = _wil_cfg80211_start_ap(wiphy, ndev,
 				    info->ssid, info->ssid_len, info->privacy,
 				    info->beacon_interval, channel->hw_value,
-				    bcon, hidden_ssid, info->pbss);
+				    wmi_edmg_channel, bcon, hidden_ssid,
+				    info->pbss);
 
 	return rc;
 }
@@ -3278,9 +3461,61 @@ static int wil_start_acs_survey(struct wil6210_priv *wil, uint dwell_time,
 	return 0;
 }
 
-static u8 wil_acs_calc_channel(struct wil6210_priv *wil)
+static int get_edmg_intersection(struct wil6210_priv *wil, u8 primary_channel)
 {
-	int i, best_channel = ACS_DEFAULT_BEST_CHANNEL - 1;
+	int i, contiguous = 0;
+	u8 num_channels = wil->survey_reply.evt.num_scanned_channels;
+	u8 channel;
+
+	for (i = 0; i < num_channels; i++) {
+		channel = wil->survey_reply.ch_info[i].channel;
+		if (channel == primary_channel - 1 ||
+		    channel == primary_channel + 1)
+			contiguous++;
+	}
+	return contiguous;
+}
+
+static int select_edmg_channel(struct wil6210_priv *wil, u8 best_channel,
+			       u64 *acs_calc_channel)
+{
+	int i, edmg_channel;
+	u8 num_channels = wil->survey_reply.evt.num_scanned_channels;
+
+	/* Select the best EDMG channel given the selected channel */
+	edmg_channel = (WIL_EDMG_CHANNEL_9 + best_channel);
+
+	switch (get_edmg_intersection(wil, best_channel)) {
+	case 0:
+		edmg_channel = 0;
+		break;
+	case 1:
+		/* Check if the contiguous channel is on the left */
+		if (best_channel == 0)
+			break;
+		for (i = 0; i < num_channels; i++) {
+			if (wil->survey_reply.ch_info[i].channel ==
+			    best_channel - 1) {
+				edmg_channel--;
+				break;
+			}
+		}
+		break;
+	case 2:
+		if (best_channel == 0 || best_channel >= WIL_MAX_SINGLE_CHANNEL)
+			break;
+		if (acs_calc_channel[best_channel - 1] <
+		    acs_calc_channel[best_channel + 1])
+			edmg_channel--;
+		break;
+	}
+	return edmg_channel;
+}
+
+static int wil_acs_calc_channel(struct wil6210_priv *wil, int edmg_enabled,
+				u8 *channel, u8 *edmg_channel)
+{
+	u8 i, best_channel = ACS_DEFAULT_BEST_CHANNEL - 1;
 	struct scan_acs_info *ch;
 	u64 dwell_time = le32_to_cpu(wil->survey_reply.evt.dwell_time);
 	u16 filled = le16_to_cpu(wil->survey_reply.evt.filled);
@@ -3288,6 +3523,7 @@ static u8 wil_acs_calc_channel(struct wil6210_priv *wil)
 	u64 busy_time, tx_time;
 	u64 min_i_ch = (u64)-1, cur_i_ch;
 	u8 p_min = 0, ch_noise;
+	u64 acs_calc_channel[WIL_MAX_SINGLE_CHANNEL];
 
 	wil_dbg_misc(wil,
 		     "acs_calc_channel: filled info: 0x%04X, for %u channels\n",
@@ -3295,7 +3531,7 @@ static u8 wil_acs_calc_channel(struct wil6210_priv *wil)
 
 	if (!num_channels) {
 		wil_err(wil, "received results with no channel info\n");
-		return 0;
+		return -EINVAL;
 	}
 
 	/* find P_min */
@@ -3355,25 +3591,39 @@ static u8 wil_acs_calc_channel(struct wil6210_priv *wil)
 			     ch->channel + 1, acs_ch_weight[ch->channel],
 			     cur_i_ch);
 
+		acs_calc_channel[ch->channel] = cur_i_ch;
+
 		if (i == 0 || cur_i_ch < min_i_ch) {
 			min_i_ch = cur_i_ch;
 			best_channel = ch->channel;
 		}
 	}
 
-	wil_dbg_misc(wil,
-		     "acs_calc_channel: best channel %d with I_ch of %llu\n",
-		     best_channel + 1, min_i_ch);
+	*channel = best_channel;
 
-	return best_channel;
+	/* Select the best EDMG channel given the selected channel */
+	if (edmg_enabled)
+		*edmg_channel = select_edmg_channel(wil, best_channel,
+						    acs_calc_channel);
+
+	wil_dbg_misc(wil,
+		     "acs_calc_channel: best channel %d with I_ch of %llu edmg channel %d\n",
+		     best_channel + 1, min_i_ch, *edmg_channel);
+	return 0;
 }
 
-static void wil_acs_report_channel(struct wil6210_priv *wil)
+static void wil_acs_report_channel(struct wil6210_priv *wil, int edmg_enabled)
 {
 	struct sk_buff *vendor_event;
 	int ret_val;
 	struct nlattr *nla;
-	u8 channel = wil_acs_calc_channel(wil);
+	u8 channel = 0;
+	u8 edmg_channel = 0;
+
+	if (wil_acs_calc_channel(wil, edmg_enabled, &channel, &edmg_channel)) {
+		wil_err(wil, "wil_acs_calc_channel failed\n");
+		return;
+	}
 
 	vendor_event = cfg80211_vendor_event_alloc(
 		wil_to_wiphy(wil), NULL, 2 * sizeof(u8) + 4 + NLMSG_HDRLEN,
@@ -3422,6 +3672,18 @@ static void wil_acs_report_channel(struct wil6210_priv *wil)
 		kfree_skb(vendor_event);
 		return;
 	}
+	/* report edmg channel */
+	if (edmg_channel) {
+		ret_val = nla_put_u8(vendor_event,
+				     QCA_WLAN_VENDOR_ATTR_ACS_EDMG_CHANNEL,
+				     edmg_channel);
+		if (ret_val) {
+			wil_err(wil,
+				"QCA_WLAN_VENDOR_ATTR_ACS_EDMG_CHANNEL put fail\n");
+			kfree_skb(vendor_event);
+			return;
+		}
+	}
 
 	cfg80211_vendor_event(vendor_event, GFP_KERNEL);
 }
@@ -3434,6 +3696,7 @@ static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
 	int rc;
 	struct nlattr *tb[QCA_WLAN_VENDOR_ATTR_ACS_MAX + 1];
 	u8 hw_mode;
+	u8 edmg_enabled = 0;
 	struct ieee80211_channel reg_channels[ARRAY_SIZE(wil_60ghz_channels)];
 	int num_channels;
 	const struct ieee80211_reg_rule *reg_rule;
@@ -3458,6 +3721,10 @@ static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
 			hw_mode, QCA_ACS_MODE_IEEE80211AD);
 		goto out;
 	}
+
+	if (tb[QCA_WLAN_VENDOR_ATTR_ACS_EDMG_ENABLED])
+		edmg_enabled =
+			nla_get_flag(tb[QCA_WLAN_VENDOR_ATTR_ACS_EDMG_ENABLED]);
 
 	/* get list of channels allowed by regulatory */
 	num_channels = 0;
@@ -3503,7 +3770,7 @@ static int wil_do_acs(struct wiphy *wiphy, struct wireless_dev *wdev,
 				  num_channels);
 
 	if (!rc)
-		wil_acs_report_channel(wil);
+		wil_acs_report_channel(wil, edmg_enabled);
 out:
 	if (!rc) {
 		temp_skbuff = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
@@ -4060,6 +4327,62 @@ static int wil_brp_set_ant_limit(struct wiphy *wiphy, struct wireless_dev *wdev,
 					 antenna_num_limit);
 }
 
+static void wil_nl_60g_fw_state_evt(struct wil6210_priv *wil)
+{
+	struct sk_buff *vendor_event = NULL;
+	struct wil_nl_60g_event *evt;
+	struct wil_nl_60g_fw_state_event *fw_state_event;
+
+	if (!wil->publish_nl_evt)
+		return;
+
+	wil_dbg_misc(wil, "report fw_state event to user-space (%d)\n",
+		     wil->fw_state);
+
+	evt = kzalloc(sizeof(*evt) + sizeof(*fw_state_event), GFP_KERNEL);
+	if (!evt)
+		return;
+
+	evt->evt_type = NL_60G_EVT_DRIVER_GENERIC;
+	evt->buf_len = sizeof(*fw_state_event);
+
+	fw_state_event = (struct wil_nl_60g_fw_state_event *)evt->buf;
+	fw_state_event->hdr.evt_id = NL_60G_GEN_EVT_FW_STATE;
+	fw_state_event->fw_state = wil->fw_state;
+
+	vendor_event = cfg80211_vendor_event_alloc(
+				wil_to_wiphy(wil),
+				NULL,
+				4 + NLMSG_HDRLEN +
+				sizeof(*evt) + sizeof(*fw_state_event),
+				QCA_NL80211_VENDOR_EVENT_UNSPEC_INDEX,
+				GFP_KERNEL);
+	if (!vendor_event) {
+		wil_err(wil, "failed to allocate vendor_event\n");
+		goto out;
+	}
+
+	if (nla_put(vendor_event, WIL_ATTR_60G_BUF,
+		    sizeof(*evt) + sizeof(*fw_state_event), evt)) {
+		wil_err(wil, "failed to fill WIL_ATTR_60G_BUF\n");
+		kfree_skb(vendor_event);
+		goto out;
+	}
+
+	cfg80211_vendor_event(vendor_event, GFP_KERNEL);
+
+out:
+	kfree(evt);
+}
+
+void wil_nl_60g_fw_state_change(struct wil6210_priv *wil,
+				enum wil_fw_state fw_state)
+{
+	wil_dbg_misc(wil, "fw_state change:%d => %d", wil->fw_state, fw_state);
+	wil->fw_state = fw_state;
+	wil_nl_60g_fw_state_evt(wil);
+}
+
 static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
 				 const void *data, int data_len)
 {
@@ -4101,6 +4424,7 @@ static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
 
 		wil_dbg_wmi(wil, "Publish wmi event %s\n",
 			    publish ? "enabled" : "disabled");
+		wil_nl_60g_fw_state_evt(wil);
 		break;
 	case NL_60G_CMD_DEBUG:
 		if (!tb[WIL_ATTR_60G_BUF]) {
@@ -4148,6 +4472,33 @@ static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
 			mutex_unlock(&wil->mutex);
 
 			break;
+
+		case NL_60G_GEN_GET_DRIVER_CAPA:
+		{
+			struct sk_buff *skb;
+			u32 capa;
+
+			skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+								  sizeof(capa));
+			if (!skb)
+				return -ENOMEM;
+
+			capa = BIT(NL_60G_DRIVER_CAPA_FW_STATE) |
+#if defined(CONFIG_WIL6210_WRITE_IOCTL)
+			       BIT(NL_60G_DRIVER_CAPA_IOCTL_WRITE) |
+#endif
+			       BIT(NL_60G_DRIVER_CAPA_WMI_OVER_NL);
+			rc = nla_put_u32(skb,
+					 QCA_WLAN_VENDOR_ATTR_DRIVER_CAPA,
+					 capa);
+			if (rc) {
+				wil_err(wil,
+					"Failed to return driver capa\n");
+				kfree_skb(skb);
+				return rc;
+			}
+			return cfg80211_vendor_cmd_reply(skb);
+		}
 		default:
 			rc = -EINVAL;
 			wil_err(wil, "invalid debug_cmd id %d",

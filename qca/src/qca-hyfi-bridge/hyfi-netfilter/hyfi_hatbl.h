@@ -131,7 +131,13 @@ extern int hyfi_hatbl_setup(struct hyfi_net_bridge *br);
 extern void hyfi_hatbl_free(void);
 extern void hyfi_hatbl_fini(struct hyfi_net_bridge *br);
 extern void hyfi_hatbl_flush(struct hyfi_net_bridge *br);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+extern void hyfi_hatbl_cleanup(struct timer_list *t);
+#else
 extern void hyfi_hatbl_cleanup(unsigned long data);
+#endif
+
 extern void hyfi_hatbl_delete_by_port(struct hyfi_net_bridge *br,
 		const struct net_bridge_port *p);
 extern int hyfi_hatbl_fillbuf(struct hyfi_net_bridge *br, void *buf,

@@ -31,6 +31,9 @@
 
 #define DLOAD_MAGIC_COOKIE	0x10
 #define DLOAD_DISABLED		0x40
+
+#define TCSR_SOC_HW_VERSION_REG 0x194D000
+
 DECLARE_GLOBAL_DATA_PTR;
 struct sdhci_host mmc_host;
 extern int ipq6018_edma_init(void *cfg);
@@ -57,7 +60,20 @@ struct dumpinfo_t dumpinfo_n[] = {
 	 *                                |                      |
          *                                ------------------------
 	 */
+
+	/* Compressed EBICS dump follows descending order
+	 * to use in-memory compression for which destination
+	 * for compression will be address of EBICS2.BIN
+	 *
+	 * EBICS2 - (ddr size / 2) [to] end of ddr
+	 * EBICS1 - uboot end addr [to] (ddr size / 2)
+	 * EBICS0 - ddr start      [to] uboot start addr
+	 */
+
 	{ "EBICS0.BIN", 0x40000000, 0x10000000, 0 },
+	{ "EBICS2.BIN", 0x60000000, 0x20000000, 0, 0, 0, 0, 1 },
+	{ "EBICS1.BIN", CONFIG_UBOOT_END_ADDR, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS0.BIN", 0x40000000, CONFIG_QCA_UBOOT_OFFSET, 0, 0, 0, 0, 1 },
 	{ "CODERAM.BIN", 0x00200000, 0x00028000, 0 },
 	{ "DATARAM.BIN", 0x00290000, 0x00014000, 0 },
 	{ "MSGRAM.BIN", 0x00060000, 0x00006000, 1 },
@@ -71,9 +87,18 @@ struct dumpinfo_t dumpinfo_n[] = {
 };
 int dump_entries_n = ARRAY_SIZE(dumpinfo_n);
 
+/* Compressed dumps:
+ * EBICS_S2 - (ddr start + 256M) [to] end of ddr
+ * EBICS_S1 - uboot end addr     [to] (ddr start + 256M)
+ * EBICS_S0 - ddr start          [to] uboot start addr
+ */
+
 struct dumpinfo_t dumpinfo_s[] = {
 	{ "EBICS_S0.BIN", 0x40000000, 0xA600000, 0 },
 	{ "EBICS_S1.BIN", CONFIG_TZ_END_ADDR, 0x10000000, 0 },
+	{ "EBICS_S2.BIN", 0x50000000, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS_S1.BIN", CONFIG_UBOOT_END_ADDR, 0x5B00000, 0, 0, 0, 0, 1 },
+	{ "EBICS_S0.BIN", 0x40000000, CONFIG_QCA_UBOOT_OFFSET, 0, 0, 0, 0, 1 },
 	{ "DATARAM.BIN", 0x00290000, 0x00014000, 0 },
 	{ "MSGRAM.BIN", 0x00060000, 0x00006000, 1 },
 	{ "IMEM.BIN", 0x08600000, 0x00001000, 0 },
@@ -87,99 +112,25 @@ struct dumpinfo_t dumpinfo_s[] = {
 int dump_entries_s = ARRAY_SIZE(dumpinfo_s);
 u32 *tz_wonce = (u32 *)CONFIG_IPQ6018_TZ_WONCE_4_ADDR;
 
-
-void uart2_configure_mux(void)
-{
-	unsigned long cfg_rcgr;
-
-	cfg_rcgr = readl(GCC_BLSP1_UART2_APPS_CFG_RCGR);
-	/* Clear mode, src sel, src div */
-	cfg_rcgr &= ~(GCC_UART_CFG_RCGR_MODE_MASK |
-			GCC_UART_CFG_RCGR_SRCSEL_MASK |
-			GCC_UART_CFG_RCGR_SRCDIV_MASK);
-
-	cfg_rcgr |= ((UART2_RCGR_SRC_SEL << GCC_UART_CFG_RCGR_SRCSEL_SHIFT)
-			& GCC_UART_CFG_RCGR_SRCSEL_MASK);
-
-	cfg_rcgr |= ((UART2_RCGR_SRC_DIV << GCC_UART_CFG_RCGR_SRCDIV_SHIFT)
-			& GCC_UART_CFG_RCGR_SRCDIV_MASK);
-
-	cfg_rcgr |= ((UART2_RCGR_MODE << GCC_UART_CFG_RCGR_MODE_SHIFT)
-			& GCC_UART_CFG_RCGR_MODE_MASK);
-
-	writel(cfg_rcgr, GCC_BLSP1_UART2_APPS_CFG_RCGR);
-}
-
-void uart2_set_rate_mnd(unsigned int m,
-			unsigned int n, unsigned int two_d)
-{
-	writel(m, GCC_BLSP1_UART2_APPS_M);
-	writel(NOT_N_MINUS_M(n, m), GCC_BLSP1_UART2_APPS_N);
-	writel(NOT_2D(two_d), GCC_BLSP1_UART2_APPS_D);
-}
-
-int uart2_trigger_update(void)
-{
-	unsigned long cmd_rcgr;
-	int timeout = 0;
-
-	cmd_rcgr = readl(GCC_BLSP1_UART2_APPS_CMD_RCGR);
-	cmd_rcgr |= UART2_CMD_RCGR_UPDATE;
-	writel(cmd_rcgr, GCC_BLSP1_UART2_APPS_CMD_RCGR);
-
-	while (readl(GCC_BLSP1_UART2_APPS_CMD_RCGR) & UART2_CMD_RCGR_UPDATE) {
-		if (timeout++ >= CLOCK_UPDATE_TIMEOUT_US) {
-			printf("Timeout waiting for UART2 clock update\n");
-			return -ETIMEDOUT;
-		}
-		udelay(1);
-	}
-	cmd_rcgr = readl(GCC_BLSP1_UART2_APPS_CMD_RCGR);
-	return 0;
-}
-
-void uart2_toggle_clock(void)
-{
-	unsigned long cbcr_val;
-
-	cbcr_val = readl(GCC_BLSP1_UART2_APPS_CBCR);
-	cbcr_val |= UART2_CBCR_CLK_ENABLE;
-	writel(cbcr_val, GCC_BLSP1_UART2_APPS_CBCR);
-}
-
-void uart2_clock_config(unsigned int m,
-			unsigned int n, unsigned int two_d)
-{
-	uart2_configure_mux();
-	uart2_set_rate_mnd(m, n, two_d);
-	uart2_trigger_update();
-	uart2_toggle_clock();
-}
+#define BLSP1_UART0_BASE	0x078AF000
+#define UART_PORT_ID(reg)	((reg - BLSP1_UART0_BASE) / 0x1000)
 
 void qca_serial_init(struct ipq_serial_platdata *plat)
 {
-	int node, uart2_node;
+	int ret;
 
-	writel(1, GCC_BLSP1_UART1_APPS_CBCR);
-
-	node = fdt_path_offset(gd->fdt_blob, "/serial@78B1000/serial_gpio");
-	if (node < 0) {
-		printf("Could not find serial_gpio node\n");
+	if (plat->gpio_node < 0) {
+		printf("serial_init: unable to find gpio node \n");
 		return;
 	}
 
-	if (plat->port_id == 1) {
-		uart2_node = fdt_path_offset(gd->fdt_blob, "uart2");
-		if (uart2_node < 0) {
-			printf("Could not find uart2 node\n");
-			return;
-		}
-		node = fdt_subnode_offset(gd->fdt_blob,
-				uart2_node, "serial_gpio");
-		uart2_clock_config(plat->m_value, plat->n_value, plat->d_value);
-		writel(1, GCC_BLSP1_UART2_APPS_CBCR);
-	}
-	qca_gpio_init(node);
+	qca_gpio_init(plat->gpio_node);
+	plat->port_id = UART_PORT_ID(plat->reg_base);
+	ret = uart_clock_config(plat);
+	if (ret)
+		printf("UART clock config failed %d \n", ret);
+
+	return;
 }
 
 int do_pmic_reset()
@@ -229,24 +180,23 @@ void reset_crashdump(void)
 #ifdef CONFIG_QCA_MMC
 void emmc_clock_config(void)
 {
-	/* Enable root clock generator */
-	writel(readl(GCC_SDCC1_APPS_CBCR)|0x1, GCC_SDCC1_APPS_CBCR);
-	/* Add 10us delay for CLK_OFF to get cleared */
+	int cfg;
+
+	/* Configure sdcc1_apps_clk_src */
+	cfg = (GCC_SDCC1_APPS_CFG_RCGR_SRC_SEL
+			| GCC_SDCC1_APPS_CFG_RCGR_SRC_DIV);
+	writel(cfg, GCC_SDCC1_APPS_CFG_RCGR);
+	writel(SDCC1_M_VAL, GCC_SDCC1_APPS_M);
+	writel(SDCC1_N_VAL, GCC_SDCC1_APPS_N);
+	writel(SDCC1_D_VAL, GCC_SDCC1_APPS_D);
+	writel(CMD_UPDATE, GCC_SDCC1_APPS_CMD_RCGR);
+	mdelay(100);
+	writel(ROOT_EN, GCC_SDCC1_APPS_CMD_RCGR);
+
+	/* Configure CBCRs */
+	writel(readl(GCC_SDCC1_APPS_CBCR) | CLK_ENABLE, GCC_SDCC1_APPS_CBCR);
 	udelay(10);
-	writel(readl(GCC_SDCC1_AHB_CBCR)|0x1, GCC_SDCC1_AHB_CBCR);
-	/* PLL0 - 192Mhz */
-	writel(0x20B, GCC_SDCC1_APPS_CFG_RCGR);
-	/* Delay for clock operation complete */
-	udelay(10);
-	writel(0x1, GCC_SDCC1_APPS_M);
-	writel(0xFC, GCC_SDCC1_APPS_N);
-	writel(0xFD, GCC_SDCC1_APPS_D);
-	/* Delay for clock operation complete */
-	udelay(10);
-	/* Update APPS_CMD_RCGR to reflect source selection */
-	writel(readl(GCC_SDCC1_APPS_CMD_RCGR)|0x1, GCC_SDCC1_APPS_CMD_RCGR);
-	/* Add 10us delay for clock update to complete */
-	udelay(10);
+	writel(readl(GCC_SDCC1_AHB_CBCR) | CLK_ENABLE, GCC_SDCC1_AHB_CBCR);
 }
 
 void mmc_iopad_config(struct sdhci_host *host)
@@ -325,15 +275,35 @@ int board_mmc_init(bd_t *bis)
 }
 #endif
 
+#ifdef CONFIG_QCA_SPI
+static void spi_clock_init(void)
+{
+	int cfg;
+
+	/* Configure qup1_spi_apps_clk_src */
+	cfg = (GCC_BLSP1_QUP1_SPI_APPS_CFG_RCGR_SRC_SEL |
+		GCC_BLSP1_QUP1_SPI_APPS_CFG_RCGR_SRC_DIV);
+	writel(cfg, GCC_BLSP1_QUP1_SPI_APPS_CFG_RCGR);
+
+	writel(CMD_UPDATE, GCC_BLSP1_QUP1_SPI_APPS_CMD_RCGR);
+	mdelay(100);
+	writel(ROOT_EN, GCC_BLSP1_QUP1_SPI_APPS_CMD_RCGR);
+
+	/* Configure CBCR */
+	writel(CLK_ENABLE, GCC_BLSP1_QUP1_SPI_APPS_CBCR);
+}
+#endif
+
 void board_nand_init(void)
 {
 #ifdef CONFIG_QCA_SPI
 	int gpio_node;
 #endif
 
-	qpic_nand_init();
+	qpic_nand_init(NULL);
 
 #ifdef CONFIG_QCA_SPI
+	spi_clock_init();
 	gpio_node = fdt_path_offset(gd->fdt_blob, "/spi/spi_gpio");
 	if (gpio_node >= 0) {
 		qca_gpio_init(gpio_node);
@@ -349,20 +319,41 @@ void board_nand_init(void)
 #ifdef CONFIG_PCI_IPQ
 static void pcie_v2_clock_init(void)
 {
-	/* Enable PCIE CLKS */
-	writel(0x2, GCC_PCIE0_AUX_CMD_RCGR);
-	writel(0x107, GCC_PCIE0_AXI_CFG_RCGR);
-	writel(0x1, GCC_PCIE0_AXI_CMD_RCGR);
+	int cfg;
+
+
+	/* Configure pcie0_aux_clk_src */
+	cfg = (GCC_PCIE0_AUX_CFG_RCGR_SRC_SEL | GCC_PCIE0_AUX_CFG_RCGR_SRC_DIV);
+	writel(cfg, GCC_PCIE0_AUX_CFG_RCGR);
+	writel(CMD_UPDATE, GCC_PCIE0_AUX_CMD_RCGR);
 	mdelay(100);
-	writel(0x2, GCC_PCIE0_AXI_CMD_RCGR);
-	writel(0x20000001, GCC_PCIE0_AHB_CBCR);
-	writel(0x4FF1, GCC_PCIE0_AXI_M_CBCR);
-	writel(0x20004FF1, GCC_PCIE0_AXI_S_CBCR);
-	writel(0x1, GCC_PCIE0_AUX_CBCR);
-	writel(0x80004FF1, GCC_PCIE0_PIPE_CBCR);
-	writel(0x1, GCC_PCIE0_AXI_S_BRIDGE_CBCR);
-	writel(0x10F, GCC_PCIE0_RCHNG_CFG_RCGR);
-	writel(0x3, GCC_PCIE0_RCHNG_CMD_RCGR);
+	writel(ROOT_EN, GCC_PCIE0_AUX_CMD_RCGR);
+
+	/* Configure pcie0_axi_clk_src */
+	cfg = (GCC_PCIE0_AXI_CFG_RCGR_SRC_SEL | GCC_PCIE0_AXI_CFG_RCGR_SRC_DIV);
+	writel(cfg, GCC_PCIE0_AXI_CFG_RCGR);
+	writel(CMD_UPDATE, GCC_PCIE0_AXI_CMD_RCGR);
+	mdelay(100);
+	writel(ROOT_EN, GCC_PCIE0_AXI_CMD_RCGR);
+
+	/* Configure CBCRs */
+	writel(CLK_ENABLE, GCC_SYS_NOC_PCIE0_AXI_CBCR);
+	writel(CLK_ENABLE, GCC_PCIE0_AHB_CBCR);
+	writel(CLK_ENABLE, GCC_PCIE0_AXI_M_CBCR);
+	writel(CLK_ENABLE, GCC_PCIE0_AXI_S_CBCR);
+	writel(CLK_ENABLE, GCC_PCIE0_AUX_CBCR);
+	writel(PIPE_CLK_ENABLE, GCC_PCIE0_PIPE_CBCR);
+	writel(CLK_ENABLE, GCC_PCIE0_AXI_S_BRIDGE_CBCR);
+
+	/* Configure pcie0_rchng_clk_src */
+	cfg = (GCC_PCIE0_RCHNG_CFG_RCGR_SRC_SEL
+			| GCC_PCIE0_RCHNG_CFG_RCGR_SRC_DIV);
+	writel(cfg, GCC_PCIE0_RCHNG_CFG_RCGR);
+	writel(CMD_UPDATE, GCC_PCIE0_RCHNG_CMD_RCGR);
+	mdelay(100);
+	writel(ROOT_EN, GCC_PCIE0_RCHNG_CMD_RCGR);
+
+
 }
 
 static void pcie_v2_clock_deinit(void)
@@ -371,7 +362,7 @@ static void pcie_v2_clock_deinit(void)
 	writel(0x0, GCC_PCIE0_AXI_CFG_RCGR);
 	writel(0x0, GCC_PCIE0_AXI_CMD_RCGR);
 	mdelay(100);
-	writel(0x0, GCC_SYS_NOC_PCIE0_AXI_CLK);
+	writel(0x0, GCC_SYS_NOC_PCIE0_AXI_CBCR);
 	writel(0x0, GCC_PCIE0_AHB_CBCR);
 	writel(0x0, GCC_PCIE0_AXI_M_CBCR);
 	writel(0x0, GCC_PCIE0_AXI_S_CBCR);
@@ -488,38 +479,80 @@ void board_usb_deinit(int id)
 
 static void usb_clock_init(int id)
 {
+	int cfg;
+
 	if (id == 0) {
-		writel(0x222004, GCC_USB0_GDSCR);
-		writel(0, GCC_SYS_NOC_USB0_AXI_CBCR);
-		writel(0, GCC_SNOC_BUS_TIMEOUT2_AHB_CBCR);
-		writel(0x10b, GCC_USB0_MASTER_CFG_RCGR);
-		writel(0x1, GCC_USB0_MASTER_CMD_RCGR);
-		writel(1, GCC_SYS_NOC_USB0_AXI_CBCR);
-		writel(0xcff1, GCC_USB0_MASTER_CBCR);
-		writel(1, GCC_SNOC_BUS_TIMEOUT2_AHB_CBCR);
-		writel(1, GCC_USB0_SLEEP_CBCR);
-		//gcc_usb0_mock_utmi_clk is set to 24 MHz
-		writel(0x1, GCC_USB0_MOCK_UTMI_CFG_RCGR);
-		writel(0x1, GCC_USB0_MOCK_UTMI_M);
-		writel(0xf7, GCC_USB0_MOCK_UTMI_N);
-		writel(0xf6, GCC_USB0_MOCK_UTMI_D);
-		writel(0x3, GCC_USB0_MOCK_UTMI_CMD_RCGR);
-		writel(1, GCC_USB0_MOCK_UTMI_CBCR);
-		writel(0x8001, GCC_USB0_PHY_CFG_AHB_CBCR);
-		writel(1, GCC_USB0_AUX_CBCR);
-		writel(1, GCC_USB0_PIPE_CBCR);
+		cfg = readl(GCC_USB0_GDSCR) | SW_OVERRIDE_ENABLE;
+		cfg &= ~(SW_COLLAPSE_ENABLE);
+		writel(cfg, GCC_USB0_GDSCR);
+
+		/* Configure usb0_master_clk_src */
+		cfg = (GCC_USB0_MASTER_CFG_RCGR_SRC_SEL |
+			GCC_USB0_MASTER_CFG_RCGR_SRC_DIV);
+		writel(cfg, GCC_USB0_MASTER_CFG_RCGR);
+		writel(CMD_UPDATE, GCC_USB0_MASTER_CMD_RCGR);
+		mdelay(100);
+		writel(ROOT_EN, GCC_USB0_MASTER_CMD_RCGR);
+
+		/* Configure usb0_mock_utmi_clk_src */
+		cfg = (GCC_USB_MOCK_UTMI_SRC_SEL |
+			GCC_USB_MOCK_UTMI_SRC_DIV);
+		writel(cfg, GCC_USB0_MOCK_UTMI_CFG_RCGR);
+		writel(UTMI_M, GCC_USB0_MOCK_UTMI_M);
+		writel(UTMI_N, GCC_USB0_MOCK_UTMI_N);
+		writel(UTMI_D, GCC_USB0_MOCK_UTMI_D);
+		writel(CMD_UPDATE, GCC_USB0_MOCK_UTMI_CMD_RCGR);
+		mdelay(100);
+		writel(ROOT_EN, GCC_USB0_MOCK_UTMI_CMD_RCGR);
+
+		/* Configure usb0_aux_clk_src */
+		cfg = (GCC_USB0_AUX_CFG_SRC_SEL |
+			GCC_USB0_AUX_CFG_SRC_DIV);
+		writel(cfg, GCC_USB0_AUX_CFG_RCGR);
+		writel(AUX_M, GCC_USB0_AUX_M);
+		writel(AUX_N, GCC_USB0_AUX_N);
+		writel(AUX_D, GCC_USB0_AUX_D);
+		writel(CMD_UPDATE, GCC_USB0_AUX_CMD_RCGR);
+		mdelay(100);
+		writel(ROOT_EN, GCC_USB0_AUX_CMD_RCGR);
+
+		/* Configure CBCRs */
+		writel(CLK_DISABLE, GCC_SYS_NOC_USB0_AXI_CBCR);
+		writel(CLK_DISABLE, GCC_SNOC_BUS_TIMEOUT2_AHB_CBCR);
+		writel(CLK_ENABLE, GCC_SYS_NOC_USB0_AXI_CBCR);
+		writel((readl(GCC_USB0_MASTER_CBCR) | CLK_ENABLE),
+						GCC_USB0_MASTER_CBCR);
+		writel(CLK_ENABLE, GCC_SNOC_BUS_TIMEOUT2_AHB_CBCR);
+		writel(CLK_ENABLE, GCC_USB0_SLEEP_CBCR);
+		writel(CLK_ENABLE, GCC_USB0_MOCK_UTMI_CBCR);
+		writel((CLK_ENABLE | NOC_HANDSHAKE_FSM_EN),
+						GCC_USB0_PHY_CFG_AHB_CBCR);
+		writel(CLK_ENABLE, GCC_USB0_AUX_CBCR);
+		writel(CLK_ENABLE, GCC_USB0_PIPE_CBCR);
+
 	} else if (id == 1) {
-		writel(0x222004, GCC_USB1_GDSCR);
-		writel(0xcff1, GCC_USB1_MASTER_CBCR);
-		writel(1, GCC_USB1_SLEEP_CBCR);
-		//gcc_usb1_mock_utmi_clk is set to 24 MHz
-		writel(0x1, GCC_USB1_MOCK_UTMI_CFG_RCGR);
-		writel(0x1, GCC_USB1_MOCK_UTMI_M);
-		writel(0xf7, GCC_USB1_MOCK_UTMI_N);
-		writel(0xf6, GCC_USB1_MOCK_UTMI_D);
-		writel(0x3, GCC_USB1_MOCK_UTMI_CMD_RCGR);
-		writel(1, GCC_USB1_MOCK_UTMI_CBCR);
-		writel(0x8001, GCC_USB1_PHY_CFG_AHB_CBCR);
+		cfg = readl(GCC_USB1_GDSCR) | SW_OVERRIDE_ENABLE;
+		cfg &= ~(SW_COLLAPSE_ENABLE);
+		writel(cfg, GCC_USB1_GDSCR);
+
+		/* Configure usb1_mock_utmi_clk_src */
+		cfg = (GCC_USB_MOCK_UTMI_SRC_SEL |
+			GCC_USB_MOCK_UTMI_SRC_DIV);
+		writel(cfg, GCC_USB1_MOCK_UTMI_CFG_RCGR);
+		writel(UTMI_M, GCC_USB1_MOCK_UTMI_M);
+		writel(UTMI_N, GCC_USB1_MOCK_UTMI_N);
+		writel(UTMI_D, GCC_USB1_MOCK_UTMI_D);
+		writel(CMD_UPDATE, GCC_USB1_MOCK_UTMI_CMD_RCGR);
+		mdelay(100);
+		writel(ROOT_EN, GCC_USB1_MOCK_UTMI_CMD_RCGR);
+
+		/* Configure CBCRs */
+		writel(readl(GCC_USB1_MASTER_CBCR) | CLK_ENABLE,
+						GCC_USB1_MASTER_CBCR);
+		writel(CLK_ENABLE, GCC_USB1_SLEEP_CBCR);
+		writel(CLK_ENABLE, GCC_USB1_MOCK_UTMI_CBCR);
+		writel((CLK_ENABLE | NOC_HANDSHAKE_FSM_EN),
+					GCC_USB1_PHY_CFG_AHB_CBCR);
 	}
 }
 
@@ -712,60 +745,32 @@ int ipq_board_usb_init(void)
 }
 #endif
 
+static void __fixup_usb_device_mode(void *blob)
+{
+	parse_fdt_fixup("/soc/usb3@8A00000/dwc3@8A00000%dr_mode%?peripheral", blob);
+	parse_fdt_fixup("/soc/usb3@8A00000/dwc3@8A00000%maximum-speed%?high-speed", blob);
+}
+
+static void fdt_fixup_diag_gadget(void *blob)
+{
+	__fixup_usb_device_mode(blob);
+	parse_fdt_fixup("/soc/qcom,gadget_diag@0%status%?ok", blob);
+}
+
 void ipq_fdt_fixup_usb_device_mode(void *blob)
 {
-	int nodeoff, ret, node;
-	const char *usb_dr_mode = "peripheral"; /* Supported mode */
-	const char *usb_max_speed = "high-speed";/* Supported speed */
-	const char *usb_node[] = {"/soc/usb3@8A00000/dwc3@8A00000"};
 	const char *usb_cfg;
 
 	usb_cfg = getenv("usb_mode");
 	if (!usb_cfg)
 		return;
 
-	if (strcmp(usb_cfg, usb_dr_mode)) {
-		printf("fixup_usb: usb_mode can be either 'peripheral' or not set\n");
-		return;
-	}
-
-	for (node = 0; node < ARRAY_SIZE(usb_node); node++) {
-		nodeoff = fdt_path_offset(blob, usb_node[node]);
-		if (nodeoff < 0) {
-			printf("fixup_usb: unable to find node '%s'\n",
-			       usb_node[node]);
-			return;
-		}
-		ret = fdt_setprop(blob, nodeoff, "dr_mode",
-				  usb_dr_mode,
-				  (strlen(usb_dr_mode) + 1));
-		if (ret)
-			printf("fixup_usb: 'dr_mode' cannot be set");
-
-		/* if mode is peripheral restricting to high-speed */
-		ret = fdt_setprop(blob, nodeoff, "maximum-speed",
-				  usb_max_speed,
-				  (strlen(usb_max_speed) + 1));
-		if (ret)
-			printf("fixup_usb: 'maximum-speed' cannot be set");
-	}
-}
-
-void fdt_fixup_set_dload_dis(void *blob)
-{
-	int nodeoff, ret;
-	const char *dload_node = {"/soc/qca,scm_restart_reason"};
-	uint32_t setval = 1;
-
-	nodeoff = fdt_path_offset(blob, dload_node);
-	if (nodeoff < 0) {
-		printf("fixup_set_dload: unable to find node '%s'\n",
-		       dload_node);
-		return;
-	}
-	ret = fdt_setprop_u32(blob, nodeoff, "dload_status", setval);
-	if (ret)
-		printf("fixup_set_dload: 'dload_status' not set");
+	if (!strncmp(usb_cfg, "peripheral", sizeof("peripheral")))
+		__fixup_usb_device_mode(blob);
+	else if (!strncmp(usb_cfg, "diag_gadget", sizeof("diag_gadget")))
+		fdt_fixup_diag_gadget(blob);
+	else
+		printf("%s: invalid param for usb_mode\n", __func__);
 }
 
 void enable_caches(void)
@@ -1046,7 +1051,7 @@ void set_function_select_as_mdc_mdio(void)
 		for (i = 0; i < mdc_mdio_gpio_cnt; i++) {
 			if (mdc_mdio_gpio[i] >=0) {
 				mdc_mdio_gpio_base = (unsigned int *)GPIO_CONFIG_ADDR(mdc_mdio_gpio[i]);
-				writel(0x7, mdc_mdio_gpio_base);
+				writel(0xC7, mdc_mdio_gpio_base);
 			}
 		}
 	}
@@ -1207,6 +1212,7 @@ void reset_board(void)
 	reset_crashdump();
 
 	puts ("resetting ...\n");
+	mdelay(100);
 
 	if(*tz_wonce == 0) {	/*COLD REBOOT*/
 		if(do_pmic_reset())
@@ -1267,8 +1273,6 @@ void ipq_fdt_fixup_socinfo(void *blob)
 
 void fdt_fixup_auto_restart(void *blob)
 {
-	int nodeoff, ret;
-	const char *node = "/soc/q6v5_wcss@CD00000";
 	const char *paniconwcssfatal;
 
 	paniconwcssfatal = getenv("paniconwcssfatal");
@@ -1279,15 +1283,7 @@ void fdt_fixup_auto_restart(void *blob)
 	if (strncmp(paniconwcssfatal, "1", sizeof("1"))) {
 		printf("fixup_auto_restart: invalid variable 'paniconwcssfatal'");
 	} else {
-		nodeoff = fdt_path_offset(blob, node);
-		if (nodeoff < 0) {
-			printf("fixup_auto_restart: unable to find node '%s'\n", node);
-			return;
-		}
-		ret = fdt_delprop(blob, nodeoff, "qca,auto-restart");
-
-		if (ret)
-			printf("fixup_auto_restart: cannot delete property");
+		parse_fdt_fixup("/soc/q6v5_wcss@CD00000%delete%?qca,auto-restart", blob);
 	}
 	return;
 }
@@ -1325,6 +1321,10 @@ unsigned int get_dts_machid(unsigned int machid)
 	switch (machid)
 	{
 		case MACH_TYPE_IPQ6018_AP_CP01_C2:
+		case MACH_TYPE_IPQ6018_AP_CP01_C3:
+		case MACH_TYPE_IPQ6018_AP_CP01_C5:
+			return MACH_TYPE_IPQ6018_AP_CP01_C1;
+		case MACH_TYPE_IPQ6018_AP_CP01_C4:
 			return MACH_TYPE_IPQ6018_AP_CP01_C1;
 		default:
 			return machid;
@@ -1334,14 +1334,31 @@ unsigned int get_dts_machid(unsigned int machid)
 void ipq_uboot_fdt_fixup(void)
 {
 	int ret, len;
-	const char *config = "config@cp01-c2";
-	len = fdt_totalsize(gd->fdt_blob) + strlen(config) + 1;
+	char *config = NULL;
 
-	if (gd->bd->bi_arch_number == MACH_TYPE_IPQ6018_AP_CP01_C2)
+	switch (gd->bd->bi_arch_number)
 	{
+		case MACH_TYPE_IPQ6018_AP_CP01_C2:
+			config = "config@cp01-c2";
+			break;
+		case MACH_TYPE_IPQ6018_AP_CP01_C3:
+			config = "config@cp01-c3";
+			break;
+		case MACH_TYPE_IPQ6018_AP_CP01_C4:
+			config = "config@cp01-c4";
+			break;
+		case MACH_TYPE_IPQ6018_AP_CP01_C5:
+			config = "config@cp01-c5";
+			break;
+	}
+
+	if (config != NULL)
+	{
+		len = fdt_totalsize(gd->fdt_blob) + strlen(config) + 1;
+
 		/*
 		 * Open in place with a new length.
-		 */
+		*/
 		ret = fdt_open_into(gd->fdt_blob, (void *)gd->fdt_blob, len);
 		if (ret)
 			 printf("uboot-fdt-fixup: Cannot expand FDT: %s\n", fdt_strerror(ret));
@@ -1356,50 +1373,16 @@ void ipq_uboot_fdt_fixup(void)
 
 void fdt_fixup_set_qca_cold_reboot_enable(void *blob)
 {
-	int nodeoff, ret;
-	const char *dload_node = {"/soc/qca,scm_restart_reason"};
-	uint32_t setval = 1;
-
-	nodeoff = fdt_path_offset(blob, dload_node);
-	if (nodeoff < 0) {
-		printf("fixup_set_dload: unable to find node '%s'\n",
-		       dload_node);
-		return;
-	}
-
-	ret = fdt_setprop_u32(blob, nodeoff, "qca,coldreboot-enabled", setval);
-	if (ret)
-		printf("fixup_set_dload: 'qca,coldreboot-enabled' not set");
-
-	return;
+	parse_fdt_fixup("/soc/qca,scm_restart_reason%qca,coldreboot-enabled%1", blob);
 }
 
-void fdt_fixup_del_qca_secure_prop(void *blob)
+void fdt_fixup_wcss_rproc_for_atf(void *blob)
 {
-	int nodeoff, ret;
-	char *node;
+	parse_fdt_fixup("/soc/qcom_q6v5_wcss@CD00000%qcom,nosecure%1", blob);
+	parse_fdt_fixup("/soc/qcom_q6v5_wcss@CD00000%qca,wcss-aon-reset-seq%1", blob);
+}
 
-	node = "/soc/q6v5_wcss@CD00000";
-	nodeoff = fdt_path_offset(blob, node);
-	if (nodeoff < 0) {
-		printf("fixup_del_qca_secure: unable to find node '%s'\n",node);
-		return;
-	}
-
-	ret = fdt_delprop(blob, nodeoff, "qca,secure");
-	if (ret)
-		printf("fixup_del_qca_secure:cannot delete property in '%s'\n",node);
-
-	node = "/soc/q6v6_adsp@AB00000";
-	nodeoff = fdt_path_offset(blob, node);
-	if (nodeoff < 0) {
-		printf("fixup_del_qca_secure: unable to find node '%s'\n",node);
-		return;
-	}
-
-	ret = fdt_delprop(blob, nodeoff, "qca,secure");
-	if (ret)
-		printf("fixup_del_qca_secure:cannot delete property in '%s'\n",node);
-
-	return;
+int get_soc_hw_version(void)
+{
+	return readl(TCSR_SOC_HW_VERSION_REG);
 }

@@ -22,17 +22,24 @@ LOCAL_VARIANT=$(patsubst lacpd-%,%,$(patsubst lacpd-%,%,$(BUILD_VARIANT)))
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
 
+PKG_BUILD_DEPENDS += qca-ssdk
+
+SSDK_NOHNAT:=PACKAGE_kmod-qca-ssdk-nohnat
+SSDK_HNAT:=PACKAGE_kmod-qca-ssdk-hnat
+
+SSDK_PKGS:=$(SSDK_NOHNAT)||$(SSDK_HNAT)
+
 define Package/lacpd
   SECTION:=net
   CATEGORY:=Network
   MAINTAINER:=Xiaoping Fan <xfan@codeaurora.org>
-  DEPENDS:=+libubox +libuci +libubus +ubus +ubusd +!PACKAGE_kmod-qca-ssdk-nohnat:kmod-qca-ssdk-hnat
+  DEPENDS:=+libubox +libuci +libubus +ubus +ubusd @$(SSDK_PKGS)
   TITLE:=Link aggregation control protocol Daemon
 endef
 
 TARGET_CFLAGS += \
 	-I$(STAGING_DIR)/usr/include/qca-ssdk \
-	-I$(STAGING_DIR)/usr/include
+	-I$(STAGING_DIR)/usr/include -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
 
 CMAKE_OPTIONS += \
 	-DDEBUG=1

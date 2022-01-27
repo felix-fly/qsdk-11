@@ -47,6 +47,7 @@
 #include <net/netns/generic.h>
 #include <net/rtnetlink.h>
 #include <net/dst_metadata.h>
+#include <net/vxlan.h>
 
 int iptunnel_xmit(struct sock *sk, struct rtable *rt, struct sk_buff *skb,
 		  __be32 src, __be32 dst, __u8 proto,
@@ -55,6 +56,7 @@ int iptunnel_xmit(struct sock *sk, struct rtable *rt, struct sk_buff *skb,
 	int pkt_len = skb->len - skb_inner_network_offset(skb);
 	struct net *net = dev_net(rt->dst.dev);
 	struct iphdr *iph;
+	struct net_device *in_dev = NULL;
 	int err;
 	int skb_iif;
 
@@ -83,7 +85,12 @@ int iptunnel_xmit(struct sock *sk, struct rtable *rt, struct sk_buff *skb,
 	iph->ttl	=	ttl;
 	__ip_select_ident(net, iph, skb_shinfo(skb)->gso_segs ?: 1);
 
-	if (proto == IPPROTO_IPV6 || proto == IPPROTO_GRE)
+	/* Get input interface */
+	if (skb_iif)
+		in_dev = __dev_get_by_index(&init_net, skb_iif);
+
+	if (proto == IPPROTO_IPV6 || proto == IPPROTO_GRE ||
+			netif_is_vxlan(in_dev))
 		skb->skb_iif = skb_iif;
 
 	err = ip_local_out(net, sk, skb);

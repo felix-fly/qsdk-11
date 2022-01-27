@@ -12,7 +12,7 @@
 #include <plat_qti.h>
 #include <platform_def.h>
 #include <qtiseclib_interface.h>
-
+#include <qtiseclib_cb_interface.h>
 /*
  * Table of regions for various BL stages to map using the MMU.
  * This doesn't include TZRAM as the 'mem_layout' argument passed to
@@ -30,24 +30,9 @@ const mmap_region_t plat_qti_mmap[] = {
 };
 
 CASSERT(ARRAY_SIZE(plat_qti_mmap) <= MAX_MMAP_REGIONS, assert_max_mmap_regions);
-
-/* Adding it till 64 bit address support will be merged to arm tf.
-   PAGE_SIZE defined as U instead of ULL. */
-static uintptr_t qti_page_align(uintptr_t value, unsigned dir)
-{
-	/* Round up the limit to the next page boundary */
-	if (value & (PAGE_SIZE - 1)) {
-		value &= ~((uintptr_t)PAGE_SIZE - 1);
-		if (dir == UP)
-			value += PAGE_SIZE;
-	}
-
-	return value;
-}
-
 bool qti_is_overlap_atf_rg(unsigned long long addr, size_t size)
 {
-	if (addr > addr + size || (BL31_BASE < addr + size && BL31_LIMIT > addr))
+	if (addr > addr + size || ((BL31_BASE < addr + size) && (BL31_LIMIT > addr) && (BL31_LIMIT > (addr + size))))
 		return true;
 	return false;
 }
@@ -95,9 +80,13 @@ void qti_setup_page_tables(uintptr_t total_base,
 
 	static uint64_t total_ddr_size = 0;
 	/*
-	 * Map the Trusted SRAM with appropriate memory attributes.
+	 * Map the entire RAM with appropriate memory attributes.
 	 * Subsequent mappings will adjust the attributes for specific regions.
 	 */
+	total_ddr_size = qtiseclib_get_ddr_size();
+        mmap_add_region(QTI_DDR_BASE, QTI_DDR_BASE,
+                        (total_ddr_size), MT_MEMORY | MT_RW | MT_SECURE);
+
 	VERBOSE("Trusted SRAM seen by this BL image: %p - %p\n",
 		(void *)total_base, (void *)(total_base + total_size));
 	mmap_add_region(total_base, total_base,
@@ -128,12 +117,16 @@ void qti_setup_page_tables(uintptr_t total_base,
 			SP_IMAGE_XLAT_TABLES_SIZE,
 			MT_MEMORY | MT_RW | MT_SECURE);
 #endif
+	/*Remap the IMEM RW region to make it uncacheable*/
+	mmap_add_region(QTI_SHARED_IMEM_RW_BASE,QTI_SHARED_IMEM_RW_BASE,
+					QTI_SHARED_IMEM_RW_SIZE, MT_NON_CACHEABLE | MT_RW | MT_SECURE);
 
-	/* Get DDR size to map the HLOS address space*/
-        total_ddr_size = qtiseclib_get_ddr_size();
-        mmap_add_region(BL31_LIMIT, BL31_LIMIT,
-                        ((QTI_DDR_BASE + total_ddr_size) - BL31_LIMIT), MT_MEMORY | MT_RW | MT_SECURE);
-
+	/* Remap the region beyond BL31_END for making it accessible for any other secure operations */
+	if ((BL31_LIMIT > BL31_END) && (BL31_LIMIT - BL31_END) > 0) {
+	    mmap_add_region(BL31_END, BL31_END,
+			   (BL31_LIMIT - BL31_END),
+			    MT_MEMORY | MT_RW | MT_SECURE);
+	}
 	/* Now (re-)map the platform-specific memory regions */
 	mmap_add(plat_qti_mmap);
 

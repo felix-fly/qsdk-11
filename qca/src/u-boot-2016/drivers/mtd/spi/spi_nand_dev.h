@@ -80,6 +80,7 @@ struct spi_nand_flash_params {
 	u32 erase_size;
 	u8 no_of_dies;
 	int prev_die_id;
+	u8 plane_id;
 	u8 protec_bpx;
 	u64 pages_per_die;
 	void (*norm_read_cmd) (u8 *cmd, int column);

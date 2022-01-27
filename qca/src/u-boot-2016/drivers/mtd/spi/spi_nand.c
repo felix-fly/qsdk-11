@@ -36,6 +36,12 @@
 
 #define MACRONIX_NORM_READ_MASK	(MACRONIX_WRAP | MACRONIX_PLANE | 0x0F)
 
+/* Fidelix Specific Defines */
+#define SET_CMD_PLANE_BIT(plane)	(plane << 4)
+/* Introduce the 6th bit in the page address and insert the plane ID */
+#define INSERT_PLANE_BIT(x, plane)	(((x << 1) & 0xFFFFFF80) | (x & 0x3F) \
+								| (plane << 6))
+
 #define GIGADEVICE_NORM_READ_MASK 0x0F
 
 #define spi_print(...)  printf("spi_nand: " __VA_ARGS__)
@@ -52,6 +58,8 @@ void gigadevice_norm_read_cmd_12bit_addr(u8 *cmd, int column);
 void macronix_norm_read_cmd(u8 *cmd, int column);
 void winbond_norm_read_cmd(u8 *cmd, int column);
 void toshiba_norm_read_cmd(u8 *cmd, int column);
+void fidelix_norm_read_cmd(u8 *cmd, int column);
+
 int spi_nand_die_select(struct mtd_info *mtd, struct spi_flash *flash,
 			int die_id);
 
@@ -64,6 +72,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 1024,
@@ -80,6 +89,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 1024,
@@ -96,6 +106,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00040000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x20000,
 		.pages_per_sector = 64,
 		.nr_sectors = 2048,
@@ -112,6 +123,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 1024,
@@ -128,6 +140,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 1024,
@@ -144,6 +157,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 1024,
@@ -160,6 +174,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00020000,
 		.no_of_dies = 2,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x10000,
 		.pages_per_sector = 64,
 		.nr_sectors = 2048,
@@ -176,6 +191,7 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.erase_size = 0x00040000,
 		.no_of_dies = 1,
 		.prev_die_id = INT_MAX,
+		.plane_id = 0,
 		.pages_per_die = 0x20000,
 		.pages_per_sector = 64,
 		.nr_sectors = 2048,
@@ -186,6 +202,23 @@ static struct spi_nand_flash_params spi_nand_flash_tbl[] = {
 		.die_select = NULL,
 		.name = "TC58CVG2S0F",
 	},
+	{
+		.id = { 0x00, 0xe5, 0x72, 0xe5 },
+		.page_size = 2048,
+		.erase_size = 0x00020000,
+		.no_of_dies = 2,
+		.prev_die_id = INT_MAX,
+		.plane_id = 0,
+		.pages_per_die = 0x10000,
+		.pages_per_sector = 64,
+		.nr_sectors = 2048,
+		.oob_size = 64,
+		.protec_bpx = 0xC7,
+		.norm_read_cmd = fidelix_norm_read_cmd,
+		.verify_ecc = verify_2bit_ecc,
+		.die_select = NULL,
+		.name = "FM35X2GA",
+        },
 };
 
 struct spi_nand_flash_params *params;
@@ -211,6 +244,14 @@ void macronix_norm_read_cmd(u8 *cmd, int column)
 {
 	cmd[0] = IPQ40XX_SPINAND_CMD_NORM_READ;
 	cmd[1] = ((u8)(column >> 8) & MACRONIX_NORM_READ_MASK);
+	cmd[2] = (u8)(column);
+	cmd[3] = 0;
+}
+
+void fidelix_norm_read_cmd(u8 *cmd, int column)
+{
+	cmd[0] = IPQ40XX_SPINAND_CMD_NORM_READ;
+	cmd[1] = ((u8)(column >> 8)) | SET_CMD_PLANE_BIT(params->plane_id);
 	cmd[2] = (u8)(column);
 	cmd[3] = 0;
 }
@@ -310,6 +351,19 @@ static int get_die_id(struct ipq40xx_spinand_info *info, u32 page)
 	return die_id;
 }
 
+static int get_plane_id(struct ipq40xx_spinand_info *info, u32 page)
+{
+	if (info->params->no_of_dies == 2 && info->params->die_select == NULL) {
+		params->plane_id = page / info->params->pages_per_die;
+
+		if (params->plane_id > info->params->no_of_dies) {
+			printf("Invalid Plane ID: %d\n", params->plane_id);
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 int spi_nand_die_select(struct mtd_info *mtd, struct spi_flash *flash,
 			int die_id)
 {
@@ -317,7 +371,7 @@ int spi_nand_die_select(struct mtd_info *mtd, struct spi_flash *flash,
 	u8 status;
 	int ret = 0;
 
-	if(die_id < 0)
+	if (die_id < 0)
 		return -EINVAL;
 
 	if (params->prev_die_id == die_id)
@@ -353,6 +407,16 @@ static inline int do_die_select(struct mtd_info *mtd, struct spi_flash *flash,
 	return ret;
 }
 
+static int fidelix_plane_select(u32 page)
+{
+	if (params->no_of_dies == 2 && params->die_select == NULL) {
+		if (params->plane_id)
+			page = page - params->pages_per_die;
+		page = INSERT_PLANE_BIT(page, params->plane_id);
+	}
+	return page;
+}
+
 static int spi_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 {
 	u8 cmd[8];
@@ -376,6 +440,9 @@ static int spi_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 	if (ret)
 		goto out;
 
+	if (get_plane_id(info, page))
+		goto out;
+
 	ret = spi_flash_cmd(flash->spi, IPQ40XX_SPINAND_CMD_WREN, NULL, 0);
 	if (ret) {
 		printf ("Write enable failed %s\n", __func__);
@@ -385,6 +452,8 @@ static int spi_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 	if (ret) {
 		goto out;
 	}
+
+	page = fidelix_plane_select(page);
 
 	cmd[0] = IPQ40XX_SPINAND_CMD_ERASE;
 	cmd[1] = (u8)(page >> 16);
@@ -444,6 +513,10 @@ static int spi_nand_block_isbad(struct mtd_info *mtd, loff_t offs)
 	if (ret)
 		goto out;
 
+	if (get_plane_id(info, page))
+		goto out;
+	page = fidelix_plane_select(page);
+
 	cmd[0] = IPQ40XX_SPINAND_CMD_READ;
 	cmd[1] = (u8)(page >> 16);
 	cmd[2] = (u8)(page >> 8);
@@ -494,6 +567,9 @@ static int spinand_write_oob_std(struct mtd_info *mtd, struct nand_chip *chip,
 	if (ret)
 		goto out;
 
+	if (get_plane_id(info, page))
+		goto out;
+
 	ret = spi_flash_cmd(flash->spi, IPQ40XX_SPINAND_CMD_WREN, NULL, 0);
 	if (ret) {
 		printf("Write enable failed in %s\n", __func__);
@@ -501,7 +577,7 @@ static int spinand_write_oob_std(struct mtd_info *mtd, struct nand_chip *chip,
 	}
 
 	cmd[0] = IPQ40XX_SPINAND_CMD_PLOAD;
-	cmd[1] = (u8)(column >> 8);
+	cmd[1] = ((u8)(column >> 8)) | SET_CMD_PLANE_BIT(params->plane_id);
 	cmd[2] = (u8)(column);
 
 	ret = spi_flash_cmd_write(flash->spi, cmd, 3, wbuf, ops->ooblen);
@@ -510,6 +586,8 @@ static int spinand_write_oob_std(struct mtd_info *mtd, struct nand_chip *chip,
 		ret = 1;
 		goto out;
 	}
+
+	page = fidelix_plane_select(page);
 
 	cmd[0] = IPQ40XX_SPINAND_CMD_PROG;
 	cmd[1] = (u8)(page >> 16);
@@ -676,6 +754,10 @@ static int spi_nand_read_std(struct mtd_info *mtd, loff_t from, struct mtd_oob_o
 		if (ret)
 			goto out;
 
+		if (get_plane_id(info, page))
+			goto out;
+		page = fidelix_plane_select(page);
+
 		cmd[0] = IPQ40XX_SPINAND_CMD_READ;
 		cmd[1] = (u8)(page >> 16);
 		cmd[2] = (u8)(page >> 8);
@@ -706,10 +788,7 @@ static int spi_nand_read_std(struct mtd_info *mtd, loff_t from, struct mtd_oob_o
 
 		/* Read Data */
 		if (bytes) {
-			cmd[0] = IPQ40XX_SPINAND_CMD_NORM_READ;
-			cmd[1] = 0;
-			cmd[2] = 0;
-			cmd[3] = 0;
+			info->params->norm_read_cmd(cmd, 0);
 			ret = spi_flash_cmd_read(flash->spi, cmd, 4, ops->datbuf, bytes);
 			if (ret) {
 				printf("%s: read data failed\n", __func__);
@@ -808,6 +887,9 @@ static int spi_nand_write_std(struct mtd_info *mtd, loff_t to, struct mtd_oob_op
 		if (ret)
 			goto out;
 
+		if (get_plane_id(info, page))
+			goto out;
+
 		ret = spi_flash_cmd(flash->spi, IPQ40XX_SPINAND_CMD_WREN, NULL, 0);
 		if (ret) {
 			printf("Write enable failed\n");
@@ -816,13 +898,15 @@ static int spi_nand_write_std(struct mtd_info *mtd, loff_t to, struct mtd_oob_op
 
 		/* buffer to be transmittted here */
 		cmd[0] = IPQ40XX_SPINAND_CMD_PLOAD;
-		cmd[1] = 0;
+		cmd[1] = SET_CMD_PLANE_BIT(params->plane_id);
 		cmd[2] = 0;
 		ret = spi_flash_cmd_write(flash->spi, cmd, 3, wbuf, bytes);
 		if (ret) {
 			printf("%s: write command failed\n", __func__);
 			goto out;
 		}
+
+		page = fidelix_plane_select(page);
 
 		cmd[0] = IPQ40XX_SPINAND_CMD_PROG;
 		cmd[1] = (u8)(page >> 16);

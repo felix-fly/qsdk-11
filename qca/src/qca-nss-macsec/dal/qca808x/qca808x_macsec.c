@@ -3138,7 +3138,7 @@ static g_error_t _qca808x_secy_tx_epr_property_get(u32 secy_id,
 g_error_t qca808x_secy_tx_udf_ufilt_cfg_set(u32 secy_id,
 	struct secy_udf_filt_cfg_t *cfg)
 {
-	bool val = FALSE, val1 = FALSE;
+	u16 val = FALSE, val1 = FALSE;
 
 	SHR_RET_ON_ERR(PHY_REG_FIELD_READ(secy_id, PHY_MMD3,
 		MACSEC_SYS_CONFIG, SYS_CEPR_EN, &val1));
@@ -3183,7 +3183,7 @@ g_error_t qca808x_secy_tx_udf_ufilt_cfg_get(u32 secy_id,
 g_error_t qca808x_secy_tx_udf_cfilt_cfg_set(u32 secy_id,
 	struct secy_udf_filt_cfg_t *cfg)
 {
-	bool val = 0, val1 = 0;
+	u16 val = 0, val1 = 0;
 
 	SHR_RET_ON_ERR(PHY_REG_FIELD_READ(secy_id, PHY_MMD3,
 		MACSEC_SYS_CONFIG, SYS_UEPR_EN, &val));
@@ -3634,7 +3634,7 @@ g_error_t qca808x_secy_tx_ctl_filt_half_da_sa_set(u32 secy_id,
 g_error_t qca808x_secy_tx_ctl_filt_set(u32 secy_id, u32 index,
 	struct secy_ctl_filt_t *secy_filt)
 {
-	bool val = 0, val1 = 0;
+	u16 val = 0, val1 = 0;
 	g_error_t rv;
 
 	if (index > 0)

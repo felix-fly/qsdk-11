@@ -30,10 +30,7 @@
 				gpio = <61>;
 				func = <1>;
 				pull = <GPIO_PULL_DOWN>;
-				drvstr = <GPIO_2MA>;
-				oe = <GPIO_OE_DISABLE>;
 				vm = <GPIO_VM_ENABLE>;
-				od_en = <GPIO_OD_DISABLE>;
 				pu_res = <GPIO_PULL_RES2>;
 			};
 		};
@@ -55,7 +52,6 @@
 			gpio2 {
 				gpio = <9>;
 				func = <1>;
-				pull = <GPIO_NO_PULL>;
 				oe = <GPIO_OE_ENABLE>;
 			};
 		};

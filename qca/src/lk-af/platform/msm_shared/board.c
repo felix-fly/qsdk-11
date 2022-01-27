@@ -291,3 +291,8 @@ uint32_t board_platform_ver_minor()
 	version = board.platform_version;
 	return (version & 0x0000ffff);
 }
+
+__WEAK void fdt_fixup_atf(void *fdt)
+{
+	return;
+}

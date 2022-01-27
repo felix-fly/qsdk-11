@@ -18,6 +18,6 @@
 #include "qcom-ipq8064-ap145.dtsi"
 / {
 	qcom,board-id = <8 0>;
-	qcom,msm-id = <0xC9 0>;
+	qcom,msm-id = <0xC9 0>, <0xCA 0>, <0xCB 0>, <0xCC 0>, <0x118 0>, <0x119 0>;
 	qcom,pmic-id = <0 0 0 0>;
 };

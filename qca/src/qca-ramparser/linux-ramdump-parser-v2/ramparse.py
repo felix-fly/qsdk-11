@@ -24,14 +24,17 @@ import os.path as path
 import struct
 import re
 import time
+import subprocess
 from optparse import OptionParser, OptionValueError
 
 import parser_util
 from ramdump import RamDump
 from print_out import print_out_str, set_outfile, print_out_section, print_out_exception, flush_outfile
 
+import gdbmi
+
 # Please update version when something is changed!'
-VERSION = '2.0.26'
+VERSION = '2.0.27'
 
 # quick check of system requirements:
 major, minor = sys.version_info[:2]
@@ -65,13 +68,23 @@ if minor != 7 and '--force-26' not in sys.argv:
 if '--force-26' in sys.argv:
     sys.argv.remove('--force-26')
 
-# Supported for 32-bit ELF, Little-Endian format only
-def q6_etr_from_q6mem_elf(fd, etr_addr, etr_size, outdir):
+def q6_wlanfw_get_address_of_symbol(wlanfw):
+    if not options.gdb:
+        print_out_str("--gdb-path not specified")
+        sys.exit(1)
+    wlanfwelf = gdbmi.GdbMI(options.gdb, wlanfw)
+    wlanfwelf.open()
+
+    paddr = wlanfwelf.address_of('g_plat_ctxt.qdss_trace_ctrl.qdss_mem_info.mem_seg[0].addr')
+    psize = wlanfwelf.address_of('g_plat_ctxt.qdss_trace_ctrl.qdss_mem_info.mem_seg[0].size')
+    return (paddr, psize)
+
+def elf_get_pheaders(fd):
     e_ident = fd.read(8)
     e_magic, e_class, e_data, e_version, e_osabi = struct.unpack("<IBBBB", e_ident)
 
     if e_magic != 0x464c457f and e_class != 1 and e_data != 1:
-        print("!!!ELF magic not matched or format not supported")
+        print_out_str("!!!ELF magic not matched or format not supported")
         return None
 
     # e_phoff - Points to the start of the program header table.
@@ -88,6 +101,7 @@ def q6_etr_from_q6mem_elf(fd, etr_addr, etr_size, outdir):
 
     fd.seek(e_phoff)
     count = 0
+    elf_pheaders = []
     while count < e_phnum:
         curr_offset = e_phoff + count * e_phentsize
 
@@ -103,9 +117,28 @@ def q6_etr_from_q6mem_elf(fd, etr_addr, etr_size, outdir):
         fd.seek(curr_offset + 0x10)
         p_filesz, = struct.unpack("<I", fd.read(4))
 
-        if p_paddr == etr_addr:
-            break
+        elf_pheaders.append((p_paddr, p_filesz, p_offset))
         count += 1
+
+    return elf_pheaders
+
+# Supported for 32-bit ELF, Little-Endian format only
+def q6_etr_from_q6mem_elf(fd, paddr, psize, outdir):
+    elf_pheaders = elf_get_pheaders(fd)
+
+    for p_paddr, p_filesz, p_offset in elf_pheaders:
+        p_end = p_paddr + p_filesz
+        if paddr >= p_paddr and paddr <= p_end and psize >= p_paddr and psize <= p_end:
+            fd.seek(paddr - p_paddr + p_offset)
+            etr_addr, = struct.unpack("<Q", fd.read(8))
+
+            fd.seek(psize - p_paddr + p_offset)
+            etr_size, = struct.unpack("<I", fd.read(4))
+            break
+
+    for p_paddr, p_filesz, p_offset in elf_pheaders:
+        if p_paddr == etr_addr and p_filesz == etr_size:
+            break
 
     if p_paddr != etr_addr and p_filesz != etr_size:
         print_out_str('etr region not found in the program header')
@@ -128,6 +161,11 @@ def q6_etr_from_q6mem_elf(fd, etr_addr, etr_size, outdir):
         magic, status, read_ptr, write_ptr = struct.unpack("<IIII", fd.read(16))
 
         etr_file_path = os.path.join(outdir, "q6_etr.bin")
+        if os.path.exists(etr_file_path):
+            try:
+                os.remove(etr_file_path)
+            except:
+                print_out_str("!!! Cannot delete old etr dump")
         try:
             #Write etr dump to a file
             with open(etr_file_path, 'ab') as etr_file:
@@ -142,6 +180,8 @@ def q6_etr_from_q6mem_elf(fd, etr_addr, etr_size, outdir):
                     etr_file.write(fd.read(end - read_ptr))
                     fd.seek(offset)
                     etr_file.write(fd.read(write_ptr - etr_addr))
+            print_out_str("etr binary generated at " + etr_file_path)
+            print("etr binary generated at " + etr_file_path)
             return True
         except:
             print_out_str("!!! Cannot write etr dump to output file")
@@ -162,15 +202,15 @@ def parse_etr_option(option, opt_str, value, parser):
             break
         temp.append(arg)
 
-    if len(temp) is 3:
+    if len(temp) is 2:
 	a = []
-	a.append((temp[0], int(temp[1], 16), int(temp[2], 16)))
+	a.append((temp[0], temp[1]))
 	setattr(parser.values, option.dest, a)
     elif len(temp) is 0:
 	a = "EBICS"
 	setattr(parser.values, option.dest, a)
     else:
-        raise OptionValueError("--dump_q6_etr option should have either no argument or if specified, in 'path, start, size' format")
+        raise OptionValueError("--dump_q6_etr option should have either no argument or if specified, in 'q6mem-path, wlanfw.elf-path' format")
 
 def parse_ram_file(option, opt_str, value, parser):
     a = getattr(parser.values, option.dest)
@@ -238,8 +278,8 @@ if __name__ == '__main__':
                       help='CPU 0 Registers')
     parser.add_option('', '--cpu1-reg-path', dest='cpu1_reg_path',
                       help='CPU 1 Registers')
-    parser.add_option('', '--qca-nss-drv-path', dest='qca_nss_drv_path',
-                      help='qca nss drv path')
+    parser.add_option('', '--ko-path', dest='ko_path',
+                      help='*.ko files path')
     parser.add_option('', '--readelf-path', dest='readelf_path',
                       help='readelf path')
     parser.add_option('', '--custom', dest='custom',
@@ -247,8 +287,12 @@ if __name__ == '__main__':
     parser.add_option('', '--dump_dts', action='store_true',
                       dest='dump_dts', help='Dump the Device Tree Blob and Source', default=False)
     parser.add_option('', '--dump_q6_etr', action='callback',
-                      dest='dump_q6_etr', help='etr region (path, start, size) to extract etr dump q6_etr.bin',
+                      dest='dump_q6_etr', help='etr region (q6mem dump path, wlanfw elf path) to extract etr dump q6_etr.bin',
                       callback=parse_etr_option, default=False)
+    parser.add_option('', '--parse-rddm', action='store_true',
+                      dest='rddm', help='Extract RDDM dumps')
+    parser.add_option('', '--ath11k', action='store_true', dest='ath11k', help='ath11k specific parse')
+    parser.add_option('', '--console-log', dest='console_log', help='parse console logs to extract functions and modules')
 
     for p in parser_util.get_parsers():
         parser.add_option(p.shortopt or '',
@@ -281,18 +325,20 @@ if __name__ == '__main__':
     print_out_str('Linux Ram Dump Parser Version %s' % VERSION)
 
     if options.dump_q6_etr and options.dump_q6_etr != "EBICS":
-	    fd = None
-	    etr, = options.dump_q6_etr
-	    if os.path.isfile(etr[0]) is True:
-		try:
-		    fd = open(etr[0], 'rb')
-		except:
-		    fd.close()
-                    print_out_str("!!! File {0} cannot be opened".format(q6mem_file_path))
-		    sys.exit(1)
+        fd = None
+        etr, = options.dump_q6_etr
+        print_out_str('\n--------- begin q6_etr extraction (q6mem)---------')
+        if os.path.isfile(etr[0]) is True and os.path.isfile(etr[1]) is True:
+            try:
+                fd = open(etr[0], 'rb')
+            except:
+                fd.close()
+                print_out_str("!!! File {0} cannot be opened".format(etr[0]))
+                sys.exit(1)
 
-            q6_etr_from_q6mem_elf(fd, etr[1], etr[2], options.outdir)
-	    sys.exit(1)
+            paddr, psize = q6_wlanfw_get_address_of_symbol(etr[1])
+            q6_etr_from_q6mem_elf(fd, paddr, psize, options.outdir)
+        print_out_str('--------- end q6_etr extraction ---------')
 
     args = ''
     for arg in sys.argv:
@@ -314,7 +360,8 @@ if __name__ == '__main__':
     if options.vmlinux is None:
         if options.autodump is None:
             print_out_str("No vmlinux or autodump dir given. I can't proceed!")
-            parser.print_usage()
+            if options.dump_q6_etr is None or options.dump_q6_etr == "EBICS":
+                parser.print_usage()
             sys.exit(1)
         autovm = os.path.join(options.autodump, 'vmlinux')
         if os.path.isfile(autovm):
@@ -340,8 +387,22 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if options.ram_addr is not None:
+        count = 0
         for a in options.ram_addr:
             if os.path.exists(a[0]):
+                dump_file = a[0]
+                compressed = dump_file.find('.gz')
+                if compressed > 0:
+                    a = (dump_file[:-3], a[1], a[2])
+                    cmd = ["gzip -cdk " + dump_file + ">" + a[0]]
+                    ret = subprocess.call(cmd, shell=True)
+                    if ret != 0:
+                        print_out_str('Error executing gzip')
+                        sys.exit(1)
+
+                    options.ram_addr[count] = (a[0], a[1], a[2])
+                    count = count + 1
+
                 print_out_str(
                     'Loading Ram file {0} from {1:x}--{2:x}'.format(a[0], a[1], a[2]))
             else:
@@ -407,16 +468,22 @@ if __name__ == '__main__':
     if options.everything:
         options.qtf = True
 
+    if options.ath11k:
+        print_out_str("using ath11k module")
+        if options.readelf_path is None or  options.ko_path is None:
+            print_out_str("!!! Missing --readelf-path or --ko-path option")
+            sys.exit(1)
+
     #path to nss driver
-    qca_nss_drv_path = options.qca_nss_drv_path
+    ko_path = options.ko_path
     readelf_path = options.readelf_path
 
-    dump = RamDump(options.vmlinux, nm_path, gdb_path, readelf_path, qca_nss_drv_path, objdump_path, options.ram_addr,
+    dump = RamDump(options.vmlinux, nm_path, gdb_path, readelf_path, ko_path, objdump_path, options.ram_addr,
                    options.autodump, options.phys_offset, options.outdir, options.qtf_path, options.custom,
                    options.cpu0_reg_path, options.cpu1_reg_path,
                    options.force_hardware, options.force_hardware_version,
                    arm64=options.arm64,
-                   page_offset=options.page_offset, qtf=options.qtf)
+                   page_offset=options.page_offset, qtf=options.qtf, ath11k=options.ath11k)
 
     if options.shell or options.classic_shell:
         print("Entering interactive shell mode.")
@@ -470,18 +537,27 @@ if __name__ == '__main__':
         print_out_str('\n--------- end dtb extraction ---------')
 
     if options.dump_dts and options.dump_q6_etr == "EBICS":
-        print_out_str('\n--------- begin q6_etr extraction ---------')
+        print_out_str('\n--------- begin q6_etr extraction (EBICS)---------')
         etr_reg = dump.dts_lookup("q6_etr_dump")
         if etr_reg is not None:
-	    etr_addr = int(etr_reg[1], 16)
-	    etr_size = int(etr_reg[3], 16)
+            etr_addr = int(etr_reg[1], 16)
+            etr_size = int(etr_reg[3], 16)
 
             etr = dump.get_q6_etr(etr_addr, etr_size)
             if etr is None:
                 print_out_str("!!! etr dump not available")
         else:
-	    print_out_str('!!! etr region not found in device-tree')
+            print_out_str('!!! etr region not found in device-tree')
         print_out_str('--------- end q6_etr extraction ---------')
+
+    print_out_str('\n--------- begin glink log parsing ---------\n')
+    dump.get_glink_logging(options.outdir)
+    print_out_str('\n--------- end glink log parsing ---------\n')
+
+    if options.rddm:
+        print_out_str('\n--------- begin RDDM extraction ---------\n')
+        dump.get_rddm_dump(options.outdir)
+        print_out_str('\n--------- end RDDM extraction ---------\n')
 
     if options.qdss:
         print_out_str('!!! --parse-qdss is now deprecated')
@@ -492,6 +568,11 @@ if __name__ == '__main__':
         print_out_str('\n--------- watchdog time -------')
         get_wdog_timing(dump)
         print_out_str('---------- end watchdog time-----')
+
+    if options.console_log:
+        print_out_str('\n--------- begin console log extraction -------')
+        dump.extract_modules_from_console(options.console_log)
+        print_out_str('--------- end console log extraction -------')
 
     # we called parser.add_option with dest=p.cls.__name__ above,
     # so if the user passed that option then `options' will have a

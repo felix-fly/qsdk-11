@@ -1883,6 +1883,11 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 
 	memblock=debug	[KNL] Enable memblock debug messages.
 
+	mhi_netdev_overide [MHI] Configure MRU value
+			Set MRU value to align with aggregation value
+			for optimized memory usage.
+			This change applicable to FWA targets only.
+
 	load_ramdisk=	[RAM] List of ramdisks to load from floppy
 			See Documentation/blockdev/ramdisk.txt.
 
@@ -2047,6 +2052,13 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			with memmap= to avoid physical address space collisions.
 			Without memmap= PCI devices could be placed at addresses
 			belonging to unused RAM.
+
+	skip_mem_usage_tracking
+			Using this boot argument the CONFIG_DEBUG_MEM_USAGE feature
+			can be disabled at runtime.This will help for debugging on
+			particular context,if the CONFIG_DEBUG_MEM_USAGE feature is not
+			needed for a partitcular use case debugging,it can be disabled.
+			By default this feature is enabled to trace the memory usage.
 
 	mem=nopentium	[BUGS=X86-32] Disable usage of 4MB pages for kernel
 			memory.
@@ -3183,6 +3195,9 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			only "lazy" RCU callbacks (RCU_FAST_NO_HZ=y).
 			Lazy RCU callbacks are those which RCU can
 			prove do nothing more than free memory.
+
+	rcutree.rcu_cpu_stall_panic= [KNL]
+			Panic when CPU stall
 
 	rcutorture.cbflood_inter_holdoff= [KNL]
 			Set holdoff time (jiffies) between successive

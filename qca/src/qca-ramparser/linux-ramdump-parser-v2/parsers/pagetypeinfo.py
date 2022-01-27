@@ -23,6 +23,7 @@ class Pagetypeinfo(RamParser):
         free_list_offset = ramdump.field_offset(
             'struct free_area', 'free_list')
         migratetype_names = ramdump.addr_lookup('migratetype_names')
+        list_head_size = ramdump.sizeof('struct list_head')
         zone_name_offset = ramdump.field_offset('struct zone', 'name')
         zname_addr = ramdump.read_word(zone + zone_name_offset)
         zname = ramdump.read_cstring(zname_addr, 12)
@@ -43,7 +44,7 @@ class Pagetypeinfo(RamParser):
 
                 area = zone + free_area_offset + order * free_area_size
 
-                orig_free_list = area + free_list_offset + 8 * mtype
+                orig_free_list = area + free_list_offset + list_head_size * mtype
                 curr = orig_free_list
                 pg_count = -1
                 first = True

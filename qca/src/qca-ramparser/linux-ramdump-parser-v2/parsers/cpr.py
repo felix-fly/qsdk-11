@@ -13,7 +13,8 @@ from parser_util import register_parser, RamParser
 from print_out import print_out_str
 import sys
 
-@register_parser('--cpr-reg', 'Print the cpr register info')
+# Disabled cpr-reg extraction for all the chipsets
+# @register_parser('--cpr-reg', 'Print the cpr register info')
 
 class CPR(RamParser):
     def parse(self):

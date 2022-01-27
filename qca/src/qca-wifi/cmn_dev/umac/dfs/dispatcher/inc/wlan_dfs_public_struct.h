@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -23,7 +23,7 @@
 
 #ifndef __WLAN_DFS_PUBLIC_STRUCT_H_
 #define __WLAN_DFS_PUBLIC_STRUCT_H_
-
+#include <wlan_cmn.h>
 /* TODO: This structure has many redundant variables, needs cleanup */
 /**
  * struct radar_found_info - radar found info
@@ -56,12 +56,12 @@ struct radar_found_info {
 /**
  * struct dfs_acs_info - acs info, ch range
  * @acs_mode: to enable/disable acs 1/0.
- * @channel_list: channel list in acs config
+ * @chan_freq_list: channel frequency list
  * @num_of_channel: number of channel in ACS channel list
  */
 struct dfs_acs_info {
 	uint8_t acs_mode;
-	uint8_t *channel_list;
+	uint32_t *chan_freq_list;
 	uint8_t num_of_channel;
 };
 
@@ -126,16 +126,73 @@ struct dfs_radar_found_params {
 };
 
 /**
+ * enum adfs_ocac_mode - Various Off-Channel CAC modes.
+ * @QUICK_OCAC_MODE: Used for OCAC where the CAC timeout value is finite.
+ *                   This is also known as PreCAC.
+ * @EXTENSIVE_OCAC:  Extensive OCAC.
+ * @QUICK_RCAC_MODE: Used for RollingCAC where the timeout value is assumed to
+ *                   be infinite by the Firmware code, that is, the FW has to
+ *                   be on the agile channel until host stop/aborts the agile
+ *                   CAC.
+ */
+enum adfs_ocac_mode {
+	QUICK_OCAC_MODE = 0,
+	EXTENSIVE_OCAC_MODE,
+	QUICK_RCAC_MODE,
+};
+
+/**
  * struct dfs_agile_cac_params - Agile DFS-CAC parameters.
- * @precac_chan:        Agile preCAC channel.
- * @precac_chwidth:     Agile preCAC channel width.
- * @min_precac_timeout: Minimum agile preCAC timeout.
- * @max_precac_timeout: Maximum agile preCAC timeout.
+ * @precac_chan:           Agile preCAC channel.
+ * @precac_center_freq_1:  Agile preCAC channel frequency in MHz for 20/40/80/
+ *                         160 and left center frequency(5690MHz) for restricted
+ *                         80p80.
+ * @precac_center_freq_2:  Second segment Agile frequency if applicable. 0 for
+ *                         20/40/80/160 and right center frequency(5775MHz) for
+ *                         restricted 80p80.
+ * @precac_chwidth:        Agile preCAC channel width.
+ * @min_precac_timeout:    Minimum agile preCAC timeout.
+ * @max_precac_timeout:    Maximum agile preCAC timeout.
+ * @ocac_mode:             Off-Channel CAC mode.
  */
 struct dfs_agile_cac_params {
 	uint8_t precac_chan;
+	uint16_t precac_center_freq_1;
+	uint16_t precac_center_freq_2;
 	enum phy_ch_width precac_chwidth;
 	uint32_t min_precac_timeout;
 	uint32_t max_precac_timeout;
+	enum adfs_ocac_mode ocac_mode;
+};
+
+/* The first DFS channel number is 52 and the last DFS channel number is 161(in
+ * case of ETSI EN302502). So, the array size is taken as (161 - 52) / 4 ~= 30.
+ */
+#define NUM_DFS_CHANS 30
+
+/**
+ * enum channel_dfs_state - DFS  channel states.
+ * @CH_DFS_S_INVALID: The DFS state for invalid channel numbers that are not
+ *                    part of the radio's channel list.
+ * @CH_DFS_S_CAC_REQ: Indicates that the CAC/Off-channel CAC has to performed
+ *                    before Tx on the DFS channel.
+ * @CH_DFS_S_CAC_STARTED: Indicates that the CAC has been started for the DFS
+ *                        channel.
+ * @CH_DFS_S_CAC_COMPLETED: Indicates that the CAC has been completed for the
+ *                          DFS channel.
+ * @CH_DFS_S_NOL: Indicates that the DFS channel is in NOL.
+ * @CH_DFS_S_PRECAC_STARTED: Indicates that the PreCAC has been started for the
+ *                           DFS channel.
+ * @CH_DFS_S_PRECAC_COMPLETED: Indicates that the PreCAC has been completed for
+ *                             the DFS channel.
+ */
+enum channel_dfs_state {
+	CH_DFS_S_INVALID,
+	CH_DFS_S_CAC_REQ,
+	CH_DFS_S_CAC_STARTED,
+	CH_DFS_S_CAC_COMPLETED,
+	CH_DFS_S_NOL,
+	CH_DFS_S_PRECAC_STARTED,
+	CH_DFS_S_PRECAC_COMPLETED,
 };
 #endif

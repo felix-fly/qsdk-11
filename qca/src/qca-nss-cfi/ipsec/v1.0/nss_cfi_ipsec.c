@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -455,7 +455,7 @@ static int32_t nss_cfi_ipsec_trap_encap(struct sk_buff *skb, struct nss_cfi_cryp
 		fill_sa_fn = nss_cfi_ipsec_fill_v6_sa;
 		break;
 	default:
-		nss_cfi_warn("%p:invalid outer IP version (%d)\n", skb, outer_ip->version);
+		nss_cfi_warn("%px:invalid outer IP version (%d)\n", skb, outer_ip->version);
 		return -EINVAL;
 	}
 
@@ -735,7 +735,6 @@ static void nss_cfi_ipsec_data_cb(void *cb_ctx, struct sk_buff *skb)
 		goto drop;
 	}
 
-
 	skb->dev = dev;
 	skb->skb_iif = dev->ifindex;
 	skb->pkt_type = PACKET_HOST;
@@ -872,10 +871,8 @@ void __exit nss_cfi_ipsec_exit_module(void)
 	nss_cfi_info_always("NSS IPsec module unloaded\n");
 }
 
-
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("NSS IPsec offload glue");
 
 module_init(nss_cfi_ipsec_init_module);
 module_exit(nss_cfi_ipsec_exit_module);
-

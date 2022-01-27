@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -109,12 +109,8 @@ void host_diag_log_submit(void *plog_hdr_ptr)
 	uint16_t data_len;
 	uint16_t total_len;
 
-	if (cds_is_load_or_unload_in_progress()) {
-		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO,
-			  "%s: Unloading/Loading in Progress. Ignore!!!",
-			  __func__);
+	if (cds_is_load_or_unload_in_progress())
 		return;
-	}
 
 	if (nl_srv_is_initialized() != 0)
 		return;
@@ -200,13 +196,10 @@ void host_diag_event_report_payload(uint16_t event_Id, uint16_t length,
 	uint8_t *pBuf;
 	event_report_t *pEvent_report;
 	uint16_t total_len;
+	int ret;
 
-	if (cds_is_load_or_unload_in_progress()) {
-		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_INFO,
-			  "%s: Unloading/Loading in Progress. Ignore!!!",
-			  __func__);
+	if (cds_is_load_or_unload_in_progress())
 		return;
-	}
 
 	if (nl_srv_is_initialized() != 0)
 		return;
@@ -234,8 +227,9 @@ void host_diag_event_report_payload(uint16_t event_Id, uint16_t length,
 
 		memcpy(pBuf, pPayload, length);
 
-		if (ptt_sock_send_msg_to_app
-			    (wmsg, 0, ANI_NL_MSG_PUMAC, INVALID_PID) < 0) {
+		ret = ptt_sock_send_msg_to_app
+			    (wmsg, 0, ANI_NL_MSG_PUMAC, INVALID_PID);
+		if ((ret < 0) && (ret != -ESRCH)) {
 			QDF_TRACE(QDF_MODULE_ID_HDD, QDF_TRACE_LEVEL_WARN,
 				  "Ptt Socket error sending message to the app!!");
 			qdf_mem_free((void *)wmsg);
@@ -393,6 +387,21 @@ void host_log_acs_best_chan(uint16_t chan, uint16_t weight)
 
 	WLAN_HOST_DIAG_EVENT_REPORT(&acs_best_chan,
 				    EVENT_WLAN_ACS_BEST_CHANNEL);
+}
+
+void host_log_device_status(uint16_t status_code)
+{
+	WLAN_HOST_DIAG_EVENT_DEF(driver_status,
+				 host_event_wlan_bringup_status_payload_type);
+
+	driver_status.wlan_status = status_code;
+
+	/* driver version not used yet, fill properly if need later */
+	qdf_mem_zero(driver_status.driver_version,
+		     sizeof(driver_status.driver_version));
+
+	WLAN_HOST_DIAG_EVENT_REPORT(&driver_status,
+				    EVENT_WLAN_BRINGUP_STATUS);
 }
 
 #endif

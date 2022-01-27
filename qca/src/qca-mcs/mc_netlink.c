@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015, 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015, 2018-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -24,7 +24,12 @@
 #include "mc_netlink.h"
 
 static struct sock *mc_nl_sk = NULL;
+static __be32 event_pid = MC_INVALID_PID;
 
+/*
+ * mc_acltbl_update
+ *	update the acl rules table
+ */
 static void mc_acltbl_update(struct mc_struct *mc, void *param)
 {
 	int i;
@@ -145,6 +150,10 @@ out:
 	return;
 }
 
+/*
+ * mc_acltbl_flush
+ *	flush the acl rule table
+ */
 static void mc_acltbl_flush(struct mc_struct *mc, void *param)
 {
 	struct __mc_param_acl_rule *ar = (struct __mc_param_acl_rule *)param;
@@ -161,6 +170,10 @@ static void mc_acltbl_flush(struct mc_struct *mc, void *param)
 #endif
 }
 
+/*
+ * mc_acltbl_fillbuf
+ *	fill the acl rules table into the buf
+ */
 static int mc_acltbl_fillbuf(struct mc_struct *mc, void *buf,
 			     __be32 buflen, __be32 *bytes_written, __be32 *bytes_needed)
 {
@@ -223,7 +236,11 @@ out:
 	return ret;
 }
 
-/* call with rcu_read_lock() */
+/*
+ * mc_rtports_fillbuf
+ *	fill the buf with the root port info
+ *	called with rcu_read_lock()
+ */
 static int mc_rtports_fillbuf(struct mc_struct *mc, void *buf,
 			     __be32 buflen, __be32 *bytes_written, __be32 *bytes_needed)
 {
@@ -244,7 +261,7 @@ static int mc_rtports_fillbuf(struct mc_struct *mc, void *buf,
 				continue;
 
 			}
-			entry->ifindex = ((struct net_bridge_port *)qe->port)->dev->ifindex;
+			entry->ifindex = qe->ifindex;
 			entry->ipv4 = 1;
 			num++;
 			entry++;
@@ -263,12 +280,11 @@ static int mc_rtports_fillbuf(struct mc_struct *mc, void *buf,
 				continue;
 
 			}
-			entry->ifindex = ((struct net_bridge_port *)(qe->port))->dev->ifindex;
+			entry->ifindex = qe->ifindex;
 			entry->ipv4 = 0;
 			num++;
 			entry++;
 		}
-
 	}
 #endif
 
@@ -281,12 +297,15 @@ static int mc_rtports_fillbuf(struct mc_struct *mc, void *buf,
 		else
 			*bytes_needed = 0;
 	}
+
 	return ret;
-
-
 }
 
-/* call with rcu_read_lock() */
+/*
+ * mc_mdbtbl_fillbuf
+ *	fill the mdbtbl into the netlink message data buf
+ *	call with rcu_read_lock()
+ */
 static int mc_mdbtbl_fillbuf(struct mc_struct *mc, void *buf,
 			     __be32 buflen, __be32 *bytes_written, __be32 *bytes_needed)
 {
@@ -335,7 +354,7 @@ static int mc_mdbtbl_fillbuf(struct mc_struct *mc, void *buf,
 						memcpy(entry->srcs, fg->a.srcs, fg->a.nsrcs * sizeof(struct in6_addr));
 					}
 #endif
-					entry->ifindex = ((struct net_bridge_port *)pg->port)->dev->ifindex;
+					entry->ifindex = ((struct net_device *)pg->port)->ifindex;
 					entry->filter_mode = fg->filter_mode;
 					entry->aging = jiffies_to_msecs(now - fg->ageing_timer) / 1000;
 					entry->fdb_age_out = fg->fdb_age_out;
@@ -360,6 +379,11 @@ static int mc_mdbtbl_fillbuf(struct mc_struct *mc, void *buf,
 	return ret;
 }
 
+/*
+ * mc_find_entry_by_mdb
+ *	find a entry with the same ip address in the mdb
+ *	call with rcu_read_lock()
+ */
 static void *mc_find_entry_by_mdb(struct mc_struct *mc, struct mc_mdb_entry *mdb,
 				  __be32 entry_size, void *param, __be32 param_len)
 {
@@ -385,7 +409,11 @@ static void *mc_find_entry_by_mdb(struct mc_struct *mc, struct mc_mdb_entry *mdb
 	return NULL;
 }
 
-/*call with rcu_read_lock()*/
+/*
+ * mc_group_list_add
+ *	add group into a list
+ *	called with rcu_read_lock()
+ */
 static void mc_group_list_add(struct mc_ip *pgroup, struct mc_glist_entry **ghead)
 {
 	struct mc_glist_entry *pge;
@@ -401,6 +429,10 @@ static void mc_group_list_add(struct mc_ip *pgroup, struct mc_glist_entry **ghea
 	*ghead = pge;
 }
 
+/*
+ * mc_group_notify_one
+ *	notify a group to the listeners
+ */
 void mc_group_notify_one(struct mc_struct *mc, struct mc_ip *pgroup)
 {
 	struct net_device *brdev;
@@ -415,7 +447,7 @@ void mc_group_notify_one(struct mc_struct *mc, struct mc_ip *pgroup)
 		if (!ipv4_mc_event_cb)
 			return;
 
-		MC_PRINT("Group "MC_IP4_STR"  changed\n", MC_IP4_FMT((u8 *)&pgroup->u.ip4));
+		MC_PRINT("Group %pI4  changed\n", &pgroup->u.ip4);
 		ipv4_mc_event_cb(brdev, pgroup->u.ip4);
 	}
 #ifdef MC_SUPPORT_MLD
@@ -425,14 +457,18 @@ void mc_group_notify_one(struct mc_struct *mc, struct mc_ip *pgroup)
 		if (!ipv6_mc_event_cb)
 			return;
 
-		MC_PRINT("Group "MC_IP6_STR"  changed\n", MC_IP6_FMT((__be16 *)&pgroup->u.ip6));
+		MC_PRINT("Group %pI6  changed\n", &pgroup->u.ip6);
 		ipv6_mc_event_cb(brdev, &pgroup->u.ip6);
 	}
 #endif
 }
 
 
-/*call with lock-free*/
+/*
+ * mc_group_notify
+ *	notify all group in the list to listener
+ *	called with lock-free
+ */
 static void mc_group_notify(struct mc_struct *mc, struct mc_glist_entry **ghead)
 {
 	struct mc_glist_entry *pge;
@@ -450,6 +486,9 @@ static void mc_group_notify(struct mc_struct *mc, struct mc_glist_entry **ghead)
 
 }
 
+/*
+ * mc_set_psw_encap - set path selected way encapsulation
+ */
 static void mc_set_psw_encap(struct mc_struct *mc, void *param, __be32 param_len)
 {
 	int i, entry_cnt = param_len / sizeof(struct __mc_encaptbl_entry);
@@ -459,6 +498,7 @@ static void mc_set_psw_encap(struct mc_struct *mc, void *param, __be32 param_len
 	for (i = 0; i < MC_HASH_SIZE; i++) {
 		struct mc_mdb_entry *mdb;
 		struct hlist_node *mdbh;
+
 		os_hlist_for_each_entry_rcu(mdb, mdbh, &mc->hash[i], hlist) {
 			write_lock_bh(&mdb->rwlock);
 			if (entry_cnt && ((entry = mc_find_entry_by_mdb(mc, mdb,
@@ -474,6 +514,10 @@ static void mc_set_psw_encap(struct mc_struct *mc, void *param, __be32 param_len
 	}
 }
 
+/*
+ * mc_set_psw_flood
+ *	flood the path selected way in the whole mdb database
+ */
 static void mc_set_psw_flood(struct mc_struct *mc, void *param, __be32 param_len, struct mc_glist_entry **ghead)
 {
 	int i, entry_cnt = param_len / sizeof(struct __mc_floodtbl_entry);
@@ -485,6 +529,7 @@ static void mc_set_psw_flood(struct mc_struct *mc, void *param, __be32 param_len
 	for (i = 0; i < MC_HASH_SIZE; i++) {
 		struct mc_mdb_entry *mdb;
 		struct hlist_node *mdbh;
+
 		os_hlist_for_each_entry_rcu(mdb, mdbh, &mc->hash[i], hlist) {
 			entry_changed = 0;
 
@@ -512,6 +557,11 @@ static void mc_set_psw_flood(struct mc_struct *mc, void *param, __be32 param_len
 	}
 }
 
+/*
+ * __mc_netlink_receive
+ *	user space netlink message handler
+ *	rcu read lock proteced
+ */
 static void __mc_netlink_receive(struct sk_buff *__skb)
 {
 	struct net_device *brdev = NULL;
@@ -539,48 +589,55 @@ static void __mc_netlink_receive(struct sk_buff *__skb)
 	msgtype = nlh->nlmsg_type;
 
 	do {
-		brdev = dev_get_by_name(&init_net, msghdr->if_name);
+		/*
+		 * For global option to set, it needn't specified bridge
+		 */
+		if (msgtype == MC_MSG_SET_EVENT_PID) {
+			struct __event_info *p = msgdata;
 
+			event_pid = p->event_pid;
+			break;
+		}
+
+		brdev = dev_get_by_name(&init_net, msghdr->if_name);
 		if (!brdev) {
-			printk("Not a bridge device, or device not found: %s\n", msghdr->if_name);
 			msghdr->status = MC_STATUS_NOT_FOUND;
 			break;
 		}
 
-		if ((mc = MC_DEV(brdev)) == NULL && msgtype != MC_MSG_SET_ENABLE) {
-			printk("%s: mc module is not registered!\n", __func__);
+		/*
+		 * For enable/disable option, the handler make sure it won't
+		 * have two instance with same device.
+		 */
+		if ( msgtype == MC_MSG_SET_ENABLE) {
+			struct __mc_param_value *e = (struct __mc_param_value *)msgdata;
+
+			if (e->val) {
+				mc_attach(brdev);
+			} else {
+				mc_detach(brdev);
+			}
+			dev_put(brdev);
+			break;
+		}
+
+		/*
+		 * For mc instance option, it need find the instance before any setting
+		 */
+		mc = MC_DEV(brdev);
+		if (!mc) {
 			msghdr->status = MC_STATUS_FAILURE;
 			dev_put(brdev);
 			break;
 		}
 
 		switch (msgtype) {
-		case MC_MSG_SET_ENABLE:
-			{
-				struct __mc_param_value *e = (struct __mc_param_value *)msgdata;
-				if (e->val) {
-					if (mc_attach(brdev) == 0)
-						printk("%s: Enable bridge snooping!\n", __func__);
-					else
-						printk("%s: Failed to enable bridge snooping!\n", __func__);
-				} else {
-					mc_detach(brdev);
-					printk("%s: Disable bridge snooping!\n", __func__);
-				}
-			}
-			break;
-		case MC_MSG_SET_EVENT_PID:
-			{
-				struct __event_info *p = msgdata;
-				mc->event_pid = p->event_pid;
-				MC_PRINT(KERN_INFO "%s: Set event process id %d\n", __func__, p->event_pid);
-			}
-			break;
 		case MC_MSG_SET_DEBUG:
 			{
 				struct __mc_param_value *e = (struct __mc_param_value *)msgdata;
 				mc->debug = e->val;
-				MC_PRINT(KERN_INFO "%s: %s MC debug\n", __func__, e->val ? "Enable" : "Disable");
+				MC_PRINT(KERN_INFO "%s: %s MC[%s] debug\n",
+						__func__, e->val ? "Enable" : "Disable", brdev->name);
 			}
 			break;
 		case MC_MSG_SET_POLICY:
@@ -717,9 +774,11 @@ static void __mc_netlink_receive(struct sk_buff *__skb)
 			break;
 		case MC_MSG_GET_MDB:
 			{
+				spin_lock_bh(&mc->lock);
 				if (mc_mdbtbl_fillbuf(mc, msgdata, msghdr->buf_len,
 							&msghdr->bytes_written, &msghdr->bytes_needed))
 					msghdr->status = MC_STATUS_BUFFER_OVERFLOW;
+				spin_unlock_bh(&mc->lock);
 			}
 			break;
 		case MC_MSG_SET_ROUTER:
@@ -741,7 +800,9 @@ static void __mc_netlink_receive(struct sk_buff *__skb)
 			msghdr->status = MC_STATUS_INVALID_PARAMETER;
 			break;
 		} /* switch */
+
 		dev_put(brdev);
+
 	} while (0);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
@@ -753,7 +814,11 @@ static void __mc_netlink_receive(struct sk_buff *__skb)
 	netlink_unicast(mc_nl_sk, skb, pid, MSG_DONTWAIT);
 }
 
-
+/*
+ * mc_netlink_receive
+ *	netlink message receiver
+ *	the entry of netlink message, rcu protected the further process
+ */
 static void mc_netlink_receive(struct sk_buff *__skb)
 {
 	rcu_read_lock();
@@ -761,23 +826,28 @@ static void mc_netlink_receive(struct sk_buff *__skb)
 	rcu_read_unlock();
 }
 
-
+/*
+ * mc_netlink_event_send - send a event to user space by netlink message
+ */
 void mc_netlink_event_send(struct mc_struct *mc, u32 event_type, u32 event_len, void *event_data)
 {
 	struct sk_buff *skb;
 	struct nlmsghdr *nlh;
+	struct __mcctl_msg_header *data;
 	int send_msg = 1;
 
-	if (!mc || mc->event_pid == MC_INVALID_PID ||
+	if (!mc || event_pid == MC_INVALID_PID ||
 			event_type >= MC_EVENT_MAX)
 		return;
 
-	if ((skb = nlmsg_new(event_len, gfp_any())) == NULL) {
+	skb = nlmsg_new(event_len + MC_MSG_HDRLEN, gfp_any());
+	if (!skb) {
 		MC_PRINT("nlmsg_new failed, event_type=%d\n", event_type);
 		return;
 	}
 
-	if ((nlh = nlmsg_put(skb, mc->event_pid, 0, event_type, event_len, 0)) == NULL) {
+	nlh = nlmsg_put(skb, event_pid, 0, event_type, event_len + MC_MSG_HDRLEN, 0);
+	if (!nlh) {
 		MC_PRINT("nlmsg_put failed, event_type=%d\n", event_type);
 		kfree_skb(skb);
 		return;
@@ -785,7 +855,8 @@ void mc_netlink_event_send(struct mc_struct *mc, u32 event_type, u32 event_len, 
 
 	switch (event_type) {
 	case MC_EVENT_MDB_UPDATED:
-		/* No data; recipient needs to ask for the updated mdb table */
+		data = NLMSG_DATA(nlh);
+		memcpy(data->if_name, mc->dev->name, IFNAMSIZ);
 		break;
 
 	default:
@@ -802,10 +873,14 @@ void mc_netlink_event_send(struct mc_struct *mc, u32 event_type, u32 event_len, 
 		NETLINK_CB(skb).pid = 0; /* from kernel */
 #endif
 		NETLINK_CB(skb).dst_group = 0; /* unicast */
-		netlink_unicast(mc_nl_sk, skb, mc->event_pid, MSG_DONTWAIT);
+		netlink_unicast(mc_nl_sk, skb, event_pid, MSG_DONTWAIT);
 	}
 }
 
+/*
+ * mc_netlink_init
+ *	netlink process module init
+ */
 int __init mc_netlink_init(void)
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0))
@@ -833,6 +908,10 @@ err:
 	return -ENODEV;
 }
 
+/*
+ * mc_netlink_exit
+ *	netlink process module exit
+ */
 void mc_netlink_exit(void)
 {
 	if (mc_nl_sk) {

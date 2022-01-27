@@ -737,7 +737,7 @@ static sw_error_t hnat_add_host_route(
 
 	memset(&host_route, 0, sizeof(fal_host_route_t));
 
-	fal_ip_host_route_get(0, 0, &host_route);
+	IP_HOST_ROUTE_GET(0, 0, &host_route);
 	if ((host_route.route_addr.ip4_addr == ip_addr) &&
 	    (host_route.prefix_length == prefix_len) &&
 	    host_route.valid)
@@ -749,7 +749,7 @@ static sw_error_t hnat_add_host_route(
 	host_route.route_addr.ip4_addr = ip_addr;
 	host_route.prefix_length = prefix_len;
 
-	return fal_ip_host_route_set(0, 0, &host_route);
+	return IP_HOST_ROUTE_ADD(0, 0, &host_route);
 }
 static sw_error_t setup_interface_entry(char *list_if, int is_wan)
 {
@@ -931,13 +931,13 @@ static void setup_dev_list(void)
 				HNAT_PRINTK("wan port vid:%d\n", tmp_vid);
 				nat_wan_vid = tmp_vid;
 				snprintf(nat_wan_dev_list, IFNAMSIZ*5,
-					 "eth0.%d eth0 pppoe-wan erouter0 br-wan",
-					 tmp_vid);
+					 "eth0.%d eth1.%d eth0 pppoe-wan erouter0 br-wan",
+					 tmp_vid, tmp_vid);
 			} else {
 				/*lan port*/
 				HNAT_PRINTK("lan port vid:%d\n", tmp_vid);
 				nat_lan_vid = tmp_vid;
-				snprintf(nat_lan_dev_list, IFNAMSIZ*4, "eth0.%d eth1 eth1.%d br-lan",
+				snprintf(nat_lan_dev_list, IFNAMSIZ*4, "eth0.%d eth1.%d eth1 br-lan",
 					tmp_vid, tmp_vid);
 			}
 		}
@@ -1088,7 +1088,7 @@ static void pppoev6_mac6_loop_dev(void)
 
     /* PPPoE entry 0 */
 	entry = PPPOEV6_SESSION_ID;
-	HSL_REG_ENTRY_SET(rv, 0, PPPOE_EDIT, 0, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
+	REG_ENTRY_SET(rv, 0, PPPOE_EDIT, 0, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 
     aos_printk("%s: end of function... \n", __func__);
 }
@@ -1101,7 +1101,7 @@ static void pppoev6_remove_parser(uint32_t entry_id)
     aos_printk("%s: clear entry id: %d\n", __func__, entry_id);
     /* clear the session id in the PPPoE parser engine */
 	entry = 0;
-	HSL_REG_ENTRY_SET(rv, 0, PPPOE_SESSION,
+	REG_ENTRY_SET(rv, 0, PPPOE_SESSION,
 					entry_id, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 }
 
@@ -1122,15 +1122,15 @@ static void pppoev6_mac6_stop_learning(void)
 
 
     /* clear the MAC6 learning bit */
-	HSL_REG_ENTRY_GET(rv, 0, PORT_LOOKUP_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
+	REG_ENTRY_GET(rv, 0, PORT_LOOKUP_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 	entry = entry & ~(1<<20);
-	HSL_REG_ENTRY_SET(rv, 0, PORT_LOOKUP_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
+	REG_ENTRY_SET(rv, 0, PORT_LOOKUP_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 
     /* force loopback mode */
 	entry = 0x7e;
-	HSL_REG_ENTRY_SET(rv, 0, PORT_STATUS, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
+	REG_ENTRY_SET(rv, 0, PORT_STATUS, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 	entry = 0x10;
-	HSL_REG_ENTRY_SET(rv, 0, PORT_HDR_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
+	REG_ENTRY_SET(rv, 0, PORT_HDR_CTL, 6, (a_uint8_t *) (&entry), sizeof (a_uint32_t));
 }
 #endif
 #endif // ifdef ISIS
@@ -1453,7 +1453,7 @@ arp_add(struct nat_helper_bg_msg *msg)
 
     smac = arp_info->mac;
     aos_mem_copy(&(entry.addr), smac, sizeof(fal_mac_addr_t));
-    if(fal_fdb_entry_search(0, &entry) == SW_OK) {
+    if(FDB_ENTRY_SEARCH(0, &entry) == SW_OK) {
         vid  = entry.fid;
         sport = 0;
         while (sport < 32) {
@@ -2012,7 +2012,7 @@ static unsigned int ipv6_bg_handle(struct nat_helper_bg_msg *msg)
             smac = skb_mac_header(skb) + MAC_LEN;
             aos_mem_copy(&(entry.addr), smac, sizeof(fal_mac_addr_t));
 
-            if(fal_fdb_entry_search(0, &entry) == SW_OK) {
+            if(FDB_ENTRY_SEARCH(0, &entry) == SW_OK) {
                 vid  = entry.fid;
                 sport = 0;
                 while (sport < 32) {

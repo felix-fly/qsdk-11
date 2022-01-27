@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -13,6 +13,7 @@
  */
 
 
+/*qca808x_start*/
 
 #ifndef _SCOMPHY_REG_ACCESS_H_
 #define _SCOMPHY_REG_ACCESS_H_
@@ -30,9 +31,27 @@ scomphy_phy_get(a_uint32_t dev_id, a_uint32_t phy_addr,
 sw_error_t
 scomphy_phy_set(a_uint32_t dev_id, a_uint32_t phy_addr,
 		a_uint32_t reg, a_uint16_t value);
+/*qca808x_end*/
 
 sw_error_t
-scomphy_reg_access_init(a_uint32_t dev_id, hsl_access_mode mode);
+scomphy_reg_get(a_uint32_t dev_id, a_uint32_t reg_addr,
+		a_uint8_t *val, a_uint32_t len);
+
+sw_error_t
+scomphy_reg_set(a_uint32_t dev_id, a_uint32_t reg_addr,
+		a_uint8_t *val, a_uint32_t len);
+
+sw_error_t
+scomphy_uniphy_reg_get(a_uint32_t dev_id, a_uint32_t index,
+		a_uint32_t reg_addr, a_uint8_t *val, a_uint32_t len);
+
+sw_error_t
+scomphy_uniphy_reg_set(a_uint32_t dev_id, a_uint32_t index,
+		a_uint32_t reg_addr, a_uint8_t *val, a_uint32_t len);
+
+/*qca808x_start*/
+sw_error_t
+scomphy_reg_access_init(a_uint32_t dev_id, ssdk_init_cfg *cfg);
 
 
 #ifdef __cplusplus
@@ -40,4 +59,4 @@ scomphy_reg_access_init(a_uint32_t dev_id, hsl_access_mode mode);
 #endif /* __cplusplus */
 
 #endif /* _SCOMPHY_REG_ACCESS_H_ */
-
+/*qca808x_end*/

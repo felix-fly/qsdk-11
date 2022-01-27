@@ -53,7 +53,7 @@ static int ipv6_mc_check_exthdrs(struct sk_buff *skb)
 
 	ip6h = ipv6_hdr(skb);
 
-	if (ip6h->nexthdr != IPPROTO_HOPOPTS && ip6h->nexthdr != IPPROTO_ICMPV6)
+	if (ip6h->nexthdr != IPPROTO_HOPOPTS)
 		return -ENOMSG;
 
 	nexthdr = ip6h->nexthdr;
@@ -62,6 +62,9 @@ static int ipv6_mc_check_exthdrs(struct sk_buff *skb)
 
 	if (offset < 0)
 		return -EINVAL;
+
+	if (nexthdr != IPPROTO_ICMPV6)
+		return -ENOMSG;
 
 	skb_set_transport_header(skb, offset);
 
@@ -117,7 +120,6 @@ static int ipv6_mc_check_mld_msg(struct sk_buff *skb)
 	switch (mld->mld_type) {
 	case ICMPV6_MGM_REDUCTION:
 	case ICMPV6_MGM_REPORT:
-	case ICMPV6_NDISC_NBR_SOLICITATION:
 		/* fall through */
 		return 0;
 	case ICMPV6_MLD2_REPORT:

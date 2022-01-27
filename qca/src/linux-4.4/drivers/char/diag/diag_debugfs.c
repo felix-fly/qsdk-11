@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,7 +25,7 @@
 #include "diagfwd_hsic.h"
 #include "diagfwd_smux.h"
 #endif
-#ifdef CONFIG_MSM_MHI
+#ifdef CONFIG_MHI_BUS
 #include "diagfwd_mhi.h"
 #endif
 #include "diagmem.h"
@@ -54,7 +54,7 @@ static int diag_dbgfs_bridgeinfo_index;
 static int diag_dbgfs_finished;
 static int diag_dbgfs_dci_data_index;
 static int diag_dbgfs_dci_finished;
-
+static struct mutex diag_dci_dbgfs_mutex;
 static ssize_t diag_dbgfs_read_status(struct file *file, char __user *ubuf,
 				      size_t count, loff_t *ppos)
 {
@@ -155,6 +155,7 @@ static ssize_t diag_dbgfs_read_dcistats(struct file *file,
 	buf_size = ksize(buf);
 	bytes_remaining = buf_size;
 
+	mutex_lock(&diag_dci_dbgfs_mutex);
 	if (diag_dbgfs_dci_data_index == 0) {
 		bytes_written =
 			scnprintf(buf, buf_size,
@@ -174,6 +175,7 @@ static ssize_t diag_dbgfs_read_dcistats(struct file *file,
 		bytes_in_buf += bytes_written;
 		bytes_remaining -= bytes_written;
 #endif
+#ifdef CONFIG_PM
 		bytes_written = scnprintf(buf+bytes_in_buf,
 					  bytes_remaining,
 					  "dci power: active, relax: %lu, %lu\n",
@@ -183,7 +185,7 @@ static ssize_t diag_dbgfs_read_dcistats(struct file *file,
 						power.wakeup->relax_count);
 		bytes_in_buf += bytes_written;
 		bytes_remaining -= bytes_written;
-
+#endif
 	}
 	temp_data += diag_dbgfs_dci_data_index;
 	for (i = diag_dbgfs_dci_data_index; i < DIAG_DCI_DEBUG_CNT; i++) {
@@ -210,8 +212,8 @@ static ssize_t diag_dbgfs_read_dcistats(struct file *file,
 		}
 		temp_data++;
 	}
-
 	diag_dbgfs_dci_data_index = (i >= DIAG_DCI_DEBUG_CNT) ? 0 : i + 1;
+	mutex_unlock(&diag_dci_dbgfs_mutex);
 	bytes_written = simple_read_from_buffer(ubuf, count, ppos, buf,
 								bytes_in_buf);
 	kfree(buf);
@@ -219,6 +221,7 @@ static ssize_t diag_dbgfs_read_dcistats(struct file *file,
 	return bytes_written;
 }
 
+#ifdef CONFIG_PM
 static ssize_t diag_dbgfs_read_power(struct file *file, char __user *ubuf,
 				     size_t count, loff_t *ppos)
 {
@@ -256,7 +259,7 @@ static ssize_t diag_dbgfs_read_power(struct file *file, char __user *ubuf,
 	kfree(buf);
 	return ret;
 }
-
+#endif
 static ssize_t diag_dbgfs_read_table(struct file *file, char __user *ubuf,
 				     size_t count, loff_t *ppos)
 {
@@ -798,7 +801,7 @@ const struct file_operations diag_dbgfs_hsicinfo_ops = {
 	.read = diag_dbgfs_read_hsicinfo,
 };
 #endif
-#ifdef CONFIG_MSM_MHI
+#ifdef CONFIG_MHI_BUS
 static ssize_t diag_dbgfs_read_mhiinfo(struct file *file, char __user *ubuf,
 				       size_t count, loff_t *ppos)
 {
@@ -830,24 +833,22 @@ static ssize_t diag_dbgfs_read_mhiinfo(struct file *file, char __user *ubuf,
 		bytes_written = scnprintf(buf+bytes_in_buffer, bytes_remaining,
 			"id: %d\n"
 			"name: %s\n"
+			"enabled %d\n"
 			"bridge index: %s\n"
 			"mempool: %s\n"
 			"read ch opened: %d\n"
-			"read ch hdl: %pK\n"
 			"write ch opened: %d\n"
-			"write ch hdl: %pK\n"
 			"read work pending: %d\n"
 			"read done work pending: %d\n"
 			"open work pending: %d\n"
 			"close work pending: %d\n\n",
 			mhi_info->id,
 			mhi_info->name,
+			mhi_info->enabled,
 			DIAG_BRIDGE_GET_NAME(mhi_info->dev_id),
 			DIAG_MEMPOOL_GET_NAME(mhi_info->mempool),
 			atomic_read(&mhi_info->read_ch.opened),
-			mhi_info->read_ch.hdl,
 			atomic_read(&mhi_info->write_ch.opened),
-			mhi_info->write_ch.hdl,
 			work_pending(&mhi_info->read_work),
 			work_pending(&mhi_info->read_done_work),
 			work_pending(&mhi_info->open_work),
@@ -975,9 +976,11 @@ const struct file_operations diag_dbgfs_dcistats_ops = {
 	.read = diag_dbgfs_read_dcistats,
 };
 
+#ifdef CONFIG_PM
 const struct file_operations diag_dbgfs_power_ops = {
 	.read = diag_dbgfs_read_power,
 };
+#endif
 
 const struct file_operations diag_dbgfs_debug_ops = {
 	.write = diag_dbgfs_write_debug
@@ -1025,12 +1028,12 @@ int diag_debugfs_init(void)
 				    &diag_dbgfs_dcistats_ops);
 	if (!entry)
 		goto err;
-
+#ifdef CONFIG_PM
 	entry = debugfs_create_file("power", 0444, diag_dbgfs_dent, 0,
 				    &diag_dbgfs_power_ops);
 	if (!entry)
 		goto err;
-
+#endif
 	entry = debugfs_create_file("debug", 0444, diag_dbgfs_dent, 0,
 				    &diag_dbgfs_debug_ops);
 	if (!entry)
@@ -1047,7 +1050,7 @@ int diag_debugfs_init(void)
 	if (!entry)
 		goto err;
 #endif
-#ifdef CONFIG_MSM_MHI
+#ifdef CONFIG_MHI_BUS
 	entry = debugfs_create_file("mhiinfo", 0444, diag_dbgfs_dent, 0,
 				    &diag_dbgfs_mhiinfo_ops);
 	if (!entry)
@@ -1075,6 +1078,7 @@ int diag_debugfs_init(void)
 		pr_warn("diag: could not allocate memory for dci debug info\n");
 
 	mutex_init(&dci_stat_mutex);
+	mutex_init(&diag_dci_dbgfs_mutex);
 	return 0;
 err:
 	kfree(dci_traffic);
@@ -1091,6 +1095,7 @@ void diag_debugfs_cleanup(void)
 
 	kfree(dci_traffic);
 	mutex_destroy(&dci_stat_mutex);
+	mutex_destroy(&diag_dci_dbgfs_mutex);
 }
 #else
 int diag_debugfs_init(void) { return 0; }

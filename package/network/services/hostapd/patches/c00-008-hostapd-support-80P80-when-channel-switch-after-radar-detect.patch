@@ -1,7 +1,6 @@
-diff --git a/src/ap/dfs.c b/src/ap/dfs.c
 --- a/src/ap/dfs.c
 +++ b/src/ap/dfs.c
-@@ -263,8 +263,13 @@ static void dfs_adjust_center_freq(struct hostapd_iface *iface,
+@@ -263,8 +263,13 @@ static void dfs_adjust_center_freq(struc
  	case CHANWIDTH_160MHZ:
  		*oper_centr_freq_seg0_idx = chan->chan + 14;
  		break;
@@ -16,7 +15,7 @@ diff --git a/src/ap/dfs.c b/src/ap/dfs.c
  		*oper_centr_freq_seg0_idx = 0;
  		break;
  	}
-@@ -443,8 +448,10 @@ dfs_get_valid_channel(struct hostapd_iface *iface,
+@@ -443,8 +448,10 @@ dfs_get_valid_channel(struct hostapd_ifa
  {
  	struct hostapd_hw_modes *mode;
  	struct hostapd_channel_data *chan = NULL;
@@ -28,7 +27,7 @@ diff --git a/src/ap/dfs.c b/src/ap/dfs.c
  	u32 _rand;
  
  	wpa_printf(MSG_DEBUG, "DFS: Selecting random channel");
-@@ -475,8 +482,25 @@ dfs_get_valid_channel(struct hostapd_iface *iface,
+@@ -475,8 +482,25 @@ dfs_get_valid_channel(struct hostapd_ifa
  	else
  		*secondary_channel = 0;
  
@@ -55,6 +54,3 @@ diff --git a/src/ap/dfs.c b/src/ap/dfs.c
  			       oper_centr_freq_seg0_idx,
  			       oper_centr_freq_seg1_idx);
  
--- 
-2.7.4
-

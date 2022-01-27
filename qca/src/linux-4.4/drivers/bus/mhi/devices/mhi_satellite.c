@@ -809,7 +809,7 @@ static struct rpmsg_driver mhi_sat_rpmsg_driver = {
 };
 
 static void mhi_sat_dev_status_cb(struct mhi_device *mhi_dev,
-				  enum MHI_CB mhi_cb)
+				  enum mhi_callback mhi_cb)
 {
 }
 

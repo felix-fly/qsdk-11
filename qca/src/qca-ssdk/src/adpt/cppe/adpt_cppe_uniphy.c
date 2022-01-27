@@ -32,8 +32,6 @@
 #include "adpt_cppe_portctrl.h"
 #include "adpt_cppe_uniphy.h"
 
-#ifdef HAWKEYE_CHIP
-
 static sw_error_t
 __adpt_cppe_uniphy_reset(a_uint32_t dev_id, a_uint32_t uniphy_index)
 {
@@ -300,7 +298,6 @@ __adpt_cppe_uniphy_mode_set(a_uint32_t dev_id,
 
 	return rv;
 }
-#endif
 
 /**
  * @}

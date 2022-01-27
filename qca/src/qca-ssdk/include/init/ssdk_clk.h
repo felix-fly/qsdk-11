@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017, 2019-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -94,6 +94,21 @@ enum unphy_rst_type {
 #define NSS_PTP_REF_CLK	"gcc_nss_ptp_ref_clk"
 #define SNOC_NSSNOC_CLK	"gcc_snoc_nssnoc_clk"
 
+#define UNIPHY_AHB_CLK	"uniphy_ahb_clk"
+#define UNIPHY_SYS_CLK	"uniphy_sys_clk"
+#define MP_UNIPHY_SYS_CLK_RATE	24000000
+#define MDIO0_AHB_CLK		"gcc_mdio0_ahb_clk"
+#define MDIO1_AHB_CLK		"gcc_mdio1_ahb_clk"
+#define GMAC0_CFG_CLK		"gcc_gmac0_cfg_clk"
+#define GMAC0_SYS_CLK		"gcc_gmac0_sys_clk"
+#define GMAC1_CFG_CLK		"gcc_gmac1_cfg_clk"
+#define GMAC1_SYS_CLK		"gcc_gmac1_sys_clk"
+#define SNOC_GMAC0_AHB_CLK		"gcc_snoc_gmac0_ahb_clk"
+#define SNOC_GMAC1_AHB_CLK		"gcc_snoc_gmac1_ahb_clk"
+#define GMAC0_PTP_CLK		"gcc_gmac0_ptp_clk"
+#define GMAC1_PTP_CLK		"gcc_gmac1_ptp_clk"
+#define GMAC_CLK_RATE		240000000
+
 #define NSS_PORT1_RX_CLK	"nss_port1_rx_clk"
 #define NSS_PORT1_TX_CLK	"nss_port1_tx_clk"
 #define NSS_PORT2_RX_CLK	"nss_port2_rx_clk"
@@ -155,39 +170,85 @@ enum unphy_clk_type {
 	UNIPHYT_CLK_MAX
 };
 
-#define UNIPHY_AHB_CLK_RATE	100000000
-#define UNIPHY_SYS_CLK_RATE	19200000
-#define CPPE_UNIPHY_SYS_CLK_RATE	24000000
-#define PPE_CLK_RATE	300000000
-#define MDIO_AHB_RATE	100000000
-#define NSS_NOC_RATE	461500000
-#define NSSNOC_SNOC_RATE	266670000
-#define NSS_IMEM_RATE	400000000
-#define PTP_REF_RARE	150000000
-#define NSS_AXI_RATE	461500000
-#define NSS_PORT5_DFLT_RATE 19200000
+enum cmnblk_clk_type {
+	INTERNAL_48MHZ = 0,
+	EXTERNAL_25MHZ,
+	EXTERNAL_31250KHZ,
+	EXTERNAL_40MHZ,
+	EXTERNAL_48MHZ,
+	EXTERNAL_50MHZ,
+	INTERNAL_96MHZ,
+};
 
-#define UNIPHY_CLK_RATE_125M		125000000
-#define UNIPHY_CLK_RATE_312M		312500000
-#define UNIPHY_DEFAULT_RATE		UNIPHY_CLK_RATE_125M
+enum cmnblk_pll_src_type {
+	CMN_BLK_PLL_SRC_SEL_FROM_REG = 0,
+	CMN_BLK_PLL_SRC_SEL_FROM_LOGIC = 1,
+	CMN_BLK_PLL_SRC_SEL_FROM_PCS = 2,
+};
 
-#define PQSGMII_SPEED_10M_CLK		2500000
-#define PQSGMII_SPEED_100M_CLK	25000000
-#define PQSGMII_SPEED_1000M_CLK	125000000
-#define USXGMII_SPEED_10M_CLK		1250000
-#define USXGMII_SPEED_100M_CLK	12500000
-#define USXGMII_SPEED_1000M_CLK	125000000
-#define USXGMII_SPEED_2500M_CLK	78125000
-#define USXGMII_SPEED_5000M_CLK	156250000
-#define USXGMII_SPEED_10000M_CLK	312500000
-#define SGMII_PLUS_SPEED_2500M_CLK	312500000
-#define SGMII_SPEED_10M_CLK	2500000
-#define SGMII_SPEED_100M_CLK	25000000
-#define SGMII_SPEED_1000M_CLK	125000000
+enum mp_bcr_rst_type {
+	GEPHY_BCR_RESET_E = 0,
+	UNIPHY_BCR_RESET_E,
+	GMAC0_BCR_RESET_E,
+	GMAC1_BCR_RESET_E,
+	GEPHY_MISC_RESET_E,
+	MP_BCR_RST_MAX
+};
 
-#define CPPE_XGMAC_CLK_REG	0x0194900c
-#define CPPE_XGMAC_CLK_SIZE	0x10
-#define CPPE_XGMAC_CLK_ENABLE	0x20
+#define GEHPY_BCR_RESET_ID	"gephy_bcr_rst"
+#define UNIPHY_BCR_RESET_ID	"uniphy_bcr_rst"
+#define GMAC0_BCR_RESET_ID	"gmac0_bcr_rst"
+#define GMAC1_BCR_RESET_ID	"gmac1_bcr_rst"
+#define GEPHY_MISC_RESET_ID	"gephy_misc_rst"
+
+#define CMN_BLK_ADDR                0x0009B780
+#define CMN_BLK_PLL_SRC_ADDR        0x0009B028
+#define CMN_BLK_SIZE                0x100
+#define PLL_CTRL_SRC_MASK           0xfffffcff
+#define PLL_REFCLK_DIV_MASK         0xfffffe0f
+#define PLL_REFCLK_DIV_2            0x20
+#define FREQUENCY_MASK              0xfffffdf0
+#define INTERNAL_48MHZ_CLOCK        0x7
+#define EXTERNAL_25MHZ_CLOCK        0x203
+#define EXTERNAL_31250KHZ_CLOCK     0x204
+#define EXTERNAL_40MHZ_CLOCK        0x206
+#define EXTERNAL_48MHZ_CLOCK        0x207
+#define EXTERNAL_50MHZ_CLOCK        0x208
+#define UNIPHY_AHB_CLK_RATE         100000000
+#define UNIPHY_SYS_CLK_RATE         19200000
+#define CPPE_UNIPHY_SYS_CLK_RATE    24000000
+#define PPE_CLK_RATE                300000000
+#define MDIO_AHB_RATE               100000000
+#define NSS_NOC_RATE                461500000
+#define NSSNOC_SNOC_RATE            266670000
+#define NSS_IMEM_RATE               400000000
+#define PTP_REF_RARE                150000000
+#define NSS_AXI_RATE                461500000
+#define NSS_PORT5_DFLT_RATE         19200000
+
+#define UNIPHY_CLK_RATE_25M         25000000
+#define UNIPHY_CLK_RATE_50M         50000000
+#define UNIPHY_CLK_RATE_125M        125000000
+#define UNIPHY_CLK_RATE_312M        312500000
+#define UNIPHY_DEFAULT_RATE         UNIPHY_CLK_RATE_125M
+
+#define PQSGMII_SPEED_10M_CLK       2500000
+#define PQSGMII_SPEED_100M_CLK      25000000
+#define PQSGMII_SPEED_1000M_CLK     125000000
+#define USXGMII_SPEED_10M_CLK       1250000
+#define USXGMII_SPEED_100M_CLK      12500000
+#define USXGMII_SPEED_1000M_CLK     125000000
+#define USXGMII_SPEED_2500M_CLK     78125000
+#define USXGMII_SPEED_5000M_CLK     156250000
+#define USXGMII_SPEED_10000M_CLK    312500000
+#define SGMII_PLUS_SPEED_2500M_CLK  312500000
+#define SGMII_SPEED_10M_CLK         2500000
+#define SGMII_SPEED_100M_CLK        25000000
+#define SGMII_SPEED_1000M_CLK       125000000
+
+#define CPPE_XGMAC_CLK_REG          0x0194900c
+#define CPPE_XGMAC_CLK_SIZE         0x10
+#define CPPE_XGMAC_CLK_ENABLE       0x20
 
 enum {
 	UNIPHY_RX = 0,
@@ -204,7 +265,7 @@ void ssdk_port_reset(
 	a_uint32_t port_id,
 	a_uint32_t action);
 
-#if defined(HPPE)
+#if defined(HPPE) || defined(MP)
 void
 qca_gcc_mac_port_clock_set(a_uint32_t dev_id, a_uint32_t port_id,
                                 a_bool_t enable);
@@ -212,24 +273,37 @@ qca_gcc_mac_port_clock_set(a_uint32_t dev_id, a_uint32_t port_id,
 void
 qca_gcc_uniphy_port_clock_set(a_uint32_t dev_id, a_uint32_t uniphy_index,
                                 a_uint32_t port_id, a_bool_t enable);
-void ssdk_ppe_clock_init(void);
-void ssdk_uniphy_raw_clock_reset(a_uint8_t uniphy_index);
-void ssdk_uniphy_raw_clock_set(
-	a_uint8_t uniphy_index,
-	a_uint8_t direction,
-	a_uint32_t clock);
+void ssdk_gcc_clock_init(void);
 void
 ssdk_port_speed_clock_set(
 	a_uint32_t dev_id,
 	a_uint32_t port_id,
 	a_uint32_t rate);
-
-void ssdk_ppe_reset_init(void);
-sw_error_t
-qca_cppe_fpga_xgmac_clock_enable(a_uint32_t dev_id);
 void ssdk_port_mac_clock_reset(
 	a_uint32_t dev_id,
 	a_uint32_t port_id);
+#endif
+
+#if defined(HPPE)
+void ssdk_ppe_reset_init(void);
+void ssdk_uniphy_raw_clock_reset(a_uint8_t uniphy_index);
+void ssdk_uniphy_raw_clock_set(
+	a_uint8_t uniphy_index,
+	a_uint8_t direction,
+	a_uint32_t clock);
+void ssdk_gcc_uniphy_sys_set(a_uint32_t dev_id, a_uint32_t uniphy_index,
+	a_bool_t enable);
+void ssdk_uniphy_port5_clock_source_set(void);
+#endif
+
+#if defined(MP)
+void ssdk_mp_raw_clock_set(
+	a_uint8_t uniphy_index,
+	a_uint8_t direction,
+	a_uint32_t clock);
+void ssdk_mp_gephy_icc_efuse_load_enable(
+	a_bool_t enable);
+
 #endif
 
 #ifdef __cplusplus

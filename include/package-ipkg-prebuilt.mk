@@ -26,6 +26,7 @@ ifeq ($(DUMP),)
       ifeq ($(if $(VARIANT),$(BUILD_VARIANT)),$(VARIANT))
         ifdef Package/$(1)/install
           ifneq ($(CONFIG_PACKAGE_$(1))$(SDK)$(DEVELOPER),)
+	    IPKGS += $(1)
 
             ifeq ($(CONFIG_PACKAGE_$(1)),y)
               .PHONY: $(PKG_INSTALL_STAMP).$(1)

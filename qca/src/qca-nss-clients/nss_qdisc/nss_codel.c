@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014, 2016-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014, 2016-2018, 2020,  The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -76,9 +76,18 @@ static struct nla_policy nss_codel_policy[TCA_NSSCODEL_MAX + 1] = {
  * nss_codel_enqueue()
  *	Enqueue a packet into nss_codel queue in NSS firmware (bounce).
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 static int nss_codel_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+#else
+static int nss_codel_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+				struct sk_buff **to_free)
+#endif
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	return nss_qdisc_enqueue(skb, sch);
+#else
+	return nss_qdisc_enqueue(skb, sch, to_free);
+#endif
 }
 
 /*
@@ -90,6 +99,7 @@ static struct sk_buff *nss_codel_dequeue(struct Qdisc *sch)
 	return nss_qdisc_dequeue(sch);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 /*
  * nss_codel_drop()
  *	Drops a packet from the bounce complete queue.
@@ -100,6 +110,7 @@ static unsigned int nss_codel_drop(struct Qdisc *sch)
 {
 	return nss_qdisc_drop(sch);
 }
+#endif
 
 /*
  * nss_codel_reset()
@@ -234,9 +245,15 @@ static int nss_codel_mem_sz_get(struct Qdisc *sch, struct tc_nsscodel_qopt *qopt
  * nss_codel_change()
  *	Used to configure the nss_codel queue in NSS firmware.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 static int nss_codel_change(struct Qdisc *sch, struct nlattr *opt)
+#else
+static int nss_codel_change(struct Qdisc *sch, struct nlattr *opt,
+				struct netlink_ext_ack *extack)
+#endif
 {
 	struct nss_codel_sched_data *q = qdisc_priv(sch);
+	struct nlattr *tb[TCA_NSSCODEL_MAX + 1];
 	struct tc_nsscodel_qopt *qopt;
 	struct nss_if_msg nim;
 	struct net_device *dev = qdisc_dev(sch);
@@ -245,7 +262,11 @@ static int nss_codel_change(struct Qdisc *sch, struct nlattr *opt)
 	struct nss_shaper_node_config *config;
 	bool free_flow_queue = true;
 
-	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, tb, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS);
+#else
+	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, tb, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS, extack);
+#endif
 	if (!qopt) {
 		return -EINVAL;
 	}
@@ -381,16 +402,28 @@ fail:
  * nss_codel_init()
  *	Initializes the nss_codel qdisc.
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 static int nss_codel_init(struct Qdisc *sch, struct nlattr *opt)
 {
+	struct netlink_ext_ack *extack = NULL;
+#else
+static int nss_codel_init(struct Qdisc *sch, struct nlattr *opt,
+				struct netlink_ext_ack *extack)
+{
+#endif
 	struct nss_qdisc *nq = qdisc_priv(sch);
+	struct nlattr *tb[TCA_NSSCODEL_MAX + 1];
 	struct tc_nsscodel_qopt *qopt;
 
 	if (!opt) {
 		return -EINVAL;
 	}
 
-	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, tb, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS);
+#else
+	qopt = nss_qdisc_qopt_get(opt, nss_codel_policy, tb, TCA_NSSCODEL_MAX, TCA_NSSCODEL_PARMS, extack);
+#endif
 	if (!qopt) {
 		return -EINVAL;
 	}
@@ -404,7 +437,8 @@ static int nss_codel_init(struct Qdisc *sch, struct nlattr *opt)
 	nss_qdisc_register_configure_callback(nq, nss_codel_configure_callback);
 	nss_qdisc_register_stats_callback(nq, nss_codel_stats_callback);
 
-	if (nss_qdisc_init(sch, nq, NSS_SHAPER_NODE_TYPE_CODEL, 0, qopt->accel_mode) < 0) {
+	if (nss_qdisc_init(sch, nq, NSS_SHAPER_NODE_TYPE_CODEL, 0, qopt->accel_mode, extack) < 0)
+	{
 		return -EINVAL;
 	}
 
@@ -412,7 +446,11 @@ static int nss_codel_init(struct Qdisc *sch, struct nlattr *opt)
 		return -EINVAL;
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
 	if (nss_codel_change(sch, opt) < 0) {
+#else
+	if (nss_codel_change(sch, opt, extack) < 0) {
+#endif
 		nss_qdisc_destroy(nq);
 		return -EINVAL;
 	}
@@ -451,7 +489,7 @@ static int nss_codel_dump(struct Qdisc *sch, struct sk_buff *skb)
 	opt.flows = q->flows;
 	opt.ecn = q->ecn;
 
-	opts = nla_nest_start(skb, TCA_OPTIONS);
+	opts = nss_qdisc_nla_nest_start(skb, TCA_OPTIONS);
 	if (opts == NULL) {
 		goto nla_put_failure;
 	}
@@ -511,7 +549,9 @@ struct Qdisc_ops nss_codel_qdisc_ops __read_mostly = {
 	.enqueue	=	nss_codel_enqueue,
 	.dequeue	=	nss_codel_dequeue,
 	.peek		=	nss_codel_peek,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	.drop		=	nss_codel_drop,
+#endif
 	.init		=	nss_codel_init,
 	.reset		=	nss_codel_reset,
 	.destroy	=	nss_codel_destroy,
@@ -530,7 +570,9 @@ struct Qdisc_ops nss_fq_codel_qdisc_ops __read_mostly = {
 	.enqueue	=	nss_codel_enqueue,
 	.dequeue	=	nss_codel_dequeue,
 	.peek		=	nss_codel_peek,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0))
 	.drop		=	nss_codel_drop,
+#endif
 	.init		=	nss_codel_init,
 	.reset		=	nss_codel_reset,
 	.destroy	=	nss_codel_destroy,

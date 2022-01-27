@@ -6,7 +6,6 @@ include $(INCLUDE_DIR)/image.mk
 UBIFS_OPTS = -m 2048 -e 124KiB -c 4096 -U -F
 UBI_OPTS = -m 2048 -p 128KiB
 
-E2SIZE=$(shell echo $$(($(CONFIG_TARGET_ROOTFS_PARTSIZE)*1024)))
 
 ifeq ($(strip $(call CompareKernelPatchVer,$(KERNEL_PATCHVER),eq,3.18)),1)
 IPQ806X_KERNEL_LOADADDR = 0x42008000
@@ -15,10 +14,24 @@ else
 IPQ806X_KERNEL_LOADADDR = 0x42208000
 IPQ40XX_KERNEL_LOADADDR = 0x80208000
 endif
+
+KIMAGE = Image.gz
+COMP_TYPE=gzip
+
+ifneq ($(CONFIG_KERNEL_IPQ_FLASH_16M_PROFILE_DEBUG),)
+IPQ50XX_16M_KERNEL_SIZE=2624k
+IPQ50XX_16M_ROOTFS_SIZE=7296k
+else
+IPQ50XX_16M_KERNEL_SIZE=2624k
+IPQ50XX_16M_ROOTFS_SIZE=5428k
+endif
+
 IPQ807X_KERNEL_LOADADDR = 0x41208000
 IPQ807X_64_KERNEL_LOADADDR = 0x41080000
-IPQ60XX_KERNEL_LOADADDR = 0x41208000
+IPQ60XX_KERNEL_LOADADDR = 0x41008000
 IPQ60XX_64_KERNEL_LOADADDR = 0x41080000
+IPQ50XX_KERNEL_LOADADDR = 0x41208000
+IPQ50XX_64_KERNEL_LOADADDR = 0x41080000
 
 ifneq ($(CONFIG_TARGET_ROOTFS_UBIFS),)
 define Image/mkfs/ubifs_fit
@@ -28,11 +41,22 @@ define Image/mkfs/ubifs_fit
 endef
 endif
 
+define sizecheck
+	@[ $$(($(subst k,* 1024,$(subst m, * 1024k,$(1))))) -ge "$$(stat -c%s $(2))" ] || { \
+		echo "WARNING: Image file $(2) is too big, size is $$(stat -c%s $(2)) compare to max allowed $(1)" >&2; \
+		rm -f $(2); \
+	}
+endef
+
+define CompressLzma
+	$(STAGING_DIR_HOST)/bin/lzma e $(1) -lc1 -lp2 -pb2 $(2)
+endef
+
 define Image/BuildKernel/FIT
 	$(CP) $(KDIR)/Image $(BIN_DIR)/$(IMG_PREFIX)-vmlinux.bin
 	gzip -9 -c $(KDIR)/Image > $(KDIR)/Image.gz
-	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.gz)
-	$(call Image/BuildKernel/MkFIT,$(1), $(KDIR)/Image.gz, $(DTS_DIR)/$(1).dtb,gzip,$(2),$(2))
+	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.lzma)
+	$(call Image/BuildKernel/MkFIT,$(1), $(KDIR)/$(KIMAGE), $(DTS_DIR)/$(1).dtb,$(COMP_TYPE),$(2),$(2))
 	$(CP) $(KDIR)/fit-$(1).itb $(BIN_DIR)/$(IMG_PREFIX)-$(1)-fit-uImage.itb
 	mkdir -p $(BIN_DIR)/dtbs/
 	$(CP) $(DTS_DIR)/qcom-ipq*.dtb $(BIN_DIR)/dtbs/
@@ -53,7 +77,7 @@ endef
 define Image/BuildKernel/GenericFIT
 	$(CP) $(KDIR)/Image $(BIN_DIR)/$(IMG_PREFIX)-vmlinux.bin
 	gzip -9 -c $(KDIR)/Image > $(KDIR)/Image.gz
-	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.gz)
+	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.lzma)
 	$(call Image/BuildKernel/MkFIT,$(1), $(KDIR)/Image.gz,,gzip,$(2),$(2))
 	$(CP) $(KDIR)/fit-$(1).itb $(BIN_DIR)/$(IMG_PREFIX)-$(1)-fit-uImage.itb
 endef
@@ -62,8 +86,10 @@ define Image/BuildKernel/MultiDTBFIT
 	$(CP) $(KDIR)/Image $(BIN_DIR)/$(IMG_PREFIX)-vmlinux.bin
 	gzip -9 -c $(KDIR)/Image > $(KDIR)/Image.gz
 	$(foreach dtb, $(2), gzip -9 -c $(DTS_DIR)/$(dtb).dtb > $(DTS_DIR)/$(dtb).dtb.gz;)
-	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.gz)
-	$(call Image/BuildKernel/MkFITMulti,$(1),$(KDIR)/Image.gz,$(2),gzip,$(3),$(3),$(4),$(5))
+	$(call CompressLzma,$(KDIR)/Image,$(KDIR)/Image.lzma)
+	$(call Image/BuildKernel/MkFITMulti,$(1),$(KDIR)/$(KIMAGE),$(2),$(COMP_TYPE),$(3),$(3),$(4),$(5))
+	$$(if $$(CONFIG_PACKAGE_opkg), ,$$(call sizecheck, $(IPQ50XX_16M_KERNEL_SIZE), $(KDIR)/fit-$(1).itb))
+	$$(if $$(CONFIG_KERNEL_IPQ_FLASH_16M_PROFILE_DEBUG),$$(call sizecheck, $(IPQ50XX_16M_KERNEL_SIZE), $(KDIR)/fit-$(1).itb))
 	$(CP) $(KDIR)/fit-$(1).itb $(BIN_DIR)/$(IMG_PREFIX)-$(1)-fit-uImage.itb
 endef
 
@@ -154,6 +180,26 @@ define Image/BuildKernel/ipq60xx_64
 		$(call FindDeviceTrees, qcom-ipq6018-), $(IPQ60XX_64_KERNEL_LOADADDR))
 endef
 
+define Image/BuildKernel/ipq50xx
+	$(eval KIMAGE:="Image.lzma")
+	$(eval COMP_TYPE:="lzma")
+	$(foreach device, $(call FindDeviceTrees, qcom-ipq5018-), \
+		$(call Image/BuildKernel/$(1),$(device),$(IPQ50XX_KERNEL_LOADADDR));)
+
+	$(call Image/BuildKernel/MultiDTBFIT,qcom-ipq50xx-mpxx, \
+		$(call FindDeviceTrees, qcom-ipq5018-), $(IPQ50XX_KERNEL_LOADADDR))
+endef
+
+define Image/BuildKernel/ipq50xx_64
+	$(eval KIMAGE:="Image.lzma")
+	$(eval COMP_TYPE:="lzma")
+	$(foreach device, $(call FindDeviceTrees, qcom-ipq5018-), \
+		$(call Image/BuildKernel/$(1),$(device),$(IPQ50XX_64_KERNEL_LOADADDR));)
+
+	$(call Image/BuildKernel/MultiDTBFIT,qcom-ipq50xx-mpxx, \
+		$(call FindDeviceTrees, qcom-ipq5018-), $(IPQ50XX_64_KERNEL_LOADADDR))
+endef
+
 define Image/BuildKernel
 	$(call Image/BuildKernel/template,FIT)
 	$(call Image/BuildKernel/$(SUBTARGET),FIT)
@@ -193,12 +239,16 @@ define Image/Build/ubifs
 	$(call Image/mkfs/ubifs_fit,-$(SUBTARGET))
 endef
 
+ifeq ($(CONFIG_LOWMEM_FLASH),)
 define Image/Build/squashfs
 	$(call prepare_generic_squashfs,$(KDIR)/root.squashfs)
 endef
+endif
 
 define Image/Build
 	$(call Image/Build/$(1),$(1))
+	$$(if $(CONFIG_PACKAGE_opkg), ,$$(call sizecheck, $(IPQ50XX_16M_ROOTFS_SIZE), $(KDIR)/root$(2).$(1)))
+	$$(if $(CONFIG_KERNEL_IPQ_FLASH_16M_PROFILE_DEBUG),$$(call sizecheck, $(IPQ50XX_16M_ROOTFS_SIZE), $(KDIR)/root$(2).$(1)))
 	dd if=$(KDIR)/root$(2).$(1) of=$(BIN_DIR)/$(IMG_PREFIX)-$(1)-root$(3).img bs=2k conv=sync
 endef
 

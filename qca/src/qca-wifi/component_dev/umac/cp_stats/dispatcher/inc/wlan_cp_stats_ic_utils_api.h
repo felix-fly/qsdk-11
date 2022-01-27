@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -40,7 +40,7 @@
 	peer_cp_stats_##field##_dec(struct wlan_objmgr_peer *_peer, \
 				    uint64_t _val) \
 	{ \
-		ucfg_peer_cp_stats_##field##_inc(_peer, _val); \
+		ucfg_peer_cp_stats_##field##_dec(_peer, _val); \
 	} \
 	static inline void \
 	peer_cp_stats_##field##_update(struct wlan_objmgr_peer *_peer, \
@@ -66,6 +66,16 @@ PEER_CP_STATS_SET_FUNCS(is_tx_nobuf);
 #ifdef ATH_SUPPORT_IQUE
 PEER_CP_STATS_SET_FUNCS(tx_dropblock);
 #endif
+PEER_CP_STATS_SET_FUNCS(rx_decryptcrc);
+PEER_CP_STATS_SET_FUNCS(twt_event_type);
+PEER_CP_STATS_SET_FUNCS(twt_flow_id);
+PEER_CP_STATS_SET_FUNCS(twt_bcast);
+PEER_CP_STATS_SET_FUNCS(twt_trig);
+PEER_CP_STATS_SET_FUNCS(twt_announ);
+PEER_CP_STATS_SET_FUNCS(twt_dialog_id);
+PEER_CP_STATS_SET_FUNCS(twt_wake_dura_us);
+PEER_CP_STATS_SET_FUNCS(twt_wake_intvl_us);
+PEER_CP_STATS_SET_FUNCS(twt_sp_offset_us);
 
 #define PEER_CP_STATS_GET_FUNCS(field) \
 	static inline uint64_t \
@@ -78,18 +88,19 @@ PEER_CP_STATS_GET_FUNCS(rx_mgmt_rate);
 #ifdef ATH_SUPPORT_IQUE
 PEER_CP_STATS_GET_FUNCS(tx_dropblock);
 #endif
+PEER_CP_STATS_GET_FUNCS(rx_decryptcrc);
 
 static inline void
-peer_cp_stats_rx_mgmt_rssi_update(struct wlan_objmgr_peer *peer,
-				  int8_t rssi)
+peer_cp_stats_rx_mgmt_snr_update(struct wlan_objmgr_peer *peer,
+				 int8_t snr)
 {
-	ucfg_peer_cp_stats_rx_mgmt_rssi_update(peer, rssi);
+	ucfg_peer_cp_stats_rx_mgmt_snr_update(peer, snr);
 }
 
 static inline int8_t
-peer_cp_stats_rx_mgmt_rssi_get(struct wlan_objmgr_peer *peer)
+peer_cp_stats_rx_mgmt_snr_get(struct wlan_objmgr_peer *peer)
 {
-	return ucfg_peer_cp_stats_rx_mgmt_rssi_get(peer);
+	return ucfg_peer_cp_stats_rx_mgmt_snr_get(peer);
 }
 
 #define VDEV_UCAST_CP_STATS_SET_FUNCS(field) \
@@ -263,6 +274,13 @@ VDEV_CP_STATS_SET_FUNCS(peer_delete_req);
 VDEV_CP_STATS_SET_FUNCS(peer_delete_resp);
 VDEV_CP_STATS_SET_FUNCS(peer_delete_all_req);
 VDEV_CP_STATS_SET_FUNCS(peer_delete_all_resp);
+VDEV_CP_STATS_SET_FUNCS(prob_req_drops);
+VDEV_CP_STATS_SET_FUNCS(oob_probe_req_count);
+VDEV_CP_STATS_SET_FUNCS(wc_probe_req_drops);
+VDEV_CP_STATS_SET_FUNCS(fils_frames_sent);
+VDEV_CP_STATS_SET_FUNCS(fils_frames_sent_fail);
+VDEV_CP_STATS_SET_FUNCS(tx_offload_prb_resp_succ_cnt);
+VDEV_CP_STATS_SET_FUNCS(tx_offload_prb_resp_fail_cnt);
 
 #define VDEV_CP_STATS_GET_FUNCS(field) \
 	static inline uint64_t \
@@ -274,6 +292,10 @@ VDEV_CP_STATS_SET_FUNCS(peer_delete_all_resp);
 VDEV_CP_STATS_GET_FUNCS(rx_wrongbss);
 VDEV_CP_STATS_GET_FUNCS(rx_wrongdir);
 VDEV_CP_STATS_GET_FUNCS(rx_ssid_mismatch);
+VDEV_CP_STATS_GET_FUNCS(peer_delete_req);
+VDEV_CP_STATS_GET_FUNCS(peer_delete_resp);
+VDEV_CP_STATS_GET_FUNCS(peer_delete_all_req);
+VDEV_CP_STATS_GET_FUNCS(peer_delete_all_resp);
 
 static inline void vdev_cp_stats_reset(struct wlan_objmgr_vdev *vdev)
 {

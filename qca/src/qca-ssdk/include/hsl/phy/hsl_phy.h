@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, 2017-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -20,6 +20,13 @@ extern "C" {
 #endif				/* __cplusplus */
 
 #include "fal.h"
+#include <linux/version.h>
+#include <linux/phy.h>
+
+	/** Phy function reset type */
+	typedef enum {
+		PHY_FIFO_RESET = 0,	/**< Phy fifo reset */
+	} hsl_phy_function_reset_t;
 
 	typedef sw_error_t(*hsl_phy_init) (a_uint32_t dev_id,
 					   a_uint32_t phy_id);
@@ -120,6 +127,10 @@ extern "C" {
 							   a_uint32_t phy_id,
 							   fal_port_fiber_mode_t
 							   * fiber_mode);
+	typedef sw_error_t (*hsl_phy_function_reset) (a_uint32_t dev_id,
+							   a_uint32_t phy_id,
+							   hsl_phy_function_reset_t
+							   phy_reset_type);
 /*qca808x_start*/
 	typedef sw_error_t(*hsl_phy_reset) (a_uint32_t dev_id,
 					    a_uint32_t phy_id);
@@ -228,6 +239,16 @@ extern "C" {
 					      a_uint32_t phy_id,
 					      a_uint32_t * status);
 /*qca808x_end*/
+	typedef sw_error_t(*hsl_phy_led_ctrl_pattern_set) (a_uint32_t dev_id,
+					      a_uint32_t phy_id,
+					      led_ctrl_pattern_t * pattern);
+	typedef sw_error_t(*hsl_phy_led_ctrl_pattern_get) (a_uint32_t dev_id,
+					      a_uint32_t phy_id,
+					      led_ctrl_pattern_t * pattern);
+	typedef sw_error_t(*hsl_phy_led_ctrl_source_set) (a_uint32_t dev_id,
+					      a_uint32_t phy_id,
+					      a_uint32_t source_id,
+					      led_ctrl_pattern_t * pattern);
 	typedef sw_error_t(*hsl_phy_ptp_security_set) (a_uint32_t dev_id,
 				a_uint32_t phy_id, fal_ptp_security_t *sec);
 
@@ -451,6 +472,7 @@ extern "C" {
 		hsl_phy_combo_medium_status_get phy_combo_medium_status_get;
 		hsl_phy_combo_fiber_mode_set phy_combo_fiber_mode_set;
 		hsl_phy_combo_fiber_mode_get phy_combo_fiber_mode_get;
+		hsl_phy_function_reset phy_function_reset;
 /*qca808x_start*/
 		hsl_phy_reset phy_reset;
 		hsl_phy_power_off phy_power_off;
@@ -484,6 +506,9 @@ extern "C" {
 		hsl_phy_eee_cap_get phy_eee_cap_get;
 		hsl_phy_eee_status_get phy_eee_status_get;
 /*qca808x_end*/
+		hsl_phy_led_ctrl_pattern_set phy_led_ctrl_pattern_set;
+		hsl_phy_led_ctrl_pattern_get phy_led_ctrl_pattern_get;
+		hsl_phy_led_ctrl_source_set phy_led_ctrl_source_set;
 		hsl_phy_ptp_ops_t phy_ptp_ops;
 /*qca808x_start*/
 	} hsl_phy_ops_t;
@@ -505,10 +530,18 @@ typedef enum
 	AQUANTIA_PHY_CHIP,
 	QCA803X_PHY_CHIP,
 	SFP_PHY_CHIP,
+	MPGE_PHY_CHIP,
 /*qca808x_start*/
 	QCA808X_PHY_CHIP,
 	MAX_PHY_CHIP,
 } phy_type_t;
+
+#define PHY_INVALID_DAC        0
+
+typedef struct {
+	a_uint8_t mdac;
+	a_uint8_t edac;
+} phy_dac_t;
 
 typedef struct {
 	a_uint32_t phy_address[SW_MAX_NR_PORT];
@@ -520,6 +553,8 @@ typedef struct {
 	a_uint8_t phy_access_type[SW_MAX_NR_PORT];
 	a_bool_t phy_c45[SW_MAX_NR_PORT];
 	a_bool_t phy_combo[SW_MAX_NR_PORT];
+	a_uint32_t phy_reset_gpio[SW_MAX_NR_PORT];
+	phy_dac_t phy_dac[SW_MAX_NR_PORT];
 } phy_info_t;
 /*qca808x_end*/
 #define MALIBU5PORT_PHY         0x004DD0B1
@@ -528,9 +563,8 @@ typedef struct {
 #define QCA8033_PHY             0x004DD074
 #define QCA8035_PHY             0x004DD072
 /*qca808x_start*/
-#define QCA8081_PHY             0x004DD100
 #define QCA8081_PHY_V1_1        0x004DD101
-#define INVALID_PHY_ID          0
+#define INVALID_PHY_ID          0xFFFFFFFF
 
 /*qca808x_end*/
 #define F1V1_PHY                0x004DD033
@@ -553,6 +587,7 @@ typedef struct {
 /*qca808x_start*/
 #define SFP_PHY                 0xaaaabbbb
 /*qca808x_end*/
+#define MP_GEPHY                0x004DD0C0
 #define SFP_PHY_MASK            0xffffffff
 
 #define CABLE_PAIR_A            0
@@ -566,6 +601,14 @@ typedef struct {
 #define INVALID_PHY_ADDR        0xff
 #define MAX_PHY_ADDR            0x1f
 #define QCA8072_PHY_NUM         0x2
+
+#define PHY_INVALID_DATA 0xffff
+
+#define PHY_RTN_ON_READ_ERROR(phy_data) \
+    do { if (phy_data == PHY_INVALID_DATA) return(SW_READ_ERROR); } while(0);
+
+#define PHY_RTN_ON_ERROR(rv) \
+    do { if (rv != SW_OK) return(rv); } while(0);
 
 sw_error_t
 hsl_phy_api_ops_register(phy_type_t phy_type, hsl_phy_ops_t * phy_api_ops);
@@ -639,6 +682,22 @@ phy_type_t hsl_phy_type_get(a_uint32_t dev_id, a_uint32_t port_id);
 a_uint32_t
 hsl_port_phyid_get(a_uint32_t dev_id, fal_port_t port_id);
 
+a_uint32_t hsl_port_phy_reset_gpio_get(a_uint32_t dev_id, a_uint32_t port_id);
+
+void hsl_port_phy_reset_gpio_set(a_uint32_t dev_id, a_uint32_t port_id,
+	a_uint32_t phy_reset_gpio);
+
+void hsl_port_phy_gpio_reset(a_uint32_t dev_id, a_uint32_t port_id);
+
+void
+hsl_port_phy_dac_get(a_uint32_t dev_id, a_uint32_t port_id,
+	phy_dac_t *phy_dac);
+
+void
+hsl_port_phy_dac_set(a_uint32_t dev_id, a_uint32_t port_id,
+	phy_dac_t phy_dac);
+
+a_bool_t hsl_port_is_sfp(a_uint32_t dev_id, a_uint32_t port_id);
 /*qca808x_start*/
 sw_error_t ssdk_phy_driver_cleanup(void);
 /*qca808x_end*/
@@ -649,6 +708,19 @@ hsl_phydriver_update(a_uint32_t dev_id, a_uint32_t port_id,
 void
 qca_ssdk_phy_address_set(a_uint32_t dev_id, a_uint32_t port_id,
 	a_uint32_t phy_addr);
+
+sw_error_t
+hsl_port_phy_hw_init(a_uint32_t dev_id, a_uint32_t port_id);
+
+sw_error_t
+hsl_port_phydev_get(a_uint32_t dev_id, a_uint32_t port_id,
+	struct phy_device **phydev);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+sw_error_t
+hsl_port_phydev_adv_update(a_uint32_t dev_id, a_uint32_t port_id,
+	a_uint32_t autoadv);
+#endif
 /*qca808x_start*/
 #ifdef __cplusplus
 }

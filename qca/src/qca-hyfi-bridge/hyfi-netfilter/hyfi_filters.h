@@ -106,4 +106,16 @@ static inline int hyfi_ieee1905_frame_filter(struct sk_buff *skb,
 	return 0;
 }
 
+static inline int hyfi_ieee1905_msg_type(struct sk_buff *skb)
+{
+   if (unlikely(hyfi_is_ieee1905_pkt(skb))) {
+       u8 *data = (u8 *) eth_hdr(skb);
+       u8 *msg_ptr = data + ETH_HLEN + 2;
+       u16 msg_type = get_unaligned((u16*) (msg_ptr));
+                return htons(msg_type);
+   }
+
+   return -1;
+}
+
 #endif /* HYFI_FILTERS_H_ */

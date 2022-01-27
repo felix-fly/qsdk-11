@@ -304,14 +304,16 @@ static int do_mii(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 		else
 			op[1] = '\0';
 
-		if (argc >= 3)
-			extract_range(argv[2], &addrlo, &addrhi);
-		if (argc >= 4)
-			extract_range(argv[3], &reglo, &reghi);
-		if (argc >= 5)
-			data = simple_strtoul(argv[4], NULL, 16);
-		if (argc >= 6)
-			mask = simple_strtoul(argv[5], NULL, 16);
+		if (strncmp(op, "de", 2) != 0) {
+			if (argc >= 3)
+				extract_range(argv[2], &addrlo, &addrhi);
+			if (argc >= 4)
+				extract_range(argv[3], &reglo, &reghi);
+			if (argc >= 5)
+				data = simple_strtoul(argv[4], NULL, 16);
+			if (argc >= 6)
+				mask = simple_strtoul(argv[5], NULL, 16);
+		}
 	}
 
 	if (addrhi > 31) {

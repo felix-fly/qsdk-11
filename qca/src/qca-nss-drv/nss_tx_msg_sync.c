@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -101,7 +101,7 @@ static nss_tx_status_t nss_tx_msg_sync_internal(struct nss_ctx_instance *nss_ctx
 		status = tx_msg_async_with_size(nss_ctx, ncm, msg_buf_size);
 
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: Tx msg async failed\n", nss_ctx);
+		nss_warning("%px: Tx msg async failed\n", nss_ctx);
 		return status;
 	}
 
@@ -110,7 +110,7 @@ static nss_tx_status_t nss_tx_msg_sync_internal(struct nss_ctx_instance *nss_ctx
 	 */
 	ret = wait_for_completion_timeout(&sync_data->complete, msecs_to_jiffies(timeout));
 	if (!ret) {
-		nss_warning("%p: Tx msg sync timeout\n", nss_ctx);
+		nss_warning("%px: Tx msg sync timeout\n", nss_ctx);
 		return NSS_TX_FAILURE_SYNC_TIMEOUT;
 	}
 
@@ -144,7 +144,7 @@ nss_tx_status_t nss_tx_msg_sync(struct nss_ctx_instance *nss_ctx,
 	 * Check Tx msg async API
 	 */
 	if (!unlikely(tx_msg_async)) {
-		nss_warning("%p: missing Tx msg async API\n", nss_ctx);
+		nss_warning("%px: missing Tx msg async API\n", nss_ctx);
 		return NSS_TX_FAILURE_SYNC_BAD_PARAM;
 	}
 
@@ -178,7 +178,7 @@ nss_tx_status_t nss_tx_msg_sync_with_size(struct nss_ctx_instance *nss_ctx,
 	 * Check Tx msg async API
 	 */
 	if (!unlikely(tx_msg_async_with_size)) {
-		nss_warning("%p: missing Tx msg async API\n", nss_ctx);
+		nss_warning("%px: missing Tx msg async API\n", nss_ctx);
 		return NSS_TX_FAILURE_SYNC_BAD_PARAM;
 	}
 

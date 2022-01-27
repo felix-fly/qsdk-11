@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2017, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -135,4 +135,25 @@ fal_policer_global_counter_get(a_uint32_t dev_id,fal_policer_global_counter_t *c
     return rv;
 }
 
+sw_error_t
+fal_policer_bypass_en_set(a_uint32_t dev_id, fal_policer_frame_type_t frame_type,
+		a_bool_t enable)
+{
+    sw_error_t rv;
+
+    rv = sw_uk_exec(SW_API_POLICER_BYPASS_EN_SET, dev_id, frame_type,
+		enable);
+    return rv;
+}
+
+sw_error_t
+fal_policer_bypass_en_get(a_uint32_t dev_id, fal_policer_frame_type_t frame_type,
+		a_bool_t *enable)
+{
+    sw_error_t rv;
+
+    rv = sw_uk_exec(SW_API_POLICER_BYPASS_EN_GET, dev_id, frame_type,
+		enable);
+    return rv;
+}
 

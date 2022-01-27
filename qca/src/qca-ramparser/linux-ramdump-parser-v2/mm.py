@@ -124,18 +124,24 @@ def page_to_pfn_sparse(ramdump, page):
     # divide by struct page size for division fun
     return (page - addr) / sizeof_page
 
-# Yes, we are hard coding the vmemmap. This isn't very likely to change unless
-# the rest of the addresses start changing as well. When that happens, the
-# entire parser will probably be broken in many other ways so a better solution
-# can be derived then.
+
+def get_vmemmap(ramdump):
+    return ramdump.read_u64('vmemmap')
+
 def page_to_pfn_vmemmap(ramdump, page):
-    mem_map = 0xffffffbdbf000000
+    if ramdump.kernel_version >= (5, 4, 0):
+        mem_map = get_vmemmap(ramdump)
+    else:
+        mem_map = 0xffffffbdbf000000
     page_size = ramdump.sizeof('struct page')
     return ((page - mem_map) / page_size)
 
 
 def pfn_to_page_vmemmap(ramdump, pfn):
-    mem_map = 0xffffffbdbf000000
+    if ramdump.kernel_version >= (5, 4, 0):
+        mem_map = get_vmemmap(ramdump)
+    else:
+        mem_map = 0xffffffbdbf000000
     page_size = ramdump.sizeof('struct page')
     pfn_offset = ramdump.phys_offset >> 12
     return mem_map + (pfn * page_size)
@@ -210,7 +216,17 @@ def dont_map_hole_lowmem_page_address(ramdump, page):
 
 def normal_lowmem_page_address(ramdump, page):
     phys = page_to_pfn(ramdump, page) << 12
-    return phys - ramdump.phys_offset + ramdump.page_offset
+    if ramdump.arm64:
+        if ramdump.kernel_version >= (5, 4, 0):
+            phys_addr = phys - ramdump.read_s64('physvirt_offset')
+            if phys_addr < 0:
+             phys_addr = phys_addr +  (1 << 64)
+            return phys_addr
+        else:
+            memstart_addr = ramdump.read_s64('memstart_addr')
+            return phys - memstart_addr + ramdump.page_offset
+    else:
+        return phys - ramdump.phys_offset + ramdump.page_offset
 
 
 def lowmem_page_address(ramdump, page):

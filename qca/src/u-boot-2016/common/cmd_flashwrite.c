@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2020 The Linux Foundation. All rights reserved.
 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,7 +40,8 @@ uint32_t part_size, uint32_t file_size, char *layout)
 	char runcmd[256];
 	int nand_dev = CONFIG_NAND_FLASH_INFO_IDX;
 
-	if (flash_type == SMEM_BOOT_NAND_FLASH) {
+	if (((flash_type == SMEM_BOOT_NAND_FLASH) ||
+		(flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 
 		snprintf(runcmd, sizeof(runcmd), "nand device %d && ", nand_dev);
 
@@ -86,7 +87,8 @@ static int fl_erase(int flash_type, uint32_t offset, uint32_t part_size,
 	char runcmd[256];
 	int nand_dev = CONFIG_NAND_FLASH_INFO_IDX;
 
-	if (flash_type == SMEM_BOOT_NAND_FLASH) {
+	if (((flash_type == SMEM_BOOT_NAND_FLASH) ||
+		(flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 
 		snprintf(runcmd, sizeof(runcmd), "nand device %d && ", nand_dev);
 		if (strcmp(layout, "default") != 0) {
@@ -200,8 +202,9 @@ char * const argv[])
 #endif
 	disk_partition_t disk_info = {0};
 	qca_smem_flash_info_t *sfi = &qca_smem_flash_info;
+#ifdef CONFIG_CMD_NAND
 	nand_info_t *nand = &nand_info[CONFIG_NAND_FLASH_INFO_IDX];
-
+#endif
 	if (strcmp(argv[0], "flash") == 0)
 		flash_cmd = 1;
 
@@ -239,7 +242,8 @@ char * const argv[])
 	flash_type = sfi->flash_type;
 	part_name = argv[1];
 
-	if (sfi->flash_type == SMEM_BOOT_NAND_FLASH) {
+	if (((sfi->flash_type == SMEM_BOOT_NAND_FLASH) ||
+		(sfi->flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 
 		ret = smem_getpart(part_name, &start_block, &size_block);
 		if (ret) {
@@ -295,11 +299,11 @@ char * const argv[])
 			if (ret)
 				return retn;
 
-		} else if ((sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH)
+		} else if (((sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH)||
+				(sfi->flash_secondary_type == SMEM_BOOT_QSPI_NAND_FLASH))
 				&& (strncmp(part_name, "rootfs", 6) == 0)) {
 
-			/* IPQ806X - NOR + NAND */
-			flash_type = SMEM_BOOT_NAND_FLASH;
+			flash_type = sfi->flash_secondary_type;
 
 			if (sfi->rootfs.offset == 0xBAD0FF5E) {
 				if (smem_bootconfig_info() == 0)
@@ -347,14 +351,15 @@ char * const argv[])
 	}
 
 	if (flash_cmd) {
-
-		if (flash_type == SMEM_BOOT_NAND_FLASH) {
+#ifdef CONFIG_CMD_NAND
+		if (((flash_type == SMEM_BOOT_NAND_FLASH) ||
+			(flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 
 			adj_size = file_size % nand->writesize;
 			if (adj_size)
 				file_size = file_size + (nand->writesize - adj_size);
 		}
-
+#endif
 		if (flash_type == SMEM_BOOT_MMC_FLASH) {
 
 			if (disk_info.blksz) {

@@ -41,6 +41,7 @@
 #include <linux/nmi.h>
 #include <linux/fs.h>
 #include <linux/sched/rt.h>
+#include <linux/platform_device.h>
 
 #include "trace.h"
 #include "trace_output.h"
@@ -1356,6 +1357,7 @@ static arch_spinlock_t trace_cmdline_lock = __ARCH_SPIN_LOCK_UNLOCKED;
 struct saved_cmdlines_buffer {
 	unsigned map_pid_to_cmdline[PID_MAX_DEFAULT+1];
 	unsigned *map_cmdline_to_pid;
+	unsigned *map_cmdline_to_tgid;
 	unsigned cmdline_num;
 	int cmdline_idx;
 	char *saved_cmdlines;
@@ -1389,12 +1391,23 @@ static int allocate_cmdlines_buffer(unsigned int val,
 		return -ENOMEM;
 	}
 
+	s->map_cmdline_to_tgid = kmalloc_array(val,
+					       sizeof(*s->map_cmdline_to_tgid),
+					       GFP_KERNEL);
+	if (!s->map_cmdline_to_tgid) {
+		kfree(s->map_cmdline_to_pid);
+		kfree(s->saved_cmdlines);
+		return -ENOMEM;
+	}
+
 	s->cmdline_idx = 0;
 	s->cmdline_num = val;
 	memset(&s->map_pid_to_cmdline, NO_CMDLINE_MAP,
 	       sizeof(s->map_pid_to_cmdline));
 	memset(s->map_cmdline_to_pid, NO_CMDLINE_MAP,
 	       val * sizeof(*s->map_cmdline_to_pid));
+	memset(s->map_cmdline_to_tgid, NO_CMDLINE_MAP,
+	       val * sizeof(*s->map_cmdline_to_tgid));
 
 	return 0;
 }
@@ -1560,14 +1573,17 @@ static int trace_save_cmdline(struct task_struct *tsk)
 	if (!tsk->pid || unlikely(tsk->pid > PID_MAX_DEFAULT))
 		return 0;
 
+	preempt_disable();
 	/*
 	 * It's not the end of the world if we don't get
 	 * the lock, but we also don't want to spin
 	 * nor do we want to disable interrupts,
 	 * so if we miss here, then better luck next time.
 	 */
-	if (!arch_spin_trylock(&trace_cmdline_lock))
+	if (!arch_spin_trylock(&trace_cmdline_lock)) {
+		preempt_enable();
 		return 0;
+	}
 
 	idx = savedcmd->map_pid_to_cmdline[tsk->pid];
 	if (idx == NO_CMDLINE_MAP) {
@@ -1590,8 +1606,9 @@ static int trace_save_cmdline(struct task_struct *tsk)
 	}
 
 	set_cmdline(idx, tsk->comm);
-
+	savedcmd->map_cmdline_to_tgid[idx] = tsk->tgid;
 	arch_spin_unlock(&trace_cmdline_lock);
+	preempt_enable();
 
 	return 1;
 }
@@ -1631,6 +1648,35 @@ void trace_find_cmdline(int pid, char comm[])
 
 	arch_spin_unlock(&trace_cmdline_lock);
 	preempt_enable();
+}
+
+static int __find_tgid_locked(int pid)
+{
+	unsigned map;
+	int tgid;
+
+	map = savedcmd->map_pid_to_cmdline[pid];
+	if (map != NO_CMDLINE_MAP)
+		tgid = savedcmd->map_cmdline_to_tgid[map];
+	else
+		tgid = -1;
+
+	return tgid;
+}
+
+int trace_find_tgid(int pid)
+{
+	int tgid;
+
+	preempt_disable();
+	arch_spin_lock(&trace_cmdline_lock);
+
+	tgid = __find_tgid_locked(pid);
+
+	arch_spin_unlock(&trace_cmdline_lock);
+	preempt_enable();
+
+	return tgid;
 }
 
 void tracing_record_cmdline(struct task_struct *tsk)
@@ -1805,7 +1851,8 @@ void srd_info_record(unsigned long ip, unsigned long parent_ip)
 {
 	unsigned long flags;
 	struct srd_record *r;
-	int index, cpu = smp_processor_id();
+	int cpu = smp_processor_id();
+	uint32_t index;
 
 	if (!srd || !srd->r)
 		return;
@@ -1827,12 +1874,14 @@ void srd_info_record(unsigned long ip, unsigned long parent_ip)
 	local_irq_restore(flags);
 }
 
-#define SRD_PRINT_STR	"srd: 0x%p -> 0x%p 0x%x\n"		\
-			"ip: 0x%p -> 0x%p 0x%x\n",		\
-			srd, (void *)srd_pa, 			\
-			sizeof(*srd) / sizeof(uint32_t),	\
-			srd->r, (void *)srd->r_pa,		\
-			(SRD_REC_SIZE_PER_CPU * srd->ncpu) / sizeof(uint32_t)
+#define SRD_PRINT_STR	"srd: 0x%p -> 0x%p 0x%lx\n"				\
+			"ip: 0x%p -> 0x%p 0x%lx\n",				\
+			srd, (void *)srd_pa,		 			\
+			(unsigned long) (sizeof(*srd) / sizeof(uint32_t)),	\
+			srd->r, (void *)srd->r_pa,				\
+			(unsigned long) ((SRD_REC_SIZE_PER_CPU * srd->ncpu)	\
+					 / sizeof(uint32_t))
+
 static ssize_t
 tracing_srd_read(struct file *filp, char __user *ubuf,
 	       size_t cnt, loff_t *ppos)
@@ -1853,9 +1902,9 @@ static const struct file_operations tracing_srd_fops = {
 };
 
 
-void srd_buf_init(struct dentry *d_tracer)
+void srd_buf_init(struct device *dev)
 {
-	int n = 0, cpu;
+	int cpu;
 
 	/*
 	 * Would have been ideal to do this in tracer_alloc_buffers.
@@ -1875,18 +1924,15 @@ void srd_buf_init(struct dentry *d_tracer)
 	 * [<c07009d0>] (kernel_init+0x0/0x1cc) from [<c0066f28>] (do_exit+0x0/0x864)
 	 */
 
-	srd = dma_alloc_coherent(NULL, sizeof(*srd), &srd_pa, GFP_KERNEL);
+	srd = dma_alloc_coherent(dev, sizeof(*srd), &srd_pa, GFP_KERNEL);
 	if (!srd)
 		return;
 
-	for_each_possible_cpu(cpu)
-		n++;
-
-	srd->ncpu = n;
-	srd->r = dma_alloc_coherent(NULL, SRD_REC_SIZE_PER_CPU * n,
+	srd->ncpu = CONFIG_NR_CPUS;
+	srd->r = dma_alloc_coherent(dev, SRD_REC_SIZE_PER_CPU * CONFIG_NR_CPUS,
 				&srd->r_pa, GFP_KERNEL);
 	if (!srd->r) {
-		dma_free_coherent(NULL, sizeof(*srd), srd, srd_pa);
+		dma_free_coherent(dev, sizeof(*srd), srd, srd_pa);
 		return;
 	}
 
@@ -1895,8 +1941,6 @@ void srd_buf_init(struct dentry *d_tracer)
 
 	printk(SRD_PRINT_STR);
 
-	trace_create_file("srd", 0444, d_tracer,
-		srd, &tracing_srd_fops);
 }
 #endif /* CONFIG_SRD_TRACE */
 
@@ -4058,10 +4102,15 @@ tracing_saved_cmdlines_size_read(struct file *filp, char __user *ubuf,
 {
 	char buf[64];
 	int r;
+	unsigned int n;
 
+	preempt_disable();
 	arch_spin_lock(&trace_cmdline_lock);
-	r = scnprintf(buf, sizeof(buf), "%u\n", savedcmd->cmdline_num);
+	n = savedcmd->cmdline_num;
 	arch_spin_unlock(&trace_cmdline_lock);
+	preempt_enable();
+
+	r = scnprintf(buf, sizeof(buf), "%u\n", n);
 
 	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 }
@@ -4070,6 +4119,7 @@ static void free_saved_cmdlines_buffer(struct saved_cmdlines_buffer *s)
 {
 	kfree(s->saved_cmdlines);
 	kfree(s->map_cmdline_to_pid);
+	kfree(s->map_cmdline_to_tgid);
 	kfree(s);
 }
 
@@ -4086,10 +4136,12 @@ static int tracing_resize_saved_cmdlines(unsigned int val)
 		return -ENOMEM;
 	}
 
+	preempt_disable();
 	arch_spin_lock(&trace_cmdline_lock);
 	savedcmd_temp = savedcmd;
 	savedcmd = s;
 	arch_spin_unlock(&trace_cmdline_lock);
+	preempt_enable();
 	free_saved_cmdlines_buffer(savedcmd_temp);
 
 	return 0;
@@ -4300,6 +4352,78 @@ static void trace_insert_enum_map(struct module *mod,
 
 	trace_insert_enum_map_file(mod, start, len);
 }
+
+static ssize_t
+tracing_saved_tgids_read(struct file *file, char __user *ubuf,
+				size_t cnt, loff_t *ppos)
+{
+	char *file_buf;
+	char *buf;
+	int len = 0;
+	int i;
+	int *pids;
+	int n = 0;
+
+	preempt_disable();
+	arch_spin_lock(&trace_cmdline_lock);
+
+	pids = kmalloc_array(savedcmd->cmdline_num, 2*sizeof(int), GFP_KERNEL);
+	if (!pids) {
+		arch_spin_unlock(&trace_cmdline_lock);
+		preempt_enable();
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < savedcmd->cmdline_num; i++) {
+		int pid;
+
+		pid = savedcmd->map_cmdline_to_pid[i];
+		if (pid == -1 || pid == NO_CMDLINE_MAP)
+			continue;
+
+		pids[n] = pid;
+		pids[n+1] = __find_tgid_locked(pid);
+		n += 2;
+	}
+	arch_spin_unlock(&trace_cmdline_lock);
+	preempt_enable();
+
+	if (n == 0) {
+		kfree(pids);
+		return 0;
+	}
+
+	/* enough to hold max pair of pids + space, lr and nul */
+	len = n * 12;
+	file_buf = kmalloc(len, GFP_KERNEL);
+	if (!file_buf) {
+		kfree(pids);
+		return -ENOMEM;
+	}
+
+	buf = file_buf;
+	for (i = 0; i < n && len > 0; i += 2) {
+		int r;
+
+		r = snprintf(buf, len, "%d %d\n", pids[i], pids[i+1]);
+		buf += r;
+		len -= r;
+	}
+
+	len = simple_read_from_buffer(ubuf, cnt, ppos,
+				      file_buf, buf - file_buf);
+
+	kfree(file_buf);
+	kfree(pids);
+
+	return len;
+}
+
+static const struct file_operations tracing_saved_tgids_fops = {
+	.open	= tracing_open_generic,
+	.read	= tracing_saved_tgids_read,
+	.llseek	= generic_file_llseek,
+};
 
 static ssize_t
 tracing_set_trace_read(struct file *filp, char __user *ubuf,
@@ -7135,7 +7259,8 @@ static __init int tracer_init_tracefs(void)
 #endif
 
 #ifdef CONFIG_SRD_TRACE
-	srd_buf_init(d_tracer);
+	trace_create_file("srd", 0444, d_tracer,
+		srd, &tracing_srd_fops);
 #endif /* CONFIG_SRD_TRACE */
 
 	create_trace_instances(d_tracer);
@@ -7481,5 +7606,36 @@ __init static int clear_boot_tracer(void)
 	return 0;
 }
 
+#ifdef CONFIG_SRD_TRACE
+static int __init srd_probe(struct platform_device *pdev)
+{
+	srd_buf_init(&pdev->dev);
+	return 0;
+}
+
+static const struct of_device_id srd_of_table[] = {
+	{ .compatible = "srd", },
+	{}
+};
+MODULE_DEVICE_TABLE(of, srd_of_table);
+
+static struct platform_driver srd_driver = {
+	.probe = srd_probe,
+	.driver = {
+		.name	= "srd",
+		.of_match_table = srd_of_table,
+	},
+};
+
+static int __init srd_init(void)
+{
+	return platform_driver_register(&srd_driver);
+}
+#endif
+
 fs_initcall(tracer_init_tracefs);
 late_initcall(clear_boot_tracer);
+
+#ifdef CONFIG_SRD_TRACE
+device_initcall(srd_init);
+#endif

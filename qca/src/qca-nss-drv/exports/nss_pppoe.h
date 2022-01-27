@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -99,6 +99,56 @@ struct nss_pppoe_session_stats {
 	uint32_t exception[NSS_PPPOE_SESSION_EXCEPTION_EVENT_MAX];
 						/**< PPPoE session exception events. */
 };
+
+/**
+ * nss_pppoe_stats_session
+ *	PPPoE session statistics.
+ */
+enum nss_pppoe_stats_session {
+	NSS_PPPOE_STATS_SESSION_RX_PACKETS,
+	NSS_PPPOE_STATS_SESSION_RX_BYTES,
+	NSS_PPPOE_STATS_SESSION_TX_PACKETS,
+	NSS_PPPOE_STATS_SESSION_TX_BYTES,
+	NSS_PPPOE_STATS_SESSION_WRONG_VERSION_OR_TYPE,
+	NSS_PPPOE_STATS_SESSION_WRONG_CODE,
+	NSS_PPPOE_STATS_SESSION_UNSUPPORTED_PPP_PROTOCOL,
+	NSS_PPPOE_STATS_SESSION_MAX
+};
+
+/**
+ * nss_pppoe_stats_base
+ *	PPPoE base node statistics.
+ */
+enum nss_pppoe_stats_base {
+	NSS_PPPOE_STATS_BASE_RX_PACKETS,
+	NSS_PPPOE_STATS_BASE_RX_BYTES,
+	NSS_PPPOE_STATS_BASE_TX_PACKETS,
+	NSS_PPPOE_STATS_BASE_TX_BYTES,
+	NSS_PPPOE_STATS_BASE_RX_QUEUE_0_DROPPED,
+	NSS_PPPOE_STATS_BASE_RX_QUEUE_1_DROPPED,
+	NSS_PPPOE_STATS_BASE_RX_QUEUE_2_DROPPED,
+	NSS_PPPOE_STATS_BASE_RX_QUEUE_3_DROPPED,
+	NSS_PPPOE_STATS_BASE_SHORT_PPPOE_HDR_LENGTH,
+	NSS_PPPOE_STATS_BASE_SHORT_PACKET_LENGTH,
+	NSS_PPPOE_STATS_BASE_WRONG_VERSION_OR_TYPE,
+	NSS_PPPOE_STATS_BASE_WRONG_CODE,
+	NSS_PPPOE_STATS_BASE_UNSUPPORTED_PPP_PROTOCOL,
+	NSS_PPPOE_STATS_BASE_DISABLED_BRIDGE_PACKET,
+	NSS_PPPOE_STATS_BASE_MAX
+};
+
+/**
+ * nss_pppoe_stats_notification
+ *	PPPoE statistics structure.
+ */
+struct nss_pppoe_stats_notification {
+	uint32_t core_id;					/**< Core ID. */
+	uint32_t if_num;					/**< Interface number. */
+	uint64_t session_stats[NSS_PPPOE_STATS_SESSION_MAX];	/**< PPPoE statistics. */
+	uint64_t base_stats[NSS_PPPOE_STATS_BASE_MAX];		/**< PPPoE base node statistics. */
+};
+
+#ifdef __KERNEL__ /* only kernel will use. */
 
 /**
  * nss_pppoe_sync_stats_msg
@@ -296,6 +346,37 @@ void nss_pppoe_unregister_sysctl(void);
 extern void nss_pppoe_msg_init(struct nss_pppoe_msg *ncm,
 				uint16_t if_num, uint32_t type, uint32_t len,
 				void *cb, void *app_data);
+
+/**
+ * nss_pppoe_stats_register_notifier
+ *	Registers a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_pppoe_stats_register_notifier(struct notifier_block *nb);
+
+/**
+ * nss_pppoe_stats_unregister_notifier
+ *	Deregisters a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_pppoe_stats_unregister_notifier(struct notifier_block *nb);
+
+#endif /*__KERNEL__ */
+
 /**
  * @}
  */

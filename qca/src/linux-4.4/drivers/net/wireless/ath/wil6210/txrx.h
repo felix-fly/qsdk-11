@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: ISC */
 /*
  * Copyright (c) 2012-2016 Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef WIL6210_TXRX_H
@@ -570,6 +570,13 @@ static inline u8 *wil_skb_get_sa(struct sk_buff *skb)
 	return eth->h_source;
 }
 
+static inline __be16 wil_skb_get_protocol(struct sk_buff *skb)
+{
+	struct ethhdr *eth = (void *)skb->data;
+
+	return eth->h_proto;
+}
+
 static inline bool wil_need_txstat(struct sk_buff *skb)
 {
 	const u8 *da = wil_skb_get_da(skb);
@@ -650,7 +657,8 @@ struct wil_tid_ampdu_rx *wil_tid_ampdu_rx_alloc(struct wil6210_priv *wil,
 						int size, u16 ssn);
 void wil_tid_ampdu_rx_free(struct wil6210_priv *wil,
 			   struct wil_tid_ampdu_rx *r);
-void wil_tx_data_init(struct wil_ring_tx_data *txdata);
+void wil_tx_data_init(const struct wil6210_priv *wil,
+		      struct wil_ring_tx_data *txdata);
 void wil_init_txrx_ops_legacy_dma(struct wil6210_priv *wil);
 void wil_tx_latency_calc(struct wil6210_priv *wil, struct sk_buff *skb,
 			 struct wil_sta_info *sta);

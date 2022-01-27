@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, 2020 The Linux Foundation. All rights reserved.
 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -43,7 +43,6 @@ static qca_smem_flash_info_t *sfi = &qca_smem_flash_info;
 int ipq_fs_on_nand ;
 extern int nand_env_device;
 extern qca_mmc mmc_host;
-extern void board_usb_deinit(int id);
 
 #ifdef CONFIG_QCA_MMC
 static qca_mmc *host = &mmc_host;
@@ -100,7 +99,8 @@ static int set_fs_bootargs(int *fs_on_nand)
 
 	if (sfi->flash_type == SMEM_BOOT_SPI_FLASH) {
 		if (get_which_flash_param("rootfs") ||
-		    sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH) {
+		    ((sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH) ||
+			(sfi->flash_secondary_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 			bootargs = nand_rootfs;
 			*fs_on_nand = 1;
 
@@ -153,7 +153,8 @@ static int set_fs_bootargs(int *fs_on_nand)
 			if (getenv("fsbootargs") == NULL)
 				setenv("fsbootargs", bootargs);
 		}
-	} else if (sfi->flash_type == SMEM_BOOT_NAND_FLASH) {
+	} else if (((sfi->flash_type == SMEM_BOOT_NAND_FLASH) ||
+			(sfi->flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 		bootargs = nand_rootfs;
 		if (getenv("fsbootargs") == NULL)
 			setenv("fsbootargs", bootargs);
@@ -203,42 +204,56 @@ int config_select(unsigned int addr, char *rcmd, int rcmd_size)
 	 * or board name based config is used.
 	 */
 
+#ifdef CONFIG_ARCH_IPQ806x
 	int soc_version = 0;
+#endif
+	int i, strings_count;
 	const char *config = getenv("config_name");
 
 	if (config) {
 		printf("Manual device tree config selected!\n");
 		strlcpy(dtb_config_name, config, sizeof(dtb_config_name));
-	} else {
-		config = fdt_getprop(gd->fdt_blob, 0, "config_name", NULL);
+		if (fit_conf_get_node((void *)addr, dtb_config_name) >= 0) {
+			snprintf(rcmd, rcmd_size, "bootm 0x%x#%s\n",
+				 addr, dtb_config_name);
+			return 0;
+		}
 
-		if(config == NULL) {
+	} else {
+		strings_count = fdt_count_strings(gd->fdt_blob, 0, "config_name");
+
+		if (!strings_count) {
 			printf("Failed to get config_name\n");
 			return -1;
 		}
 
-		snprintf((char *)dtb_config_name,
-			 sizeof(dtb_config_name), "%s", config);
+		for (i = 0; i < strings_count; i++) {
+			fdt_get_string_index(gd->fdt_blob, 0, "config_name",
+					   i, &config);
 
-		ipq_smem_get_socinfo_version((uint32_t *)&soc_version);
+			snprintf((char *)dtb_config_name,
+				 sizeof(dtb_config_name), "%s", config);
+
 #ifdef CONFIG_ARCH_IPQ806x
-		if(SOCINFO_VERSION_MAJOR(soc_version) >= 2) {
-			snprintf(dtb_config_name + strlen("config@"),
-				 sizeof(dtb_config_name) - strlen("config@"),
-				 "v%d.0-%s",
-				 SOCINFO_VERSION_MAJOR(soc_version),
-				 config + strlen("config@"));
-		}
+			ipq_smem_get_socinfo_version((uint32_t *)&soc_version);
+			if(SOCINFO_VERSION_MAJOR(soc_version) >= 2) {
+				snprintf(dtb_config_name + strlen("config@"),
+					 sizeof(dtb_config_name) - strlen("config@"),
+					 "v%d.0-%s",
+					 SOCINFO_VERSION_MAJOR(soc_version),
+					 config + strlen("config@"));
+			}
 #endif
+			if (fit_conf_get_node((void *)addr, dtb_config_name) >= 0) {
+				snprintf(rcmd, rcmd_size, "bootm 0x%x#%s\n",
+					 addr, dtb_config_name);
+				return 0;
+			}
+		}
 	}
 
-	if (fit_conf_get_node((void *)addr, dtb_config_name) >= 0) {
-		snprintf(rcmd, rcmd_size, "bootm 0x%x#%s\n",
-			 addr, dtb_config_name);
-		return 0;
-	}
 
-	printf("Config not availabale\n");
+	printf("Config not available\n");
 	return -1;
 }
 
@@ -332,6 +347,8 @@ static int copy_rootfs(unsigned int request, uint32_t size)
 		printf("runcmd: %s\n", runcmd);
 	if (run_command(runcmd, 0) != CMD_RET_SUCCESS)
 		return CMD_RET_FAILURE;
+
+	return 0;
 }
 
 #ifndef CONFIG_IPQ_ELF_AUTH
@@ -389,6 +406,7 @@ static int authenticate_rootfs(unsigned int kernel_addr)
 static int authenticate_rootfs_elf(unsigned int rootfs_hdr)
 {
 	int ret;
+	unsigned int request;
 	image_info img_info;
 	struct {
 		unsigned long type;
@@ -396,16 +414,21 @@ static int authenticate_rootfs_elf(unsigned int rootfs_hdr)
 		unsigned long addr;
 	} rootfs_img_info;
 
-	rootfs_img_info.addr = rootfs_hdr;
+	request = CONFIG_ROOTFS_LOAD_ADDR;
+	rootfs_img_info.addr = request;
 	rootfs_img_info.type = SEC_AUTH_SW_ID;
 
 	if (parse_elf_image_phdr(&img_info, rootfs_hdr))
 		return CMD_RET_FAILURE;
 
-	/* copy rootfs from the boot device */
-	copy_rootfs(img_info.img_load_addr, img_info.img_size);
+	memcpy((void*)request, (void*)rootfs_hdr, img_info.img_offset);
 
-	rootfs_img_info.size = img_info.img_offset;
+	request += img_info.img_offset;
+
+	/* copy rootfs from the boot device */
+	copy_rootfs(request, img_info.img_size);
+
+	rootfs_img_info.size = img_info.img_offset + img_info.img_size;
 	ret = qca_scm_secure_authenticate(&rootfs_img_info, sizeof(rootfs_img_info));
 	if (ret)
 		return CMD_RET_FAILURE;
@@ -426,9 +449,6 @@ static int do_boot_signedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const a
 	disk_partition_t disk_info;
 	unsigned int active_part = 0;
 #endif
-#ifdef CONFIG_USB_XHCI_IPQ
-	int i;
-#endif
 #ifdef CONFIG_IPQ_ELF_AUTH
 	image_info img_info;
 #endif
@@ -444,7 +464,8 @@ static int do_boot_signedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const a
 		if (debug) {
 			printf("Using nand device %d\n", CONFIG_SPI_FLASH_INFO_IDX);
 		}
-	} else if (sfi->flash_type == SMEM_BOOT_NAND_FLASH) {
+	} else if (((sfi->flash_type == SMEM_BOOT_NAND_FLASH) ||
+		(sfi->flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 		if (debug) {
 			printf("Using nand device 0\n");
 		}
@@ -465,6 +486,7 @@ static int do_boot_signedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const a
 	kernel_img_info.kernel_load_addr = request;
 
 	if (ipq_fs_on_nand) {
+#ifdef CONFIG_CMD_UBI
 		/*
 		 * The kernel will be available inside a UBI volume
 		 */
@@ -505,6 +527,7 @@ static int do_boot_signedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const a
 
 		kernel_img_info.kernel_load_size =
 			(unsigned int)ubi_get_volume_size("kernel");
+#endif
 #ifdef CONFIG_QCA_MMC
 	} else if (sfi->flash_type == SMEM_BOOT_MMC_FLASH ||
 			((sfi->flash_type == SMEM_BOOT_SPI_FLASH) &&
@@ -637,14 +660,6 @@ static int do_boot_signedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const a
 
 	dcache_enable();
 
-	board_pci_deinit();
-#ifdef CONFIG_USB_XHCI_IPQ
-	usb_stop();
-        for (i=0; i<CONFIG_USB_MAX_CONTROLLER_COUNT; i++) {
-		board_usb_deinit(i);
-        }
-#endif
-
 	ret = config_select(request, runcmd, sizeof(runcmd));
 
 	if (debug)
@@ -676,9 +691,6 @@ static int do_boot_unsignedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const
 	disk_partition_t disk_info;
 	unsigned int active_part = 0;
 #endif
-#ifdef CONFIG_USB_XHCI_IPQ
-	int i;
-#endif
 
 	if (argc == 2 && strncmp(argv[1], "debug", 5) == 0)
 		debug = 1;
@@ -691,7 +703,8 @@ static int do_boot_unsignedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const
 		printf("Booting from flash\n");
 	}
 
-	if (sfi->flash_type == SMEM_BOOT_NAND_FLASH) {
+	if (((sfi->flash_type == SMEM_BOOT_NAND_FLASH) ||
+			(sfi->flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
 		if (debug) {
 			printf("Using nand device 0\n");
 		}
@@ -780,15 +793,6 @@ static int do_boot_unsignedimg(cmd_tbl_t *cmdtp, int flag, int argc, char *const
 
 	dcache_enable();
 
-	board_pci_deinit();
-
-#ifdef CONFIG_USB_XHCI_IPQ
-	usb_stop();
-        for (i=0; i<CONFIG_USB_MAX_CONTROLLER_COUNT; i++) {
-		board_usb_deinit(i);
-        }
-#endif
-
 	setenv("mtdids", mtdids);
 
 	ret = genimg_get_format((void *)CONFIG_SYS_LOAD_ADDR);
@@ -845,8 +849,11 @@ static int do_bootipq(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
 	ret = qca_scm_call(SCM_SVC_FUSE, QFPROM_IS_AUTHENTICATE_CMD, &buf, sizeof(char));
 
 	aquantia_phy_reset_init_done();
-
-	if (ret == 0 && buf == 1) {
+	/*
+	|| if atf is enable in env ,do_boot_signedimg is skip.
+	|| Note: This features currently support in ipq50XX.
+	*/
+	if (ret == 0 && buf == 1 && !getenv("atf")) {
 		ret = do_boot_signedimg(cmdtp, flag, argc, argv);
 	} else if (ret == 0 || ret == -EOPNOTSUPP) {
 		ret = do_boot_unsignedimg(cmdtp, flag, argc, argv);

@@ -32,6 +32,11 @@ INCLUDES := -I$(CURDIR) \
     -I$(MDIR)/$(HYFI_MC) \
     -I$(STAGING_DIR)/usr/include/qca-ssdk
 
+ifeq ($(strip ${HYFI_BRIDGE_EMESH_ENABLE}),1)
+ccflags-y+=-DHYFI_BRIDGE_EMESH_ENABLE
+INCLUDES+= -I$(STAGING_DIR)/usr/include/emesh-sp
+endif
+
 export EXTRA_CFLAGS += $(INCLUDES)
 
 # Module extra compilation flags
@@ -43,6 +48,10 @@ endif
 
 ifeq ($(strip ${PLC_SUPPORT_NETFILTER}),1)
 ccflags-y+=-DPLC_NF_ENABLE
+endif
+
+ifeq ($(strip ${DISABLE_SSDK_SUPPORT}),1)
+ccflags-y+=-DHYFI_DISABLE_SSDK_SUPPORT
 endif
 
 # #############################################################################

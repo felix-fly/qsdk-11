@@ -318,7 +318,7 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 	txn->dest = c_struct;
 
 	mutex_lock(&qmi->txn_lock);
-	ret = idr_alloc_cyclic(&qmi->txns, txn, 0, INT_MAX, GFP_KERNEL);
+	ret = idr_alloc_cyclic(&qmi->txns, txn, 0, U16_MAX, GFP_KERNEL);
 	if (ret < 0)
 		pr_err("failed to allocate transaction id\n");
 
@@ -345,8 +345,7 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	struct qmi_handle *qmi = txn->qmi;
 	int ret;
 
-	ret = wait_for_completion_interruptible_timeout(&txn->completion,
-							timeout);
+	ret = wait_for_completion_timeout(&txn->completion, timeout);
 
 	mutex_lock(&qmi->txn_lock);
 	mutex_lock(&txn->lock);
@@ -354,9 +353,7 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	mutex_unlock(&txn->lock);
 	mutex_unlock(&qmi->txn_lock);
 
-	if (ret < 0)
-		return ret;
-	else if (ret == 0)
+	if (ret == 0)
 		return -ETIMEDOUT;
 	else
 		return txn->result;
@@ -471,55 +468,94 @@ static void qmi_handle_net_reset(struct qmi_handle *qmi)
 		qmi_send_new_server(qmi, svc);
 }
 
+struct ldebug {
+	struct qmi_handle *qhandle;
+	struct qmi_txn *txn;
+	struct mutex qmi_txn_lock;
+	struct mutex txn_lock;
+	int trace;
+	u64 s_timestamp;
+	u64 e_timestamp;
+} ldebug;
+
 static void qmi_handle_message(struct qmi_handle *qmi,
 			       struct sockaddr_qrtr *sq,
 			       const void *buf, size_t len)
 {
-	const struct qmi_header *hdr;
+	struct qmi_header *hdr;
 	struct qmi_txn tmp_txn;
 	struct qmi_txn *txn = NULL;
 	int ret;
+	bool complete_req = false;
+
+	ldebug.qhandle = qmi;
+	ldebug.s_timestamp = ktime_to_us(ktime_get());
 
 	if (len < sizeof(*hdr)) {
 		pr_err("ignoring short QMI packet\n");
 		return;
 	}
 
-	hdr = buf;
+	hdr = (struct qmi_header *)buf;
+	hdr->txn_id = le16_to_cpu(hdr->txn_id);
+	hdr->msg_id = le16_to_cpu(hdr->msg_id);
+	hdr->msg_len = le16_to_cpu(hdr->msg_len);
 
 	/* If this is a response, find the matching transaction handle */
 	if (hdr->type == QMI_RESPONSE) {
+		ldebug.trace = 1;
+		ldebug.qmi_txn_lock = qmi->txn_lock;
 		mutex_lock(&qmi->txn_lock);
+		ldebug.qmi_txn_lock = qmi->txn_lock;
 		txn = idr_find(&qmi->txns, hdr->txn_id);
 
+		ldebug.trace = 2;
+		ldebug.txn = txn;
 		/* Ignore unexpected responses */
 		if (!txn) {
+			ldebug.trace = 3;
 			mutex_unlock(&qmi->txn_lock);
+			ldebug.e_timestamp = ktime_to_us(ktime_get());
 			return;
 		}
 
+		ldebug.txn_lock = txn->lock;
 		mutex_lock(&txn->lock);
+		ldebug.trace = 4;
 		mutex_unlock(&qmi->txn_lock);
+		ldebug.trace = 5;
 
-		if (txn->dest && txn->ei) {
+		complete_req  = txn->dest && txn->ei;
+
+		if (complete_req) {
+			ldebug.trace = 6;
 			ret = qmi_decode_message(buf, len, txn->ei, txn->dest);
 			if (ret < 0)
 				pr_err("failed to decode incoming message\n");
 
 			txn->result = ret;
-			complete(&txn->completion);
 		} else  {
+			ldebug.trace = 7;
 			qmi_invoke_handler(qmi, sq, txn, buf, len);
 		}
 
+		ldebug.trace = 8;
+		ldebug.txn_lock = txn->lock;
 		mutex_unlock(&txn->lock);
+		if (complete_req)
+			complete(&txn->completion);
+
 	} else {
 		/* Create a txn based on the txn_id of the incoming message */
 		memset(&tmp_txn, 0, sizeof(tmp_txn));
 		tmp_txn.id = hdr->txn_id;
 
+		ldebug.trace = 9;
 		qmi_invoke_handler(qmi, sq, &tmp_txn, buf, len);
 	}
+
+	ldebug.trace = 10;
+	ldebug.e_timestamp = ktime_to_us(ktime_get());
 }
 
 static void qmi_data_ready_work(struct work_struct *work)
@@ -556,6 +592,14 @@ static void qmi_data_ready_work(struct work_struct *work)
 			pr_err("qmi recvmsg failed: %zd\n", msglen);
 			break;
 		}
+
+		qmi->qmi_data_rdy_wrk[qmi->qmidatardyindex].timestamp = ktime_to_us(ktime_get());
+		if (msglen > QMI_HDR_LEN)
+			memcpy(qmi->qmi_data_rdy_wrk[qmi->qmidatardyindex++].data, qmi->recv_buf, QMI_HDR_LEN);
+		else
+			memcpy(qmi->qmi_data_rdy_wrk[qmi->qmidatardyindex++].data, qmi->recv_buf, msglen);
+
+		qmi->qmidatardyindex &= (QMI_LOG_SIZE - 1);
 
 		if (sq.sq_node == qmi->sq.sq_node &&
 		    sq.sq_port == QRTR_PORT_CTRL) {

@@ -23,6 +23,7 @@
 	#size-cells = <0x2>;
 	compatible = "qcom,ipq6018-cp01", "qcom,ipq6018";
 	interrupt-parent = <&intc>;
+	qcom,msm-id = <0x192 0x0>, <0x193 0x0>;
 
 	aliases {
 		serial0 = &blsp1_uart3;
@@ -41,7 +42,11 @@
 
 	chosen {
 		bootargs = "console=ttyMSM0,115200,n8 rw init=/init";
+#ifdef __IPQ_MEM_PROFILE_256_MB__
+		bootargs-append = " swiotlb=1";
+#else
 		bootargs-append = " swiotlb=1 coherent_pool=2M";
+#endif
 	};
 
 };
@@ -185,6 +190,12 @@
 	button_pins: button_pins {
 		wps_button {
 			pins = "gpio9";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+		reset_button {
+			pins = "gpio19";
 			function = "gpio";
 			drive-strength = <8>;
 			bias-pull-up;
@@ -410,6 +421,13 @@
 			linux,input-type = <1>;
 			debounce-interval = <60>;
 		};
+		reset {
+			label = "reset";
+			linux,code = <KEY_POWER>;
+			gpios = <&tlmm 19 GPIO_ACTIVE_LOW>;
+			linux,input-type = <1>;
+			debounce-interval = <60>;
+		};
 	};
 
 	leds {
@@ -493,15 +511,6 @@
 	status = "ok";
 };
 
-&sdhc_2 {
-	pinctrl-0 = <&sd_pins>;
-	pinctrl-names = "default";
-	cd-gpios = <&tlmm 62 1>;
-	sd-ldo-gpios = <&tlmm 66 0>;
-	vqmmc-supply = <&ipq6018_l2_corner>;
-	status = "ok";
-};
-
 &ssphy_0 {
 	status = "ok";
 };
@@ -531,7 +540,9 @@
 };
 
 &pcie0 {
+#if defined(__CNSS2__)
 	status = "ok";
+#endif
 };
 
 &qpic_lcd {

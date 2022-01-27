@@ -4,9 +4,7 @@
 . /lib/functions.sh
 . /lib/functions/network.sh
 
-config_load pppoe
-local iface
-config_get iface "relay" server
+iface=$(uci get pppoe.relay.server)
 [ -n "${iface}" -a ${INTERFACE} = ${iface} ] || return 0
 
 case "$ACTION" in

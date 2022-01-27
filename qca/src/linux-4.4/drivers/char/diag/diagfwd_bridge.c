@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,7 +30,7 @@
 #include "diagfwd_mhi.h"
 #include "diag_dci.h"
 
-#ifdef CONFIG_MSM_MHI
+#ifdef CONFIG_MHI_BUS
 #define diag_mdm_init		diag_mhi_init
 #else
 #define diag_mdm_init		diag_hsic_init
@@ -43,6 +43,18 @@ struct diagfwd_bridge_info bridge_info[NUM_REMOTE_DEV] = {
 		.id = DIAGFWD_MDM,
 		.type = DIAG_DATA_TYPE,
 		.name = "MDM",
+		.inited = 0,
+		.ctxt = 0,
+		.dev_ops = NULL,
+		.dci_read_ptr = NULL,
+		.dci_read_buf = NULL,
+		.dci_read_len = 0,
+		.dci_wq = NULL,
+	},
+	{
+		.id = DIAGFWD_MDM2,
+		.type = DIAG_DATA_TYPE,
+		.name = "MDM2",
 		.inited = 0,
 		.ctxt = 0,
 		.dev_ops = NULL,
@@ -91,19 +103,6 @@ static int diagfwd_bridge_mux_disconnect(int id, int mode)
 	if (id < 0 || id >= NUM_REMOTE_DEV)
 		return -EINVAL;
 
-	if ((mode == DIAG_USB_MODE &&
-		driver->logging_mode == DIAG_MEMORY_DEVICE_MODE) ||
-		(mode == DIAG_MEMORY_DEVICE_MODE &&
-		driver->logging_mode == DIAG_USB_MODE)) {
-		/*
-		 * Don't close the MHI channels when usb is disconnected
-		 * and a process is running in memory device mode.
-		 */
-		return 0;
-	}
-
-	if (bridge_info[id].dev_ops && bridge_info[id].dev_ops->close)
-		bridge_info[id].dev_ops->close(bridge_info[id].ctxt);
 	return 0;
 }
 
@@ -251,7 +250,7 @@ int diag_remote_dev_write_done(int id, unsigned char *buf, int len, int ctxt)
 	if (bridge_info[id].type == DIAG_DATA_TYPE) {
 		if (buf == driver->hdlc_encode_buf)
 			driver->hdlc_encode_buf_len = 0;
-		if (buf == driver->user_space_data_buf)
+		if (buf == (driver->user_space_data_buf + sizeof(int)))
 			driver->user_space_data_busy = 0;
 		err = diag_mux_queue_read(BRIDGE_TO_MUX(id));
 	} else {
@@ -314,7 +313,9 @@ uint16_t diag_get_remote_device_mask()
 
 	for (i = 0; i < NUM_REMOTE_DEV; i++) {
 		if (bridge_info[i].inited &&
-		    bridge_info[i].type == DIAG_DATA_TYPE) {
+		    bridge_info[i].type == DIAG_DATA_TYPE &&
+		    (bridge_info[i].dev_ops->remote_proc_check &&
+		    bridge_info[i].dev_ops->remote_proc_check(i))) {
 			remote_dev |= 1 << i;
 		}
 	}

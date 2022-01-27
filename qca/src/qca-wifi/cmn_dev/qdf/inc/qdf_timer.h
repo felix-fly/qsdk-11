@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2016, 2018-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, 2018-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -66,6 +66,20 @@ static inline void qdf_timer_start(qdf_timer_t *timer, int msec)
 }
 
 /**
+ * qdf_timer_start_on() - start a timer on assigned cpu
+ * @timer: timer to start
+ * @msec: Expiration period in milliseconds
+ * @cpu: cpu to attach timer
+ *
+ *
+ * Return: none
+ */
+static inline void qdf_timer_start_on(qdf_timer_t *timer, int msec, int cpu)
+{
+	__qdf_timer_start_on(timer, msec, cpu);
+}
+
+/**
  * qdf_timer_mod() - modify the timeout on a timer
  * @timer: timer to modify
  * @msec: Expiration period in milliseconds
@@ -74,11 +88,11 @@ static inline void qdf_timer_start(qdf_timer_t *timer, int msec)
  *
  * If QDF timer multiplier is set, the timeout value may get scaled.
  *
- * Return: none
+ * Return: true if @timer is already active, false if @timer was not active
  */
-static inline void qdf_timer_mod(qdf_timer_t *timer, int msec)
+static inline bool qdf_timer_mod(qdf_timer_t *timer, int msec)
 {
-	__qdf_timer_mod(timer, msec);
+	return __qdf_timer_mod(timer, msec);
 }
 
 /**

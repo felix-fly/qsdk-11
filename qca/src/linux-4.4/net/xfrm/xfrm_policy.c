@@ -3039,6 +3039,9 @@ static int __net_init xfrm_net_init(struct net *net)
 	spin_lock_init(&net->xfrm.xfrm_state_lock);
 	rwlock_init(&net->xfrm.xfrm_policy_lock);
 	mutex_init(&net->xfrm.xfrm_cfg_mutex);
+	spin_lock_init(&net->xfrm.xfrm_event_lock);
+
+	INIT_LIST_HEAD(&net->xfrm.event_notifier_list);
 
 	rv = xfrm_statistics_init(net);
 	if (rv < 0)

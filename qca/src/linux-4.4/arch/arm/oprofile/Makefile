@@ -1,3 +1,5 @@
+
+KASAN_SANITIZE := n
 obj-$(CONFIG_OPROFILE) += oprofile.o
 
 DRIVER_OBJS = $(addprefix ../../../drivers/oprofile/, \

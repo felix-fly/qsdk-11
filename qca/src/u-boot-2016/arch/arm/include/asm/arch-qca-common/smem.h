@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, 2020 The Linux Foundation. All rights reserved.
 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -39,6 +39,7 @@ enum {
 	SMEM_BOOT_SPI_FLASH       = 6,
 	SMEM_BOOT_NORPLUSNAND     = 7,
 	SMEM_BOOT_NORPLUSEMMC     = 8,
+	SMEM_BOOT_QSPI_NAND_FLASH  = 11,
 };
 
 struct version_entry
@@ -60,6 +61,7 @@ int smem_get_boot_flash(uint32_t *flash_type,
 			uint32_t *flash_block_size,
 			uint32_t *flash_density);
 int smem_getpart(char *name, uint32_t *start, uint32_t *size);
+int smem_getpart_from_offset(uint32_t offset, uint32_t *start, uint32_t *size);
 int getpart_offset_size(char *part_name, uint32_t *offset, uint32_t *size);
 unsigned int smem_get_board_machtype(void);
 uint32_t get_nand_block_size(uint8_t dev_id);

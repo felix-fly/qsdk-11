@@ -31,7 +31,7 @@ static struct cnss_dfs_nol_info {
 int cnss_set_wlan_unsafe_channel(u16 *unsafe_ch_list, u16 ch_count)
 {
 	mutex_lock(&unsafe_channel_list_lock);
-	if ((!unsafe_ch_list) || (ch_count > CNSS_MAX_CH_NUM)) {
+	if (!unsafe_ch_list || ch_count > CNSS_MAX_CH_NUM) {
 		mutex_unlock(&unsafe_channel_list_lock);
 		return -EINVAL;
 	}
@@ -83,13 +83,12 @@ int cnss_wlan_set_dfs_nol(const void *info, u16 info_len)
 		return -EINVAL;
 	}
 
-	temp = kmalloc(info_len, GFP_KERNEL);
+	temp = kmemdup(info, info_len, GFP_KERNEL);
 	if (!temp) {
 		mutex_unlock(&dfs_nol_info_lock);
 		return -ENOMEM;
 	}
 
-	memcpy(temp, info, info_len);
 	dfs_info = &dfs_nol_info;
 	kfree(dfs_info->dfs_nol_info);
 

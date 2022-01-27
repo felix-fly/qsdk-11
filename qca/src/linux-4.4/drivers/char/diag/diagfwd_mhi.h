@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -14,7 +14,6 @@
 #define DIAGFWD_MHI_H
 
 #include "diagchar.h"
-#include <linux/msm_mhi.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/completion.h>
@@ -33,16 +32,16 @@
 #include <linux/tty.h>
 #include <linux/delay.h>
 #include <linux/ipc_logging.h>
-#include <linux/msm_mhi.h>
+#include <linux/mhi.h>
 
-#define MHI_1			0
-
+enum {
+	MHI_1,
+	MHI_2,
 #ifdef CONFIG_MHI_DCI
-#define MHI_DCI_1		1
-#define NUM_MHI_DEV		2
-#else
-#define NUM_MHI_DEV		1
+	MHI_DCI_1,
 #endif
+	NUM_MHI_DEV
+};
 
 #define TYPE_MHI_READ_CH	0
 #define TYPE_MHI_WRITE_CH	1
@@ -57,12 +56,8 @@ struct diag_mhi_buf_tbl_t {
 
 struct diag_mhi_ch_t {
 	uint8_t type;
-	u32 channel;
-	enum MHI_CLIENT_CHANNEL chan;
-	atomic_t opened;
 	spinlock_t lock;
-	struct mhi_client_info_t client_info;
-	struct mhi_client_handle *hdl;
+	atomic_t opened;
 	struct list_head buf_tbl;
 };
 
@@ -73,8 +68,10 @@ struct diag_mhi_info {
 	int mempool_init;
 	int num_read;
 	uint8_t enabled;
+	struct mhi_device *mhi_dev;
 	char name[DIAG_MHI_NAME_SZ];
 	struct work_struct read_work;
+	struct list_head read_done_list;
 	struct work_struct read_done_work;
 	struct work_struct open_work;
 	struct work_struct close_work;
@@ -89,5 +86,6 @@ extern struct diag_mhi_info diag_mhi[NUM_MHI_DEV];
 
 int diag_mhi_init(void);
 void diag_mhi_exit(void);
-
+void diag_register_with_mhi(void);
+void diag_unregister_mhi(void);
 #endif

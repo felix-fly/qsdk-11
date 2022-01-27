@@ -9,6 +9,7 @@
 		    - "qcom,pcie-apq8084" for apq8084
 		    - "qcom,pcie-ipq4019" for ipq4019
 		    - "qcom,pcie-ipq807x" for ipq807x
+		    - "qcom,pcie-ipq5018" for ipq5018
 
 - reg:
 	Usage: required

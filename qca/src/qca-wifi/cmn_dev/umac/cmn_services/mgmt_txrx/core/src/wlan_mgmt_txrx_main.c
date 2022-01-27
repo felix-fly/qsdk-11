@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -30,7 +30,7 @@ QDF_STATUS wlan_mgmt_txrx_desc_pool_init(
 {
 	uint32_t i;
 
-	mgmt_txrx_info(
+	mgmt_txrx_debug(
 			"mgmt_txrx ctx: %pK pdev: %pK mgmt desc pool size %d",
 			mgmt_txrx_pdev_ctx, mgmt_txrx_pdev_ctx->pdev,
 			MGMT_DESC_POOL_MAX);
@@ -124,13 +124,14 @@ struct mgmt_txrx_desc_elem_t *wlan_mgmt_txrx_desc_get(
 					  entry);
 	mgmt_txrx_desc->in_use = true;
 
+	qdf_spin_unlock_bh(&mgmt_txrx_pdev_ctx->mgmt_desc_pool.desc_pool_lock);
+
 	/* acquire the wakelock when there are pending mgmt tx frames */
 	qdf_wake_lock_timeout_acquire(&mgmt_txrx_pdev_ctx->wakelock_tx_cmp,
 				      MGMT_TXRX_WAKELOCK_TIMEOUT_TX_CMP);
 	qdf_runtime_pm_prevent_suspend(
 		&mgmt_txrx_pdev_ctx->wakelock_tx_runtime_cmp);
 
-	qdf_spin_unlock_bh(&mgmt_txrx_pdev_ctx->mgmt_desc_pool.desc_pool_lock);
 
 	return mgmt_txrx_desc;
 }
@@ -140,6 +141,7 @@ void wlan_mgmt_txrx_desc_put(
 			uint32_t desc_id)
 {
 	struct mgmt_txrx_desc_elem_t *desc;
+	bool release_wakelock = false;
 
 	desc = &mgmt_txrx_pdev_ctx->mgmt_desc_pool.pool[desc_id];
 	qdf_spin_lock_bh(&mgmt_txrx_pdev_ctx->mgmt_desc_pool.desc_pool_lock);
@@ -162,13 +164,51 @@ void wlan_mgmt_txrx_desc_put(
 
 	/* release the wakelock if there are no pending mgmt tx frames */
 	if (mgmt_txrx_pdev_ctx->mgmt_desc_pool.free_list.count ==
-	    mgmt_txrx_pdev_ctx->mgmt_desc_pool.free_list.max_size) {
+	    mgmt_txrx_pdev_ctx->mgmt_desc_pool.free_list.max_size)
+		release_wakelock = true;
+
+	qdf_spin_unlock_bh(&mgmt_txrx_pdev_ctx->mgmt_desc_pool.desc_pool_lock);
+
+	if (release_wakelock) {
 		qdf_runtime_pm_allow_suspend(
 			&mgmt_txrx_pdev_ctx->wakelock_tx_runtime_cmp);
 		qdf_wake_lock_release(&mgmt_txrx_pdev_ctx->wakelock_tx_cmp,
 				      MGMT_TXRX_WAKELOCK_REASON_TX_CMP);
 	}
-
-	qdf_spin_unlock_bh(&mgmt_txrx_pdev_ctx->mgmt_desc_pool.desc_pool_lock);
-
 }
+
+#ifdef WLAN_IOT_SIM_SUPPORT
+QDF_STATUS iot_sim_mgmt_tx_update(struct wlan_objmgr_psoc *psoc,
+				  struct wlan_objmgr_vdev *vdev,
+				  qdf_nbuf_t buf)
+{
+	struct wlan_lmac_if_rx_ops *rx_ops;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+
+	rx_ops = wlan_psoc_get_lmac_if_rxops(psoc);
+	if (!rx_ops) {
+		mgmt_txrx_err("rx_ops is NULL");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+	if (rx_ops->iot_sim_rx_ops.iot_sim_cmd_handler) {
+		status = rx_ops->iot_sim_rx_ops.iot_sim_cmd_handler(vdev,
+								    buf,
+								    NULL,
+								    true,
+								    NULL);
+		if (status == QDF_STATUS_E_NULL_VALUE)
+			mgmt_txrx_err("iot_sim frame drop");
+		else
+			status = QDF_STATUS_SUCCESS;
+	}
+
+	return status;
+}
+#else
+QDF_STATUS iot_sim_mgmt_tx_update(struct wlan_objmgr_psoc *psoc,
+				  struct wlan_objmgr_vdev *vdev,
+				  qdf_nbuf_t buf)
+{
+	return QDF_STATUS_SUCCESS;
+}
+#endif

@@ -141,6 +141,9 @@ static void sdhci_clear_power_ctrl_irq(struct sdhci_msm_data *data)
  */
 void sdhci_msm_init(struct sdhci_host *host, struct sdhci_msm_data *config)
 {
+	uint32_t io_switch;
+
+#ifndef SDCC_MCI_REMOVED
 	/* Disable HC mode */
 	RMWREG32((config->pwrctl_base + SDCC_MCI_HC_MODE), SDHCI_HC_START_BIT, SDHCI_HC_WIDTH, 0);
 
@@ -152,11 +155,40 @@ void sdhci_msm_init(struct sdhci_host *host, struct sdhci_msm_data *config)
 
 	/* Enable sdhc mode */
 	RMWREG32((config->pwrctl_base + SDCC_MCI_HC_MODE), SDHCI_HC_START_BIT, SDHCI_HC_WIDTH, SDHCI_HC_MODE_EN);
+#else
+	uint8_t val;
 
+	/* Vendor specific register is not reset during the soft reset of the
+	 * controller. If the previous stage bootloaders leave the value to unknown
+	 * state there could be failures while initilizing the card. Set the vendor
+	 * specific register to its reset value to make sure the register is in its
+	 * reset state.
+	 */
+	REG_WRITE32(host, 0xA1C, SDCC_VENDOR_SPECIFIC_FUNC);
+
+	/* As per SDCC HPG, the SD bus power should be turned off,
+	 * for doing complete clean SW reset for all while power is on.
+	 */
+	val = REG_READ8(host, SDHCI_HOST_CTRL1_REG);
+	REG_WRITE8(host,(val & (~SDHCI_POWER_ON)), SDHCI_PWR_CTRL_REG);
+#endif
 	/*
 	 * Reset the controller
 	 */
 	sdhci_reset(host, SDHCI_SOFT_RESET);
+
+	/*
+	 * Some platforms have same SDC instance shared between emmc & sd card.
+	 * For such platforms the emmc IO voltage has to be switched from 3.3 to
+	 * 1.8 for the contoller to work with emmc.
+	 */
+
+	if(config->use_io_switch)
+	{
+		io_switch = REG_READ32(host, SDCC_VENDOR_SPECIFIC_FUNC);
+		io_switch |= HC_IO_PAD_PWR_SWITCH | HC_IO_PAD_PWR_SWITCH_EN;
+		REG_WRITE32(host, io_switch, SDCC_VENDOR_SPECIFIC_FUNC);
+	}
 
 	/*
 	 * CORE_SW_RST may trigger power irq if previous status of PWRCTL
@@ -439,8 +471,10 @@ static uint32_t sdhci_msm_cdclp533_calibration(struct sdhci_host *host)
 	/* Configure the clocks needed for CDC */
 	clock_config_cdc(host->msm_host->slot);
 
+#ifndef SDCC_MCI_REMOVED
 	/* Set the FF_CLK_SW_RST_DIS to 1 */
 	REG_WRITE32(host, (REG_READ32(host, SDCC_MCI_HC_MODE) | FW_CLK_SW_RST_DIS), SDCC_MCI_HC_MODE);
+#endif
 
 	/* Write 1 to CMD_DAT_TRACK_SEL field in DLL_CONFIG */
 	REG_WRITE32(host, (REG_READ32(host, SDCC_DLL_CONFIG_REG) | CMD_DAT_TRACK_SEL), SDCC_DLL_CONFIG_REG);
@@ -632,7 +666,9 @@ out:
  */
 void sdhci_mode_disable(struct sdhci_host *host)
 {
+#ifndef SDCC_MCI_REMOVED
 	/* Disable HC mode */
 	RMWREG32((host->msm_host->pwrctl_base + SDCC_MCI_HC_MODE), SDHCI_HC_START_BIT, SDHCI_HC_WIDTH, 0);
+#endif
 }
 

@@ -92,6 +92,8 @@ drv_mac80211_init_device_config() {
                short_gi_40 \
 	       max_amsdu \
                dsss_cck_40
+	config_add_int edmg_channel
+	config_add_boolean enable_edmg
 
 }
 
@@ -139,6 +141,8 @@ mac80211_hostapd_setup_base() {
 	[ "$auto_channel" -gt 0 ] && channel=acs_survey
 	[ "$auto_channel" -gt 0 ] && json_get_values channel_list channels
 
+	json_get_vars edmg_channel
+	json_get_vars enable_edmg
 	json_get_vars noscan
 	json_get_values ht_capab_list ht_capab
 
@@ -173,6 +177,19 @@ mac80211_hostapd_setup_base() {
 		*) ieee80211n= ;;
 	esac
 
+	# When EDMG is enabled for AD, make sure ieee80211n is not set
+	[ "$hwmode" = "ad" ] && [ "$enable_edmg" -eq 1 ] && {
+		if [ "$auto_channel" -gt 0 ]; then
+			ieee80211n=""
+			append base_cfg "enable_edmg=$enable_edmg" "$N"
+		elif [ -n "$edmg_channel" ]; then
+			if [ "$(($edmg_channel))" -gt 8 ] && [ "$((edmg_channel))" -lt 12 ]; then
+				ieee80211n=""
+				append base_cfg "enable_edmg=$enable_edmg" "$N"
+				append base_cfg "edmg_channel=$edmg_channel" "$N"
+			fi
+		fi
+	}
 
 	[ -n "$ieee80211n" ] && {
 		append base_cfg "ieee80211n=1" "$N"
@@ -562,7 +579,7 @@ mac80211_iw_interface_add() {
 		ip link show dev "$ifname" >/dev/null 2>/dev/null && rc=0
 	}
 
-	[ "$rc" = 234 ] && [ "$hwmode" = "11ad" ] && {
+	[[ "$rc" = 234 -o "$rc" = 240 ]] && [ "$hwmode" = "11ad" ] && {
 		# In case of 11ad, interface cannot be removed, so at list one interface will always exist,
 		# in such case do not fail.
 		return 0;

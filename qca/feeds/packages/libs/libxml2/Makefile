@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2006-2014 OpenWrt.org
+# Copyright (C) 2006-2016 OpenWrt.org
 #
 # This is free software, licensed under the GNU General Public License v2.
 # See /LICENSE for more information.
@@ -8,23 +8,22 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=libxml2
-PKG_VERSION:=2.9.2
-PKG_RELEASE:=3
+PKG_VERSION:=2.9.9
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=http://gd.tuwien.ac.at/languages/libxml/ \
-	http://xmlsoft.org/sources/ \
-	ftp://fr.rpmfind.net/pub/libxml/
-PKG_MD5SUM:=9e6a9aca9d155737868b3dc5fd82f788
+PKG_SOURCE_URL:=http://xmlsoft.org/sources/
+PKG_HASH:=94fb70890143e3c6549f265cee93ec064c80a84c42ad0f23e85ee1fd6540a871
 
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=COPYING
+PKG_CPE_ID:=cpe:/a:xmlsoft:libxml2
 
 PKG_MAINTAINER:=Michael Heimpold <mhei@heimpold.de>
 
 PKG_FIXUP:=autoreconf
 PKG_INSTALL:=1
-PKG_BUILD_PARALLEL:=1
+PKG_BUILD_PARALLEL:=0
 PKG_BUILD_DEPENDS:=binutils
 
 include $(INCLUDE_DIR)/host-build.mk
@@ -119,6 +118,10 @@ define Build/InstallDev
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libxml2.{la,a,so*} $(1)/usr/lib/
 
+	$(INSTALL_DIR) $(1)/usr/lib/cmake/libxml2
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/cmake/libxml2/libxml2-config.cmake \
+		$(1)/usr/lib/cmake/libxml2
+
 	$(INSTALL_DIR) $(1)/usr/lib/pkgconfig
 	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/lib/pkgconfig/libxml-2.0.pc $(1)/usr/lib/pkgconfig/
 
@@ -129,6 +132,11 @@ endef
 define Package/libxml2/install
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libxml2.so* $(1)/usr/lib/
+endef
+
+define Host/Install
+	$(SED) 's,^\(prefix\|exec_prefix\)=.*,\1=$(STAGING_DIR)/usr,g' $(HOST_BUILD_DIR)/xml2-config
+	$(call Host/Install/Default)
 endef
 
 $(eval $(call HostBuild))

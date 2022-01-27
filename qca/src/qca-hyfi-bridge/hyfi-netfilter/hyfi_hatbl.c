@@ -70,10 +70,18 @@ static inline void hatbl_delete(struct hyfi_net_bridge *br,
 }
 
 /* Clean up the expired entries in ha table.*/
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+void hyfi_hatbl_cleanup(struct timer_list *t)
+#else
 void hyfi_hatbl_cleanup(unsigned long _data)
+#endif
 {
 	u_int32_t i, aging = 0;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	struct hyfi_net_bridge *br = from_timer(br, t, hatbl_timer);
+#else
 	struct hyfi_net_bridge *br = (struct hyfi_net_bridge *) _data;
+#endif
 	unsigned long this_timer, next_timer = jiffies
 		+ msecs_to_jiffies(HYFI_HACTIVE_TBL_AGING_TIME);
 
@@ -150,6 +158,10 @@ void hyfi_hatbl_delete_by_port(struct hyfi_net_bridge *br,
 
 static void hatbl_fillbuf(struct net_hatbl_entry *ha, struct __hatbl_entry *hae)
 {
+        if(!ha || !ha->dst || !ha->dst->dev) {
+             DEBUG_ERROR("hyfi: ADD_HA-entry is NULL\n");
+             return;
+        }
 	memcpy(hae->da, ha->da.addr, ETH_ALEN);
 	memcpy(hae->sa, ha->sa.addr, ETH_ALEN);
 	memcpy(hae->id, ha->id.addr, ETH_ALEN);
@@ -782,7 +794,11 @@ void hyfi_hatbl_update_mcast_stats(struct net_bridge *br, struct sk_buff *skb,
 
 static void hyfi_hatbl_timer_init(struct hyfi_net_bridge *br)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	timer_setup(&br->hatbl_timer, hyfi_hatbl_cleanup, 0);
+#else
 	setup_timer(&br->hatbl_timer, hyfi_hatbl_cleanup, (unsigned long) br);
+#endif
 	mod_timer(&br->hatbl_timer, jiffies + msecs_to_jiffies(HYFI_HACTIVE_TBL_AGING_TIME));
 }
 

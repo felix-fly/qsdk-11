@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -320,7 +320,10 @@ typedef sw_error_t (*adpt_switch_port_loopback_set_func)(a_uint32_t dev_id,
 			fal_port_t port_id, fal_loopback_config_t *loopback_cfg);
 typedef sw_error_t (*adpt_switch_port_loopback_get_func)(a_uint32_t dev_id,
 			fal_port_t port_id, fal_loopback_config_t *loopback_cfg);
-
+typedef sw_error_t (*adpt_port_netdev_notify_func)(struct qca_phy_priv *priv,
+			a_uint32_t port_id);
+typedef sw_error_t (*adpt_port_phy_status_get_func)(a_uint32_t dev_id,
+			fal_port_t port_id, struct port_phy_status *phy_status);
 // mirror
 typedef sw_error_t (*adpt_mirr_port_in_set_func)(a_uint32_t dev_id, fal_port_t port_id,
                          a_bool_t enable);
@@ -884,6 +887,10 @@ typedef sw_error_t (*adpt_policer_time_slot_set_func)(a_uint32_t dev_id, a_uint3
 
 typedef sw_error_t (*adpt_policer_global_counter_get_func)(a_uint32_t dev_id,
 		fal_policer_global_counter_t *counter);
+typedef sw_error_t (*adpt_policer_bypass_en_set_func)(a_uint32_t dev_id,
+	fal_policer_frame_type_t frame_type, a_bool_t enable);
+typedef sw_error_t (*adpt_policer_bypass_en_get_func)(a_uint32_t dev_id,
+	fal_policer_frame_type_t frame_type, a_bool_t *enable);
 
 /* misc */
 typedef sw_error_t (*adpt_debug_port_counter_enable_func)(a_uint32_t dev_id,
@@ -892,6 +899,12 @@ typedef sw_error_t (*adpt_debug_port_counter_status_get_func)(a_uint32_t dev_id,
 			fal_port_t port_id, fal_counter_en_t * cnt_en);
 typedef sw_error_t (*adpt_debug_counter_get_func)(a_bool_t show_type);
 typedef sw_error_t (*adpt_debug_counter_set_func)(void);
+typedef sw_error_t (*adpt_intr_port_link_mask_set_func) (a_uint32_t dev_id,
+			fal_port_t port_id, a_uint32_t intr_mask);
+typedef sw_error_t (*adpt_intr_port_link_mask_get_func) (a_uint32_t dev_id,
+			fal_port_t port_id, a_uint32_t * intr_mask);
+typedef sw_error_t (*adpt_intr_port_link_status_get_func)(a_uint32_t dev_id,
+			fal_port_t port_id, a_uint32_t * intr_status);
 
 /* uniphy */
 typedef sw_error_t (*adpt_uniphy_mode_set_func)(a_uint32_t dev_id, a_uint32_t index, a_uint32_t mode);
@@ -1022,6 +1035,16 @@ typedef sw_error_t (*adpt_sfp_enhanced_cfg_get_func)(a_uint32_t dev_id,
 		a_uint32_t port_id, fal_sfp_enhanced_cfg_t *enhanced_feature);
 typedef sw_error_t (*adpt_sfp_rate_encode_get_func)(a_uint32_t dev_id,
 		a_uint32_t port_id, fal_sfp_rate_encode_t *encode);
+
+/*led*/
+typedef sw_error_t (*adpt_led_ctrl_pattern_set_func)(a_uint32_t dev_id,
+	led_pattern_group_t group, led_pattern_id_t led_pattern_id,
+	led_ctrl_pattern_t * pattern);
+typedef sw_error_t (*adpt_led_ctrl_pattern_get_func)(a_uint32_t dev_id,
+	led_pattern_group_t group, led_pattern_id_t led_pattern_id,
+	led_ctrl_pattern_t * pattern);
+typedef sw_error_t (*adpt_led_ctrl_source_set_func)(a_uint32_t dev_id,
+	a_uint32_t source_id, led_ctrl_pattern_t *pattern);
 
 typedef struct
 {
@@ -1166,6 +1189,7 @@ typedef struct
 	adpt_port_mux_mac_type_set_func adpt_port_mux_mac_type_set;
 	adpt_port_mac_speed_set_func adpt_port_mac_speed_set;
 	adpt_port_mac_duplex_set_func adpt_port_mac_duplex_set;
+	adpt_port_netdev_notify_func adpt_port_netdev_notify_set;
 	adpt_port_polling_sw_sync_func adpt_port_polling_sw_sync_set;
 
 	adpt_port_bridge_txmac_set_func adpt_port_bridge_txmac_set;
@@ -1183,6 +1207,7 @@ typedef struct
 	adpt_port_source_filter_config_get_func adpt_port_source_filter_config_get;
 	adpt_switch_port_loopback_set_func adpt_switch_port_loopback_set;
 	adpt_switch_port_loopback_get_func adpt_switch_port_loopback_get;
+	adpt_port_phy_status_get_func adpt_port_phy_status_get;
 // mirror
 	a_uint32_t adpt_mirror_func_bitmap;
 	adpt_mirr_port_in_set_func adpt_mirr_port_in_set;
@@ -1476,12 +1501,17 @@ typedef struct
 	adpt_port_compensation_byte_set_func adpt_port_compensation_byte_set;
 	adpt_policer_time_slot_set_func adpt_policer_time_slot_set;
 	adpt_policer_global_counter_get_func adpt_policer_global_counter_get;
+	adpt_policer_bypass_en_set_func adpt_policer_bypass_en_set;
+	adpt_policer_bypass_en_get_func adpt_policer_bypass_en_get;
 
 	/* misc */
 	adpt_debug_port_counter_enable_func adpt_debug_port_counter_enable;
 	adpt_debug_port_counter_status_get_func adpt_debug_port_counter_status_get;
 	adpt_debug_counter_set_func adpt_debug_counter_set;
 	adpt_debug_counter_get_func adpt_debug_counter_get;
+	adpt_intr_port_link_mask_set_func adpt_intr_port_link_mask_set;
+	adpt_intr_port_link_mask_get_func adpt_intr_port_link_mask_get;
+	adpt_intr_port_link_status_get_func adpt_intr_port_link_status_get;
 
 	/* uniphy */
 	adpt_uniphy_mode_set_func adpt_uniphy_mode_set;
@@ -1551,6 +1581,10 @@ typedef struct
 	adpt_sfp_ctrl_rate_get_func adpt_sfp_ctrl_rate_get;
 	adpt_sfp_enhanced_cfg_get_func adpt_sfp_enhanced_cfg_get;
 	adpt_sfp_rate_encode_get_func adpt_sfp_rate_encode_get;
+	/*led*/
+	adpt_led_ctrl_pattern_set_func adpt_led_ctrl_pattern_set;
+	adpt_led_ctrl_pattern_get_func adpt_led_ctrl_pattern_get;
+	adpt_led_ctrl_source_set_func adpt_led_ctrl_source_set;
 }adpt_api_t;
 
 
@@ -1561,6 +1595,9 @@ sw_error_t adpt_module_func_ctrl_set(a_uint32_t dev_id,
 sw_error_t adpt_module_func_ctrl_get(a_uint32_t dev_id,
 		a_uint32_t module, fal_func_ctrl_t *func_ctrl);
 sw_error_t adpt_module_func_init(a_uint32_t dev_id, ssdk_init_cfg *cfg);
+#ifdef SCOMPHY
+a_uint32_t adapt_scomphy_revision_get(a_uint32_t dev_id);
+#endif
 #ifdef __cplusplus
 }
 #endif                          /* __cplusplus */

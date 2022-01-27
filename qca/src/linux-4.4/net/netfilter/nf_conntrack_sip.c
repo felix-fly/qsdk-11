@@ -1061,8 +1061,11 @@ static int process_sdp(struct sk_buff *skb, unsigned int protoff,
 					    &rtp_addr, htons(port), t->class,
 					    mediaoff, medialen);
 		if (ret != NF_ACCEPT) {
-			nf_ct_helper_log(skb, ct,
+			if (net_ratelimit()) {
+				nf_ct_helper_log(skb, ct,
 					 "cannot add expectation for voice");
+			}
+
 			return ret;
 		}
 
@@ -1259,7 +1262,10 @@ static int process_register_request(struct sk_buff *skb, unsigned int protoff,
 				    exp, matchoff, matchlen);
 	else {
 		if (nf_ct_expect_related(exp) != 0) {
-			nf_ct_helper_log(skb, ct, "cannot add expectation");
+			if (net_ratelimit()) {
+				nf_ct_helper_log(skb, ct, "cannot add expectation");
+			}
+
 			ret = NF_DROP;
 		} else
 			ret = NF_ACCEPT;

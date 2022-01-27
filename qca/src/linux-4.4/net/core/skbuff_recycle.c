@@ -283,6 +283,7 @@ static int proc_skb_count_show(struct seq_file *seq, void *v)
 	int total;
 #ifdef CONFIG_SKB_RECYCLER_MULTI_CPU
 	unsigned int i;
+	unsigned long flags;
 #endif
 
 	total = 0;
@@ -300,13 +301,13 @@ static int proc_skb_count_show(struct seq_file *seq, void *v)
 		total += len;
 	}
 
-	spin_lock(&glob_recycler.lock);
 	for (i = 0; i < SKB_RECYCLE_MAX_SHARED_POOLS; i++) {
+		spin_lock_irqsave(&glob_recycler.lock, flags);
 		len = skb_queue_len(&glob_recycler.pool[i]);
+		spin_unlock_irqrestore(&glob_recycler.lock, flags);
 		seq_printf(seq, "global_list[%d]: %d\n", i, len);
 		total += len;
 	}
-	spin_unlock(&glob_recycler.lock);
 #endif
 
 	seq_printf(seq, "total: %d\n", total);

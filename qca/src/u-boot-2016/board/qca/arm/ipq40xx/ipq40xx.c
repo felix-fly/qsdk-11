@@ -37,6 +37,9 @@
 
 #define DLOAD_MAGIC_COOKIE 0x10
 #define TCSR_USB_HSPHY_DEVICE_MODE		0x00C700E7
+
+#define TCSR_SOC_HW_VERSION_REG 0x194D000
+
 DECLARE_GLOBAL_DATA_PTR;
 
 #define CPU0_APCS_SAW2_VCTL	0x0b089014
@@ -77,6 +80,9 @@ const add_node_t add_fdt_node[] = {
 
 struct dumpinfo_t dumpinfo_n[] = {
 	{ "EBICS0.BIN", 0x80000000, 0x10000000, 0 },
+	{ "EBICS2.BIN", 0xA0000000, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS1.BIN", CONFIG_UBOOT_END_ADDR, 0x10000000, 0, 0, 0, 0, 1 },
+	{ "EBICS0.BIN", 0x80000000, CONFIG_QCA_UBOOT_OFFSET, 0, 0, 0, 0, 1 },
 };
 
 int dump_entries_n = ARRAY_SIZE(dumpinfo_n);
@@ -155,7 +161,7 @@ void board_nand_init(void)
 {
 	int gpio_node;
 
-	qpic_nand_init();
+	qpic_nand_init(NULL);
 
 	gpio_node = fdt_path_offset(gd->fdt_blob, "/spi/spi_gpio");
 	if (gpio_node >= 0) {
@@ -198,6 +204,7 @@ int board_eth_init(bd_t *bis)
 	switch (gd->bd->bi_arch_number) {
 	case MACH_TYPE_IPQ40XX_AP_DK01_1_S1:
 	case MACH_TYPE_IPQ40XX_AP_DK01_1_C2:
+	case MACH_TYPE_IPQ40XX_AP_DK05_1_C1:
 		/* 8075 out of reset */
 		mdelay(1);
 		gpio_set_value(62, 1);
@@ -577,6 +584,8 @@ unsigned int get_dts_machid(unsigned int machid)
 	{
 		case MACH_TYPE_IPQ40XX_AP_DK04_1_C6:
 			return MACH_TYPE_IPQ40XX_AP_DK04_1_C1;
+		case MACH_TYPE_IPQ40XX_AP_DK05_1_C1:
+			return MACH_TYPE_IPQ40XX_AP_DK01_1_C2;
 		default:
 			return machid;
 	}
@@ -757,4 +766,32 @@ void fdt_fixup_cpus_node(void *blob)
 			printf("fixup_cpus_node: can't disable cpu3\n");
 	}
 	return;
+}
+
+void ipq_uboot_fdt_fixup(void)
+{
+	int ret, len;
+	const char *config = "config@ap.dk05.1-c1";
+	len = fdt_totalsize(gd->fdt_blob) + strlen(config) + 1;
+
+	if (gd->bd->bi_arch_number == MACH_TYPE_IPQ40XX_AP_DK05_1_C1)
+	{
+		/*
+		 * Open in place with a new length.
+		 */
+		ret = fdt_open_into(gd->fdt_blob, (void *)gd->fdt_blob, len);
+		if (ret)
+			 debug("uboot-fdt-fixup: Cannot expand FDT: %s\n", fdt_strerror(ret));
+
+		ret = fdt_setprop((void *)gd->fdt_blob, 0, "config_name",
+				config, (strlen(config)+1));
+		if (ret)
+			debug("uboot-fdt-fixup: unable to set config_name(%d)\n", ret);
+	}
+	return;
+}
+
+int get_soc_hw_version(void)
+{
+	return readl(TCSR_SOC_HW_VERSION_REG);
 }

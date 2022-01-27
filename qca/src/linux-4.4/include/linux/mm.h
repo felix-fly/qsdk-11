@@ -2318,5 +2318,9 @@ void __init setup_nr_node_ids(void);
 static inline void setup_nr_node_ids(void) {}
 #endif
 
+#ifdef CONFIG_DEBUG_MEM_USAGE
+extern int debug_mem_usage_enabled;
+#endif
+
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

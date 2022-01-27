@@ -70,6 +70,28 @@ ifeq ($(PLATFORM),msm8960)
 			$(LOCAL_DIR)/mdp_lcdc.o
 endif
 
+ifeq ($(PLATFORM),ipq6018)
+	OBJS +=	$(LOCAL_DIR)/qtimer.o \
+			$(LOCAL_DIR)/i2c_qup.o \
+			$(LOCAL_DIR)/qtimer_cp15.o \
+			$(LOCAL_DIR)/uart_dm.o \
+			$(LOCAL_DIR)/qgic.o \
+			$(LOCAL_DIR)/crypto5_eng.o \
+			$(LOCAL_DIR)/crypto5_wrapper.o \
+			$(LOCAL_DIR)/crypto_hash.o \
+			$(LOCAL_DIR)/certificate.o \
+			$(LOCAL_DIR)/image_verify.o \
+			$(LOCAL_DIR)/scm.o \
+			$(LOCAL_DIR)/interrupts.o \
+			$(LOCAL_DIR)/clock-local.o \
+			$(LOCAL_DIR)/clock.o \
+			$(LOCAL_DIR)/clock_pll.o \
+			$(LOCAL_DIR)/board.o \
+			$(LOCAL_DIR)/display.o \
+			$(LOCAL_DIR)/bam_dma.o \
+			$(LOCAL_DIR)/fuse_blower.o
+endif
+
 ifeq ($(PLATFORM),ipq807x)
 	OBJS +=	$(LOCAL_DIR)/qtimer.o \
 			$(LOCAL_DIR)/i2c_qup.o \

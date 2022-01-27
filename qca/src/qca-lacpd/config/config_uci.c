@@ -384,7 +384,8 @@ static bool lacpd_uci_cfg_init(struct lacpd_cfg_sys_init_params *param)
 	struct lacpd_uci_configuration_port *sw_port_cfg;
 	struct lacpd_cfg_lacp_parameters lacp_param;
 	struct lacpd_cfg_lacp_port_parameters lacp_port_param;
-	char port_name[LACPD_CONFIG_SYS_NAME_SIZE];
+	char port_name[LACPD_CONFIG_SYS_NAME_SIZE + LACPD_CONFIG_SYS_NAME_SIZE
+		+1];
 
 	INIT_LIST_HEAD(&cfg->switches);
 	INIT_LIST_HEAD(&cfg->lacp_instances);

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015, 2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, 2016, 2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -72,7 +72,6 @@
 #endif
 #endif /* CONFIG_DYNAMIC_DEBUG */
 
-
 #ifdef NSS_PORTIFMGR_REF_AP148
 /*
  * This holds all the netdev created on the switch ports
@@ -112,7 +111,7 @@ static int nss_portifmgr_open(struct net_device *dev)
 	struct nss_portifmgr_priv *priv = (struct nss_portifmgr_priv *)netdev_priv(dev);
 
 	if (!priv->nss_ctx) {
-		nss_portifmgr_warn("%p: %s registration to NSS not completed yet\n", dev, dev->name);
+		nss_portifmgr_warn("%px: %s registration to NSS not completed yet\n", dev, dev->name);
 		return -EAGAIN;
 	}
 	netif_start_queue(dev);
@@ -148,13 +147,13 @@ static netdev_tx_t nss_portifmgr_start_xmit(struct sk_buff *skb, struct net_devi
 	 * Drop if trying to xmit when registration to NSS is not completed yet.
 	 */
 	if (!priv->nss_ctx) {
-		nss_portifmgr_warn("%p: sending without ctx: if_num %d port_id %d\n",
+		nss_portifmgr_warn("%px: sending without ctx: if_num %d port_id %d\n",
 					dev, priv->port_id, priv->if_num);
 		goto drop;
 	}
 
 	if (skb_headroom(skb) < NSS_PORTIFMGR_EXTRA_HEADER_SIZE) {
-		nss_portifmgr_warn("%p: headroom not enough skb: %p\n", dev, skb);
+		nss_portifmgr_warn("%px: headroom not enough skb: %px\n", dev, skb);
 		goto drop;
 	}
 
@@ -168,7 +167,7 @@ static netdev_tx_t nss_portifmgr_start_xmit(struct sk_buff *skb, struct net_devi
 		tx_skb = skb_copy(skb, GFP_KERNEL);
 		kfree_skb(skb);
 		if (!tx_skb) {
-			nss_portifmgr_warn("%p: failed to copy skb\n", dev);
+			nss_portifmgr_warn("%px: failed to copy skb\n", dev);
 			stats->tx_dropped++;
 			return NETDEV_TX_OK;
 		}
@@ -178,7 +177,7 @@ static netdev_tx_t nss_portifmgr_start_xmit(struct sk_buff *skb, struct net_devi
 	if (likely(status == NSS_TX_SUCCESS)) {
 		return NETDEV_TX_OK;
 	}
-	nss_portifmgr_warn("%p: portid interface failed to xmit the packet : %d\n",
+	nss_portifmgr_warn("%px: portid interface failed to xmit the packet : %d\n",
 								dev, status);
 
 drop:
@@ -343,7 +342,7 @@ void nss_portifmgr_destroy_if(struct net_device *ndev)
 	 */
 	status = nss_portid_tx_unconfigure_port_if_msg(priv->nss_ctx, priv->if_num, priv->port_id);
 	if (status != NSS_TX_SUCCESS) {
-		nss_portifmgr_warn("%p: destroy if_num %d failed\n", priv->nss_ctx, priv->if_num);
+		nss_portifmgr_warn("%px: destroy if_num %d failed\n", priv->nss_ctx, priv->if_num);
 	}
 
 	/*

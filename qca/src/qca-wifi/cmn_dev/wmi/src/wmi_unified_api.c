@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -51,6 +51,15 @@ static const wmi_host_channel_width mode_to_width[WMI_HOST_MODE_MAX] = {
 	[WMI_HOST_MODE_11AX_HE20_2G]  = WMI_HOST_CHAN_WIDTH_20,
 	[WMI_HOST_MODE_11AX_HE40_2G]  = WMI_HOST_CHAN_WIDTH_40,
 	[WMI_HOST_MODE_11AX_HE80_2G]  = WMI_HOST_CHAN_WIDTH_80,
+#endif
+#ifdef WLAN_FEATURE_11BE
+	[WMI_HOST_MODE_11BE_EHT20]     = WMI_HOST_CHAN_WIDTH_20,
+	[WMI_HOST_MODE_11BE_EHT40]     = WMI_HOST_CHAN_WIDTH_40,
+	[WMI_HOST_MODE_11BE_EHT80]     = WMI_HOST_CHAN_WIDTH_80,
+	[WMI_HOST_MODE_11BE_EHT320]    = WMI_HOST_CHAN_WIDTH_320,
+	[WMI_HOST_MODE_11BE_EHT160]    = WMI_HOST_CHAN_WIDTH_160,
+	[WMI_HOST_MODE_11BE_EHT20_2G]  = WMI_HOST_CHAN_WIDTH_20,
+	[WMI_HOST_MODE_11BE_EHT40_2G]  = WMI_HOST_CHAN_WIDTH_40,
 #endif
 };
 
@@ -134,18 +143,6 @@ wmi_unified_vdev_set_nac_rssi_send(wmi_unified_t wmi_handle,
 {
 	if (wmi_handle->ops->send_vdev_set_nac_rssi_cmd)
 		return wmi_handle->ops->send_vdev_set_nac_rssi_cmd(wmi_handle, req);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS
-wmi_unified_hidden_ssid_vdev_restart_send(
-		wmi_unified_t wmi_handle,
-		struct hidden_ssid_vdev_restart_params *restart_params)
-{
-	if (wmi_handle->ops->send_hidden_ssid_vdev_restart_cmd)
-		return wmi_handle->ops->send_hidden_ssid_vdev_restart_cmd(
-			wmi_handle, restart_params);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -388,7 +385,6 @@ QDF_STATUS wmi_crash_inject(wmi_unified_t wmi_handle,
 	return QDF_STATUS_E_FAILURE;
 }
 
-#ifdef FEATURE_FW_LOG_PARSING
 QDF_STATUS
 wmi_unified_dbglog_cmd_send(wmi_unified_t wmi_handle,
 			    struct dbglog_params *dbglog_param)
@@ -400,7 +396,6 @@ wmi_unified_dbglog_cmd_send(wmi_unified_t wmi_handle,
 	return QDF_STATUS_E_FAILURE;
 }
 qdf_export_symbol(wmi_unified_dbglog_cmd_send);
-#endif
 
 QDF_STATUS
 wmi_unified_vdev_set_param_send(wmi_unified_t wmi_handle,
@@ -419,25 +414,6 @@ QDF_STATUS wmi_unified_sifs_trigger_send(wmi_unified_t wmi_handle,
 	if (wmi_handle->ops->send_vdev_sifs_trigger_cmd)
 		return wmi_handle->ops->send_vdev_sifs_trigger_cmd(wmi_handle,
 				param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-/**
- *  wmi_unified_stats_request_send() - WMI request stats function
- *  @param wmi_handle      : handle to WMI.
- *  @param macaddr        : MAC address
- *  @param param    : pointer to hold stats request parameter
- *
- *  Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
- */
-QDF_STATUS wmi_unified_stats_request_send(wmi_unified_t wmi_handle,
-					  uint8_t macaddr[QDF_MAC_ADDR_SIZE],
-					  struct stats_request_params *param)
-{
-	if (wmi_handle->ops->send_stats_request_cmd)
-		return wmi_handle->ops->send_stats_request_cmd(wmi_handle,
-				   macaddr, param);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -472,6 +448,17 @@ QDF_STATUS wmi_unified_packet_log_disable_send(wmi_unified_t wmi_handle,
 	if (wmi_handle->ops->send_packet_log_disable_cmd)
 		return wmi_handle->ops->send_packet_log_disable_cmd(wmi_handle,
 			mac_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_unified_fd_tmpl_send_cmd(wmi_unified_t wmi_handle,
+			     struct fils_discovery_tmpl_params *param)
+{
+	if (wmi_handle->ops->send_fd_tmpl_cmd)
+		return wmi_handle->ops->send_fd_tmpl_cmd(wmi_handle,
+				  param);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -740,6 +727,16 @@ QDF_STATUS wmi_unified_pno_stop_cmd(wmi_unified_t wmi_handle, uint8_t vdev_id)
 	return QDF_STATUS_E_FAILURE;
 }
 
+QDF_STATUS wmi_unified_obss_disable_cmd(wmi_unified_t wmi_handle,
+					uint8_t vdev_id)
+{
+	if (wmi_handle->ops->send_obss_disable_cmd)
+		return wmi_handle->ops->send_obss_disable_cmd(wmi_handle,
+							      vdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
 #ifdef FEATURE_WLAN_SCAN_PNO
 QDF_STATUS wmi_unified_pno_start_cmd(wmi_unified_t wmi_handle,
 				     struct pno_scan_req_params *pno)
@@ -791,6 +788,19 @@ QDF_STATUS wmi_unified_process_ll_stats_get_cmd(wmi_unified_t wmi_handle,
 
 	return QDF_STATUS_E_FAILURE;
 }
+
+#ifdef FEATURE_CLUB_LL_STATS_AND_GET_STATION
+QDF_STATUS wmi_process_unified_ll_stats_get_sta_cmd(
+				wmi_unified_t wmi_handle,
+				const struct ll_stats_get_params *get_req)
+{
+	if (wmi_handle->ops->send_unified_ll_stats_get_sta_cmd)
+		return wmi_handle->ops->send_unified_ll_stats_get_sta_cmd(
+						wmi_handle, get_req);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif
 #endif /* WLAN_FEATURE_LINK_LAYER_STATS */
 
 QDF_STATUS wmi_unified_congestion_request_cmd(wmi_unified_t wmi_handle,
@@ -1028,6 +1038,16 @@ QDF_STATUS wmi_unified_fw_test_cmd(wmi_unified_t wmi_handle,
 
 }
 
+QDF_STATUS wmi_unified_wfa_test_cmd(wmi_unified_t wmi_handle,
+				    struct set_wfatest_params *wmi_wfatest)
+{
+	if (wmi_handle->ops->send_wfa_test_cmd)
+		return wmi_handle->ops->send_wfa_test_cmd(wmi_handle,
+							  wmi_wfatest);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
 QDF_STATUS wmi_unified_unit_test_cmd(wmi_unified_t wmi_handle,
 				     struct wmi_unit_test_cmd *wmi_utest)
 {
@@ -1142,6 +1162,17 @@ wmi_unified_wlan_profile_trigger_cmd_send(wmi_unified_t wmi_handle,
 {
 	if (wmi_handle->ops->send_wlan_profile_trigger_cmd)
 		return wmi_handle->ops->send_wlan_profile_trigger_cmd(
+					wmi_handle, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_unified_wlan_profile_hist_intvl_cmd_send(wmi_unified_t wmi_handle,
+					     struct wlan_profile_params *param)
+{
+	if (wmi_handle->ops->send_wlan_profile_hist_intvl_cmd)
+		return wmi_handle->ops->send_wlan_profile_hist_intvl_cmd(
 					wmi_handle, param);
 
 	return QDF_STATUS_E_FAILURE;
@@ -1286,6 +1317,21 @@ wmi_unified_smart_ant_enable_tx_feedback_cmd_send(
 }
 qdf_export_symbol(wmi_unified_smart_ant_enable_tx_feedback_cmd_send);
 
+#ifdef WLAN_IOT_SIM_SUPPORT
+QDF_STATUS
+wmi_unified_simulation_test_cmd_send(
+		wmi_unified_t wmi_handle,
+		struct simulation_test_params *param)
+{
+	if (wmi_handle->ops->send_simulation_test_cmd)
+		return wmi_handle->ops->send_simulation_test_cmd(
+							wmi_handle, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+qdf_export_symbol(wmi_unified_simulation_test_cmd_send);
+#endif
+
 QDF_STATUS
 wmi_unified_vdev_spectral_configure_cmd_send(
 		wmi_unified_t wmi_handle,
@@ -1396,6 +1442,23 @@ QDF_STATUS wmi_unified_remove_beacon_filter_cmd_send(
 	if (wmi_handle->ops->send_remove_beacon_filter_cmd)
 		return wmi_handle->ops->send_remove_beacon_filter_cmd(
 						wmi_handle, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * wmi_unified_get_pn_send_cmd() - send command to get PN for peer
+ * @wmi_hdl: wmi handle
+ * @wmi_peer_tx_pn_request_cmd_fixed_param: pn request params
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_unified_get_pn_send_cmd(wmi_unified_t wmi_hdl,
+				       struct peer_request_pn_param *pn_params)
+{
+	if (wmi_hdl->ops->send_pdev_get_pn_cmd)
+		return wmi_hdl->ops->send_pdev_get_pn_cmd(wmi_hdl,
+							     pn_params);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -1571,7 +1634,7 @@ bool wmi_service_enabled(wmi_unified_t wmi_handle, uint32_t service_id)
 				wmi_handle->services[service_id]);
 		}
 	} else {
-		WMI_LOGI("Service %d not supported", service_id);
+		wmi_info("Service %d not supported", service_id);
 	}
 
 	return false;
@@ -1620,17 +1683,45 @@ wmi_extract_hal_reg_cap(wmi_unified_t wmi_handle, void *evt_buf,
 	return QDF_STATUS_E_FAILURE;
 }
 
-host_mem_req
-*wmi_extract_host_mem_req_from_service_ready(
+QDF_STATUS
+wmi_extract_hal_reg_cap_ext2(
+		wmi_unified_t wmi_handle, void *evt_buf, uint8_t phy_idx,
+		struct wlan_psoc_host_hal_reg_capabilities_ext2 *hal_reg_cap)
+{
+	if (wmi_handle->ops->extract_hal_reg_cap_ext2)
+		return wmi_handle->ops->extract_hal_reg_cap_ext2(
+			wmi_handle, evt_buf, phy_idx, hal_reg_cap);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+uint32_t
+wmi_extract_num_mem_reqs_from_service_ready(
 		wmi_unified_t wmi_handle,
-		void *evt_buf, uint8_t *num_entries)
+		void *evt_buf)
+{
+	if (wmi_handle->ops->extract_num_mem_reqs)
+		return wmi_handle->ops->extract_num_mem_reqs(wmi_handle,
+				evt_buf);
+
+	return 0;
+}
+
+QDF_STATUS
+wmi_extract_host_mem_req_from_service_ready(wmi_unified_t wmi_handle,
+					    void *evt_buf,
+					    host_mem_req *mem_reqs,
+					    uint32_t num_active_peers,
+					    uint32_t num_peers,
+					    enum wmi_fw_mem_prio fw_prio,
+					    uint16_t idx)
 {
 	if (wmi_handle->ops->extract_host_mem_req)
 		return wmi_handle->ops->extract_host_mem_req(wmi_handle,
-			evt_buf, num_entries);
+				evt_buf, mem_reqs, num_active_peers,
+				num_peers, fw_prio, idx);
 
-	*num_entries = 0;
-	return NULL;
+	return QDF_STATUS_E_FAILURE;
 }
 
 uint32_t wmi_ready_extract_init_status(wmi_unified_t wmi_handle, void *ev)
@@ -1819,6 +1910,23 @@ wmi_extract_fips_event_data(wmi_unified_t wmi_handle, void *evt_buf,
 	return QDF_STATUS_E_FAILURE;
 }
 
+/**
+ * wmi_unified_extract_pn() - extract pn event data
+ * @wmi_handle: wmi handle
+ * @param evt_buf: pointer to event buffer
+ * @param param: pointer to get pn event param
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_unified_extract_pn(wmi_unified_t wmi_hdl, void *evt_buf,
+				  struct wmi_host_get_pn_event *param)
+{
+	if (wmi_hdl->ops->extract_get_pn_data)
+		return wmi_hdl->ops->extract_get_pn_data(wmi_hdl,
+							 evt_buf, param);
+	return QDF_STATUS_E_FAILURE;
+}
+
 #ifdef WLAN_FEATURE_DISA
 QDF_STATUS
 wmi_extract_encrypt_decrypt_resp_params(void *wmi_hdl, void *evt_buf,
@@ -1869,6 +1977,30 @@ wmi_extract_vdev_scan_ev_param(wmi_unified_t wmi_handle, void *evt_buf,
 
 	return QDF_STATUS_E_FAILURE;
 }
+
+#ifdef FEATURE_WLAN_SCAN_PNO
+QDF_STATUS
+wmi_extract_nlo_match_ev_param(wmi_unified_t wmi_handle, void *evt_buf,
+			       struct scan_event *param)
+{
+	if (wmi_handle->ops->extract_nlo_match_ev_param)
+		return wmi_handle->ops->extract_nlo_match_ev_param(wmi_handle,
+			evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_extract_nlo_complete_ev_param(wmi_unified_t wmi_handle, void *evt_buf,
+				  struct scan_event *param)
+{
+	if (wmi_handle->ops->extract_nlo_complete_ev_param)
+		return wmi_handle->ops->extract_nlo_complete_ev_param(
+			wmi_handle, evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif
 
 QDF_STATUS
 wmi_extract_mu_ev_param(wmi_unified_t wmi_handle, void *evt_buf,
@@ -2013,23 +2145,12 @@ wmi_extract_composite_phyerr(wmi_unified_t wmi_handle, void *evt_buf,
 }
 
 QDF_STATUS
-wmi_extract_stats_param(wmi_unified_t wmi_handle, void *evt_buf,
-			wmi_host_stats_event *stats_param)
+wmi_extract_pmf_bcn_protect_stats(wmi_unified_t wmi_handle, void *evt_buf,
+				  wmi_host_pmf_bcn_protect_stats *bcn_stats)
 {
-	if (wmi_handle->ops->extract_all_stats_count)
-		return wmi_handle->ops->extract_all_stats_count(wmi_handle,
-			evt_buf, stats_param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS
-wmi_extract_pdev_stats(wmi_unified_t wmi_handle, void *evt_buf,
-		       uint32_t index, wmi_host_pdev_stats *pdev_stats)
-{
-	if (wmi_handle->ops->extract_pdev_stats)
-		return wmi_handle->ops->extract_pdev_stats(wmi_handle,
-			evt_buf, index, pdev_stats);
+	if (wmi_handle->ops->extract_pmf_bcn_protect_stats)
+		return wmi_handle->ops->extract_pmf_bcn_protect_stats(
+				wmi_handle, evt_buf, bcn_stats);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2053,40 +2174,6 @@ wmi_extract_pdev_ext_stats(wmi_unified_t wmi_handle, void *evt_buf,
 	if (wmi_handle->ops->extract_pdev_ext_stats)
 		return wmi_handle->ops->extract_pdev_ext_stats(wmi_handle,
 			evt_buf, index, pdev_ext_stats);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS
-wmi_extract_peer_stats(wmi_unified_t wmi_handle, void *evt_buf,
-		       uint32_t index, wmi_host_peer_stats *peer_stats)
-{
-	if (wmi_handle->ops->extract_peer_stats)
-		return wmi_handle->ops->extract_peer_stats(wmi_handle,
-			evt_buf, index, peer_stats);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS
-wmi_extract_vdev_stats(wmi_unified_t wmi_handle, void *evt_buf,
-		       uint32_t index, wmi_host_vdev_stats *vdev_stats)
-{
-	if (wmi_handle->ops->extract_vdev_stats)
-		return wmi_handle->ops->extract_vdev_stats(wmi_handle,
-			evt_buf, index, vdev_stats);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_per_chain_rssi_stats(
-		wmi_unified_t wmi_handle, void *evt_buf,
-		uint32_t index,
-		struct wmi_host_per_chain_rssi_stats *rssi_stats)
-{
-	if (wmi_handle->ops->extract_per_chain_rssi_stats)
-		return wmi_handle->ops->extract_per_chain_rssi_stats(wmi_handle,
-			evt_buf, index, rssi_stats);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2123,18 +2210,6 @@ QDF_STATUS wmi_extract_rtt_ev(wmi_unified_t wmi_handle, void *evt_buf,
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS
-wmi_extract_peer_extd_stats(wmi_unified_t wmi_handle, void *evt_buf,
-			    uint32_t index,
-			    wmi_host_peer_extd_stats *peer_extd_stats)
-{
-	if (wmi_handle->ops->extract_peer_extd_stats)
-		return wmi_handle->ops->extract_peer_extd_stats(wmi_handle,
-			evt_buf, index, peer_extd_stats);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 QDF_STATUS wmi_extract_peer_retry_stats(
 	wmi_unified_t wmi_handle, void *evt_buf,
 	uint32_t index, struct wmi_host_peer_retry_stats *peer_retry_stats)
@@ -2142,17 +2217,6 @@ QDF_STATUS wmi_extract_peer_retry_stats(
 	if (wmi_handle->ops->extract_peer_retry_stats)
 		return wmi_handle->ops->extract_peer_retry_stats(wmi_handle,
 			evt_buf, index, peer_retry_stats);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_peer_adv_stats(
-		wmi_unified_t wmi_handle, void *evt_buf,
-		struct wmi_host_peer_adv_stats *peer_adv_stats)
-{
-	if (wmi_handle->ops->extract_peer_adv_stats)
-		return wmi_handle->ops->extract_peer_adv_stats(wmi_handle,
-			evt_buf, peer_adv_stats);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2180,7 +2244,8 @@ wmi_extract_chan_stats(wmi_unified_t wmi_handle, void *evt_buf,
 }
 
 QDF_STATUS wmi_extract_thermal_stats(wmi_unified_t wmi_handle, void *evt_buf,
-				     uint32_t *temp, uint32_t *level,
+				     uint32_t *temp,
+				     enum thermal_throttle_level *level,
 				     uint32_t *pdev_id)
 {
 	if (wmi_handle->ops->extract_thermal_stats)
@@ -2274,6 +2339,18 @@ QDF_STATUS wmi_extract_vdev_nac_rssi_stats(
 	if (wmi_handle->ops->extract_vdev_nac_rssi_stats)
 		return wmi_handle->ops->extract_vdev_nac_rssi_stats(wmi_handle,
 				evt_buf, vdev_nac_rssi_stats);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_extract_vdev_prb_fils_stats(
+		wmi_unified_t wmi_handle, void *evt_buf,
+		uint32_t index,
+		struct wmi_host_vdev_prb_fils_stats *vdev_prb_fils_stats)
+{
+	if (wmi_handle->ops->extract_vdev_prb_fils_stats)
+		return wmi_handle->ops->extract_vdev_prb_fils_stats(wmi_handle,
+				evt_buf, index, vdev_prb_fils_stats);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -2373,6 +2450,22 @@ QDF_STATUS wmi_extract_mac_phy_cap_service_ready_ext(
 	return QDF_STATUS_E_FAILURE;
 }
 
+QDF_STATUS wmi_extract_mac_phy_cap_service_ready_ext2(
+			wmi_unified_t wmi_handle,
+			uint8_t *evt_buf,
+			uint8_t hw_mode_id,
+			uint8_t phy_id,
+			uint8_t phy_idx,
+			struct wlan_psoc_host_mac_phy_caps_ext2 *mac_phy_cap)
+{
+	if (wmi_handle->ops->extract_mac_phy_cap_service_ready_ext2)
+		return wmi_handle->ops->extract_mac_phy_cap_service_ready_ext2(
+				wmi_handle, evt_buf, hw_mode_id, phy_id,
+				phy_idx, mac_phy_cap);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
 QDF_STATUS wmi_extract_reg_cap_service_ready_ext(
 			wmi_unified_t wmi_handle,
 			uint8_t *evt_buf, uint8_t phy_idx,
@@ -2411,6 +2504,48 @@ QDF_STATUS wmi_extract_dbr_ring_cap_service_ready_ext2(
 
 	return QDF_STATUS_E_FAILURE;
 }
+
+QDF_STATUS wmi_extract_scan_radio_cap_service_ready_ext2(
+			wmi_unified_t wmi_handle,
+			uint8_t *evt_buf, uint8_t idx,
+			struct wlan_psoc_host_scan_radio_caps *param)
+{
+	if (wmi_handle->ops->extract_scan_radio_cap_service_ready_ext2)
+		return wmi_handle->ops->
+		       extract_scan_radio_cap_service_ready_ext2(
+				wmi_handle,
+				evt_buf, idx, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+#ifdef WLAN_CONV_SPECTRAL_ENABLE
+QDF_STATUS wmi_extract_pdev_sscan_fw_cmd_fixed_param(
+			wmi_unified_t wmi_handle,
+			uint8_t *evt_buf,
+			struct spectral_startscan_resp_params *param)
+{
+	if (wmi_handle->ops->extract_pdev_sscan_fw_cmd_fixed_param)
+		return wmi_handle->ops->extract_pdev_sscan_fw_cmd_fixed_param(
+				wmi_handle,
+				evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_extract_pdev_sscan_fft_bin_index(
+			wmi_unified_t wmi_handle,
+			uint8_t *evt_buf,
+			struct spectral_fft_bin_markers_160_165mhz *param)
+{
+	if (wmi_handle->ops->extract_pdev_sscan_fft_bin_index)
+		return wmi_handle->ops->extract_pdev_sscan_fft_bin_index(
+				wmi_handle,
+				evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif /* WLAN_CONV_SPECTRAL_ENABLE */
 
 QDF_STATUS wmi_extract_spectral_scaling_params_service_ready_ext(
 			wmi_unified_t wmi_handle,
@@ -2643,6 +2778,19 @@ QDF_STATUS wmi_unified_extract_obss_detection_info(
 	return QDF_STATUS_E_FAILURE;
 }
 
+#if defined(WLAN_SUPPORT_FILS) || defined(CONFIG_BAND_6GHZ)
+QDF_STATUS
+wmi_unified_vdev_fils_enable_cmd_send(struct wmi_unified *wmi_handle,
+				      struct config_fils_params *param)
+{
+	if (wmi_handle->ops->send_vdev_fils_enable_cmd)
+		return wmi_handle->ops->send_vdev_fils_enable_cmd(
+							wmi_handle, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif
+
 #ifdef WLAN_SUPPORT_GREEN_AP
 QDF_STATUS wmi_extract_green_ap_egap_status_info(
 	wmi_unified_t wmi_handle, uint8_t *evt_buf,
@@ -2863,6 +3011,76 @@ wmi_unified_send_obss_spatial_reuse_set_def_thresh_cmd(
 
 	return QDF_STATUS_E_FAILURE;
 }
+
+QDF_STATUS wmi_unified_send_self_srg_bss_color_bitmap_set_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_srg_bss_color_bitmap_set)
+		return wmi_handle->ops->send_self_srg_bss_color_bitmap_set(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_self_srg_partial_bssid_bitmap_set_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_srg_partial_bssid_bitmap_set)
+		return wmi_handle->ops->send_self_srg_partial_bssid_bitmap_set(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_self_srg_obss_color_enable_bitmap_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_srg_obss_color_enable_bitmap)
+		return wmi_handle->ops->
+			send_self_srg_obss_color_enable_bitmap(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_self_srg_obss_bssid_enable_bitmap_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_srg_obss_bssid_enable_bitmap)
+		return wmi_handle->ops->
+			send_self_srg_obss_bssid_enable_bitmap(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_self_non_srg_obss_color_enable_bitmap_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_non_srg_obss_color_enable_bitmap)
+		return wmi_handle->ops->
+			send_self_non_srg_obss_color_enable_bitmap(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_self_non_srg_obss_bssid_enable_bitmap_cmd(
+	wmi_unified_t wmi_handle,  uint32_t bitmap_0,
+	uint32_t bitmap_1, uint8_t pdev_id)
+{
+	if (wmi_handle->ops->send_self_non_srg_obss_bssid_enable_bitmap)
+		return wmi_handle->ops->
+			send_self_non_srg_obss_bssid_enable_bitmap(
+				wmi_handle, bitmap_0, bitmap_1, pdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
 #endif
 
 QDF_STATUS wmi_convert_pdev_id_host_to_target(wmi_unified_t wmi_handle,
@@ -2872,12 +3090,30 @@ QDF_STATUS wmi_convert_pdev_id_host_to_target(wmi_unified_t wmi_handle,
 	if (wmi_handle->ops->convert_pdev_id_host_to_target) {
 		*target_pdev_id =
 			wmi_handle->ops->convert_pdev_id_host_to_target(
+					wmi_handle,
 					host_pdev_id);
 		return QDF_STATUS_SUCCESS;
 	}
 
 	return QDF_STATUS_E_FAILURE;
 }
+
+#ifndef CNSS_GENL
+QDF_STATUS wmi_convert_pdev_id_target_to_host(wmi_unified_t wmi_handle,
+					      uint32_t target_pdev_id,
+					      uint32_t *host_pdev_id)
+{
+	if (wmi_handle->ops->convert_pdev_id_target_to_host) {
+		*host_pdev_id =
+			wmi_handle->ops->convert_pdev_id_target_to_host(
+					wmi_handle,
+					target_pdev_id);
+		return QDF_STATUS_SUCCESS;
+	}
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif
 
 QDF_STATUS
 wmi_unified_send_bss_color_change_enable_cmd(wmi_unified_t wmi_handle,
@@ -2913,33 +3149,6 @@ QDF_STATUS wmi_unified_extract_obss_color_collision_info(
 	return QDF_STATUS_E_FAILURE;
 }
 
-#ifdef WLAN_CFR_ENABLE
-QDF_STATUS wmi_unified_send_peer_cfr_capture_cmd(wmi_unified_t wmi_handle,
-						 struct peer_cfr_params *param)
-{
-	if (wmi_handle->ops->send_peer_cfr_capture_cmd)
-		return wmi_handle->ops->send_peer_cfr_capture_cmd(wmi_handle,
-								  param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-/**
- * wmi_extract_cfr_peer_tx_event_param() - extract tx event params from event
- */
-QDF_STATUS
-wmi_extract_cfr_peer_tx_event_param(wmi_unified_t wmi_handle, void *evt_buf,
-				    wmi_cfr_peer_tx_event_param *peer_tx_event)
-{
-	if (wmi_handle->ops->extract_cfr_peer_tx_event_param)
-		return wmi_handle->ops->extract_cfr_peer_tx_event_param(
-							wmi_handle,
-							evt_buf,
-							peer_tx_event);
-	return QDF_STATUS_E_FAILURE;
-}
-#endif /* WLAN_CFR_ENABLE */
-
 QDF_STATUS wmi_unified_send_mws_coex_req_cmd(struct wmi_unified *wmi_handle,
 					     uint32_t vdev_id,
 					     uint32_t cmd_id)
@@ -2974,6 +3183,268 @@ QDF_STATUS wmi_unified_extract_hw_mode_resp(wmi_unified_t wmi,
 		return wmi->ops->extract_hw_mode_resp_event(wmi,
 							    evt_buf,
 							    cmd_status);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+#ifdef FEATURE_ANI_LEVEL_REQUEST
+QDF_STATUS wmi_unified_ani_level_cmd_send(wmi_unified_t wmi_handle,
+					  uint32_t *freqs,
+					  uint8_t num_freqs)
+{
+	if (wmi_handle->ops->send_ani_level_cmd)
+		return wmi_handle->ops->send_ani_level_cmd(wmi_handle, freqs,
+							   num_freqs);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_extract_ani_level(wmi_unified_t wmi_handle,
+					 uint8_t *data,
+					 struct wmi_host_ani_level_event **info,
+					 uint32_t *num_channels)
+{
+	if (wmi_handle->ops->extract_ani_level)
+		return wmi_handle->ops->extract_ani_level(data, info,
+							  num_channels);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif /* FEATURE_ANI_LEVEL_REQUEST */
+
+QDF_STATUS
+wmi_unified_extract_roam_trigger_stats(wmi_unified_t wmi,
+				       void *evt_buf,
+				       struct wmi_roam_trigger_info *trig,
+				       uint8_t idx)
+{
+	if (wmi->ops->extract_roam_trigger_stats)
+		return wmi->ops->extract_roam_trigger_stats(wmi, evt_buf, trig,
+							    idx);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_unified_extract_roam_scan_stats(wmi_unified_t wmi, void *evt_buf,
+				    struct wmi_roam_scan_data *dst, uint8_t idx,
+				    uint8_t chan_idx, uint8_t ap_idx)
+{
+	if (wmi->ops->extract_roam_scan_stats)
+		return wmi->ops->extract_roam_scan_stats(wmi, evt_buf, dst,
+							 idx, chan_idx, ap_idx);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+#ifdef WLAN_FEATURE_PKT_CAPTURE
+QDF_STATUS
+wmi_unified_extract_vdev_mgmt_offload_event(
+				wmi_unified_t wmi, void *evt_buf,
+				struct mgmt_offload_event_params *params)
+{
+	if (wmi->ops->extract_vdev_mgmt_offload_event)
+		return wmi->ops->extract_vdev_mgmt_offload_event(wmi, evt_buf,
+								 params);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif /* WLAN_FEATURE_PKT_CAPTURE */
+
+#ifdef WLAN_FEATURE_PKT_CAPTURE_V2
+QDF_STATUS
+wmi_unified_extract_smart_monitor_event(
+				wmi_unified_t wmi, void *evt_buf,
+				struct smu_event_params *params)
+{
+	if (wmi->ops->extract_smart_monitor_event)
+		return wmi->ops->extract_smart_monitor_event(wmi, evt_buf,
+							     params);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif /* WLAN_FEATURE_PKT_CAPTURE_V2 */
+
+QDF_STATUS
+wmi_unified_extract_roam_result_stats(wmi_unified_t wmi, void *buf,
+				      struct wmi_roam_result *dst,
+				      uint8_t idx)
+{
+	if (wmi->ops->extract_roam_result_stats)
+		return wmi->ops->extract_roam_result_stats(wmi, buf, dst, idx);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_unified_extract_roam_11kv_stats(wmi_unified_t wmi, void *evt_buf,
+				    struct wmi_neighbor_report_data *dst,
+				    uint8_t idx, uint8_t rpt_idx)
+{
+	if (wmi->ops->extract_roam_11kv_stats)
+		return wmi->ops->extract_roam_11kv_stats(wmi, evt_buf, dst, idx,
+							 rpt_idx);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+#ifdef FEATURE_WLAN_TIME_SYNC_FTM
+QDF_STATUS wmi_unified_send_wlan_time_sync_ftm_trigger(wmi_unified_t wmi_handle,
+						       uint32_t vdev_id,
+						       bool burst_mode)
+{
+	if (wmi_handle->ops->send_wlan_time_sync_ftm_trigger_cmd)
+		return wmi_handle->ops->send_wlan_time_sync_ftm_trigger_cmd
+				(wmi_handle, vdev_id, burst_mode);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_wlan_time_sync_qtime(wmi_unified_t wmi_handle,
+						 uint32_t vdev_id,
+						 uint64_t lpass_ts)
+{
+	if (wmi_handle->ops->send_wlan_ts_qtime_cmd)
+		return wmi_handle->ops->send_wlan_ts_qtime_cmd(wmi_handle,
+					vdev_id, lpass_ts);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_extract_time_sync_ftm_start_stop_params(
+				wmi_unified_t wmi_handle, void *evt_buf,
+				struct ftm_time_sync_start_stop_params *param)
+{
+	if (wmi_handle->ops->extract_time_sync_ftm_start_stop_event)
+		return
+		wmi_handle->ops->extract_time_sync_ftm_start_stop_event(
+						wmi_handle, evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_extract_time_sync_ftm_offset(
+			wmi_unified_t wmi_handle, void *evt_buf,
+			struct ftm_time_sync_offset *param)
+{
+	if (wmi_handle->ops->extract_time_sync_ftm_offset_event)
+		return
+		wmi_handle->ops->extract_time_sync_ftm_offset_event(
+						wmi_handle, evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+#endif /* FEATURE_WLAN_TIME_SYNC_FTM */
+
+QDF_STATUS
+wmi_unified_send_injector_frame_config_cmd(wmi_unified_t wmi_handle,
+				 struct wmi_host_injector_frame_params *param)
+{
+	if (wmi_handle->ops->send_injector_config_cmd) {
+		return wmi_handle->ops->send_injector_config_cmd(wmi_handle,
+			param);
+	}
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_cp_stats_cmd(wmi_unified_t wmi_handle,
+					 void *buf_ptr, uint32_t buf_len)
+{
+	if (wmi_handle->ops->send_cp_stats_cmd)
+		return wmi_handle->ops->send_cp_stats_cmd(wmi_handle, buf_ptr,
+							  buf_len);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_unified_extract_cp_stats_more_pending(wmi_unified_t wmi_handle,
+					  void *evt_buf, uint32_t *more_flag)
+{
+	if (wmi_handle->ops->extract_cp_stats_more_pending)
+		return wmi_handle->ops->extract_cp_stats_more_pending(wmi_handle,
+								      evt_buf,
+								      more_flag);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * wmi_unified_send_vdev_tsf_tstamp_action_cmd() - send vdev tsf action command
+ * @wmi: wmi handle
+ * @vdev_id: vdev id
+ *
+ * TSF_TSTAMP_READ_VALUE is the only operation supported
+ * Return: QDF_STATUS_SUCCESS for success or erro code
+ */
+QDF_STATUS wmi_unified_send_vdev_tsf_tstamp_action_cmd(wmi_unified_t wmi_hdl,
+						       uint8_t vdev_id)
+{
+	wmi_unified_t wmi_handle = wmi_hdl;
+
+	if (wmi_handle->ops->send_vdev_tsf_tstamp_action_cmd)
+		return wmi_handle->ops->send_vdev_tsf_tstamp_action_cmd(
+						wmi_handle, vdev_id);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * wmi_extract_vdev_tsf_report_event() - extract vdev tsf report from event
+ * @wmi_handle: wmi handle
+ * @param evt_buf: pointer to event buffer
+ * @wmi_host_tsf_event param: Pointer to hold event info
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_extract_vdev_tsf_report_event(wmi_unified_t wmi_hdl,
+					     uint8_t *evt_buf,
+					     struct wmi_host_tsf_event *param)
+{
+	wmi_unified_t wmi_handle = wmi_hdl;
+
+	if (wmi_handle->ops->extract_vdev_tsf_report_event)
+		return wmi_handle->ops->extract_vdev_tsf_report_event(
+						wmi_handle, evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_extract_pdev_csa_switch_count_status(
+		wmi_unified_t wmi_handle,
+		void *evt_buf,
+		struct pdev_csa_switch_count_status *param)
+{
+	if (wmi_handle->ops->extract_pdev_csa_switch_count_status)
+		return wmi_handle->ops->extract_pdev_csa_switch_count_status(
+				wmi_handle,
+				evt_buf,
+				param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_set_tpc_power_cmd(wmi_unified_t wmi_handle,
+					      uint8_t vdev_id,
+					      struct reg_tpc_power_info *param)
+{
+	if (wmi_handle->ops->send_set_tpc_power_cmd)
+		return wmi_handle->ops->send_set_tpc_power_cmd(wmi_handle,
+								   vdev_id,
+								   param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS
+wmi_extract_dpd_status_ev_param(wmi_unified_t wmi_handle,
+				void *evt_buf,
+				struct wmi_host_pdev_get_dpd_status_event *param)
+{
+	if (wmi_handle->ops->extract_dpd_status_ev_param)
+		return wmi_handle->ops->extract_dpd_status_ev_param(
+				wmi_handle, evt_buf, param);
 
 	return QDF_STATUS_E_FAILURE;
 }

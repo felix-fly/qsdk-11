@@ -12,6 +12,7 @@
 #include <linux/qrtr.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
+#include <linux/mutex.h>
 
 struct socket;
 
@@ -34,6 +35,9 @@ struct qmi_header {
 #define QMI_INDICATION	4
 
 #define QMI_COMMON_TLV_TYPE 0
+
+#define QMI_HDR_LEN	10
+#define QMI_LOG_SIZE	256
 
 enum qmi_elem_type {
 	QMI_EOTI,
@@ -166,7 +170,7 @@ struct qmi_ops {
 struct qmi_txn {
 	struct qmi_handle *qmi;
 
-	int id;
+	u16 id;
 
 	struct mutex lock;
 	struct completion completion;
@@ -193,6 +197,11 @@ struct qmi_msg_handler {
 	size_t decoded_size;
 	void (*fn)(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 		   struct qmi_txn *txn, const void *decoded);
+};
+
+struct qmi_log_data {
+	u64 timestamp;
+	unsigned char data[QMI_HDR_LEN];
 };
 
 /**
@@ -234,6 +243,11 @@ struct qmi_handle {
 	struct mutex txn_lock;
 
 	const struct qmi_msg_handler *handlers;
+	struct list_head data_list;
+	struct completion complete;
+	struct qmi_log_data qmi_data_rdy_wrk[QMI_LOG_SIZE];
+	unsigned int qmidatardyindex;
+	atomic_t cnt, async_cnt, async_rsp, async_req, pass, fail;
 };
 
 int qmi_add_lookup(struct qmi_handle *qmi, unsigned int service,

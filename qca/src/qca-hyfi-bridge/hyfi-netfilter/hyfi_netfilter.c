@@ -154,6 +154,12 @@ unsigned int hyfi_netfilter_forwarding_hook(unsigned int hooknum,
 	if (unlikely(!hyfi_br || !br_port))
 		return NF_ACCEPT;
 
+	if (unlikely(hyfi_br->TSEnabled)) {
+		if (skb_vlan_tag_present(skb)) {
+			return NF_DROP;
+		}
+	}
+
 	if (unlikely( (hyfi_is_ieee1905_pkt(skb)
 					&& (!compare_ether_addr(eth_hdr(skb)->h_dest,
 							IEEE1905_MULTICAST_ADDR)
@@ -274,6 +280,12 @@ unsigned int hyfi_netfilter_local_in_hook(unsigned int hooknum,
 	if (unlikely(!hyfi_br))
 		return NF_ACCEPT;
 
+	if (unlikely(hyfi_br->TSEnabled)) {
+		if (skb_vlan_tag_present(skb)) {
+			return NF_DROP;
+		}
+	}
+
 	br_dev = hyfi_br->dev;
 	if (unlikely(!br_dev))
 		return NF_ACCEPT;
@@ -386,12 +398,19 @@ int hyfi_netfilter_init(void)
 	int ret = 0;
 
 	/* Register netfilter hooks */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	ret = nf_register_net_hooks(&init_net, hyfi_hook_ops, ARRAY_SIZE(hyfi_hook_ops));
+#else
 	ret = nf_register_hooks(hyfi_hook_ops, ARRAY_SIZE(hyfi_hook_ops));
-
+#endif
 	return ret;
 }
 
 void hyfi_netfilter_fini(void)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	nf_unregister_net_hooks(&init_net, hyfi_hook_ops, ARRAY_SIZE(hyfi_hook_ops));
+#else
 	nf_unregister_hooks(hyfi_hook_ops, ARRAY_SIZE(hyfi_hook_ops));
+#endif
 }

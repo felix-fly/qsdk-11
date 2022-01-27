@@ -3,6 +3,7 @@
  *
  * Copyright 2007-2009	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
+ * Copyright 2017	Intel Deutschland GmbH
  */
 #include <linux/export.h>
 #include <linux/bitops.h>
@@ -143,6 +144,7 @@ static void set_mandatory_flags_band(struct ieee80211_supported_band *sband,
 
 	switch (band) {
 	case IEEE80211_BAND_5GHZ:
+	case NL80211_BAND_6GHZ:
 		want = 3;
 		for (i = 0; i < sband->n_bitrates; i++) {
 			if (sband->bitrates[i].bitrate == 60 ||
@@ -218,7 +220,12 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 				   struct key_params *params, int key_idx,
 				   bool pairwise, const u8 *mac_addr)
 {
-	if (key_idx > 5)
+	int max_key_idx = 5;
+
+	if (wiphy_ext_feature_isset(&rdev->wiphy,
+				    NL80211_EXT_FEATURE_BEACON_PROTECTION))
+		max_key_idx = 7;
+	if (key_idx < 0 || key_idx > max_key_idx)
 		return -EINVAL;
 
 	if (!pairwise && mac_addr && !(rdev->wiphy.flags & WIPHY_FLAG_IBSS_RSN))
@@ -1024,7 +1031,7 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 	return err;
 }
 
-static u32 cfg80211_calculate_bitrate_60g(struct rate_info *rate)
+static u32 cfg80211_calculate_bitrate_dmg(struct rate_info *rate)
 {
 	static const u32 __mcs2bitrate[] = {
 		/* control PHY */
@@ -1069,6 +1076,40 @@ static u32 cfg80211_calculate_bitrate_60g(struct rate_info *rate)
 		return 0;
 
 	return __mcs2bitrate[rate->mcs];
+}
+
+static u32 cfg80211_calculate_bitrate_edmg(struct rate_info *rate)
+{
+	static const u32 __mcs2bitrate[] = {
+		/* control PHY */
+		[0] =   275,
+		/* SC PHY */
+		[1] =  3850,
+		[2] =  7700,
+		[3] =  9625,
+		[4] = 11550,
+		[5] = 12512, /* 1251.25 mbps */
+		[6] = 13475,
+		[7] = 15400,
+		[8] = 19250,
+		[9] = 23100,
+		[10] = 25025,
+		[11] = 26950,
+		[12] = 30800,
+		[13] = 38500,
+		[14] = 46200,
+		[15] = 50050,
+		[16] = 53900,
+		[17] = 57750,
+		[18] = 69300,
+		[19] = 75075,
+		[20] = 80850,
+	};
+
+	if (WARN_ON_ONCE(rate->mcs >= ARRAY_SIZE(__mcs2bitrate)))
+		return 0;
+
+	return __mcs2bitrate[rate->mcs] * rate->n_bonded_ch;
 }
 
 static u32 cfg80211_calculate_bitrate_vht(struct rate_info *rate)
@@ -1154,6 +1195,85 @@ static u32 cfg80211_calculate_bitrate_vht(struct rate_info *rate)
 	return (bitrate + 50000) / 100000;
 }
 
+static u32 cfg80211_calculate_bitrate_he(struct rate_info *rate)
+{
+#define SCALE 2048
+	u16 mcs_divisors[12] = {
+		34133, /* 16.666666... */
+		17067, /*  8.333333... */
+		11378, /*  5.555555... */
+		 8533, /*  4.166666... */
+		 5689, /*  2.777777... */
+		 4267, /*  2.083333... */
+		 3923, /*  1.851851... */
+		 3413, /*  1.666666... */
+		 2844, /*  1.388888... */
+		 2560, /*  1.250000... */
+		 2276, /*  1.111111... */
+		 2048, /*  1.000000... */
+	};
+	u32 rates_160M[3] = { 960777777, 907400000, 816666666 };
+	u32 rates_969[3] =  { 480388888, 453700000, 408333333 };
+	u32 rates_484[3] =  { 229411111, 216666666, 195000000 };
+	u32 rates_242[3] =  { 114711111, 108333333,  97500000 };
+	u32 rates_106[3] =  {  40000000,  37777777,  34000000 };
+	u32 rates_52[3]  =  {  18820000,  17777777,  16000000 };
+	u32 rates_26[3]  =  {   9411111,   8888888,   8000000 };
+	u64 tmp;
+	u32 result;
+
+	if (WARN_ON_ONCE(rate->mcs > 11))
+		return 0;
+
+	if (WARN_ON_ONCE(rate->he_gi > NL80211_RATE_INFO_HE_GI_3_2))
+		return 0;
+	if (WARN_ON_ONCE(rate->he_ru_alloc >
+			 NL80211_RATE_INFO_HE_RU_ALLOC_2x996))
+		return 0;
+	if (WARN_ON_ONCE(rate->nss < 1 || rate->nss > 8))
+		return 0;
+
+	if (rate->bw == RATE_INFO_BW_160)
+		result = rates_160M[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_80 ||
+		 (rate->bw == RATE_INFO_BW_HE_RU &&
+		  rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_996))
+		result = rates_969[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_40 ||
+		 (rate->bw == RATE_INFO_BW_HE_RU &&
+		  rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_484))
+		result = rates_484[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_20 ||
+		 (rate->bw == RATE_INFO_BW_HE_RU &&
+		  rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_242))
+		result = rates_242[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_HE_RU &&
+		 rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_106)
+		result = rates_106[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_HE_RU &&
+		 rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_52)
+		result = rates_52[rate->he_gi];
+	else if (rate->bw == RATE_INFO_BW_HE_RU &&
+		 rate->he_ru_alloc == NL80211_RATE_INFO_HE_RU_ALLOC_26)
+		result = rates_26[rate->he_gi];
+	else if (WARN(1, "invalid HE MCS: bw:%d, ru:%d\n",
+		      rate->bw, rate->he_ru_alloc))
+		return 0;
+
+	/* now scale to the appropriate MCS */
+	tmp = result;
+	tmp *= SCALE;
+	do_div(tmp, mcs_divisors[rate->mcs]);
+	result = tmp;
+
+	/* and take NSS, DCM into account */
+	result = (result * rate->nss) / 8;
+	if (rate->he_dcm)
+		result /= 2;
+
+	return result;
+}
+
 u32 cfg80211_calculate_bitrate(struct rate_info *rate)
 {
 	int modulation, streams, bitrate;
@@ -1161,10 +1281,14 @@ u32 cfg80211_calculate_bitrate(struct rate_info *rate)
 	if (!(rate->flags & RATE_INFO_FLAGS_MCS) &&
 	    !(rate->flags & RATE_INFO_FLAGS_VHT_MCS))
 		return rate->legacy;
-	if (rate->flags & RATE_INFO_FLAGS_60G)
-		return cfg80211_calculate_bitrate_60g(rate);
+	if (rate->flags & RATE_INFO_FLAGS_DMG)
+		return cfg80211_calculate_bitrate_dmg(rate);
+	if (rate->flags & RATE_INFO_FLAGS_EDMG)
+		return cfg80211_calculate_bitrate_edmg(rate);
 	if (rate->flags & RATE_INFO_FLAGS_VHT_MCS)
 		return cfg80211_calculate_bitrate_vht(rate);
+	if (rate->flags & RATE_INFO_FLAGS_HE_MCS)
+		return cfg80211_calculate_bitrate_he(rate);
 
 	/* the formula below does only work for MCS values smaller than 32 */
 	if (WARN_ON_ONCE(rate->mcs >= 32))
@@ -1342,6 +1466,9 @@ bool ieee80211_operating_class_to_band(u8 operating_class,
 	case 128 ... 130:
 		*band = IEEE80211_BAND_5GHZ;
 		return true;
+	case 131 ... 135:
+		*band = NL80211_BAND_6GHZ;
+		return true;
 	case 81:
 	case 82:
 	case 83:
@@ -1489,22 +1616,10 @@ EXPORT_SYMBOL(ieee80211_chandef_to_operating_class);
 int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
 				 u32 beacon_int)
 {
-	struct wireless_dev *wdev;
-	int res = 0;
-
-	if (!beacon_int)
+	if (beacon_int < 10 || beacon_int > 10000)
 		return -EINVAL;
 
-	list_for_each_entry(wdev, &rdev->wdev_list, list) {
-		if (!wdev->beacon_interval)
-			continue;
-		if (wdev->beacon_interval != beacon_int) {
-			res = -EINVAL;
-			break;
-		}
-	}
-
-	return res;
+	return 0;
 }
 
 int cfg80211_iter_combinations(struct wiphy *wiphy,

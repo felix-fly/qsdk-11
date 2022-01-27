@@ -15,8 +15,9 @@ proto=$(uci_get ipsec setup protostack)
 [ -z "$proto" ] && return
 
 ifaces=$(uci_get ipsec setup interfaces)
+wan_iface=$(uci get network.wan.ifname)
 
-[ -z "$ifaces" ] && ifaces="ipsec0=eth0"
+[ -z "$ifaces" ] && ifaces="ipsec0=$wan_iface"
 
 network_get_device ifname $INTERFACE
 
@@ -33,6 +34,10 @@ restart_service(){
 	then
 		exit 0
 	fi
-	/etc/init.d/ipsec restart
+	if [ -f /tmp/qca_nss_ipsec_ol ]; then
+		/etc/init.d/qca-nss-ipsec restart
+	else
+		/etc/init.d/ipsec restart
+	fi
 }
 [ "$ACTION" = "ifup" ] && restart_service

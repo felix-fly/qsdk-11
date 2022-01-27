@@ -117,4 +117,11 @@ config USB_DWC3_QCOM
 	  for peripheral mode support.
 	  Say 'Y' or 'M' if you have one such device.
 
+config IPQ_DWC3_QTI_EXTCON
+	bool "Extcon support in dwc3-qcom driver"
+	depends on USB_DWC3_QCOM
+	help
+	  This config enables the extcon support in the dwc3-qcom
+	  driver, which can be used for type-c functionality.
+
 endif

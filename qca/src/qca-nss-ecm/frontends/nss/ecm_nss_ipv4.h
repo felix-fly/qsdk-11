@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2016 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, 2020 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -64,13 +64,13 @@ extern struct nss_ctx_instance *ecm_nss_ipv4_nss_ipv4_mgr;
  */
 static inline bool ecm_nss_ipv4_accel_pending_set(struct ecm_front_end_connection_instance *feci)
 {
-	DEBUG_INFO("%p: Accel conn: %p\n", feci, feci->ci);
+	DEBUG_INFO("%px: Accel conn: %px\n", feci, feci->ci);
 
 	/*
 	 * If re-generation is required then we cannot permit acceleration
 	 */
 	if (ecm_db_connection_regeneration_required_peek(feci->ci)) {
-		DEBUG_TRACE("%p: accel %p failed - regen required\n", feci, feci->ci);
+		DEBUG_TRACE("%px: accel %px failed - regen required\n", feci, feci->ci);
 		return false;
 	}
 
@@ -80,7 +80,7 @@ static inline bool ecm_nss_ipv4_accel_pending_set(struct ecm_front_end_connectio
 	spin_lock_bh(&feci->lock);
 	if (ECM_FRONT_END_ACCELERATION_FAILED(feci->accel_mode)) {
 		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: accel %p failed\n", feci, feci->ci);
+		DEBUG_TRACE("%px: accel %px failed\n", feci, feci->ci);
 		return false;
 	}
 
@@ -89,7 +89,7 @@ static inline bool ecm_nss_ipv4_accel_pending_set(struct ecm_front_end_connectio
 	 */
 	if (feci->accel_mode != ECM_FRONT_END_ACCELERATION_MODE_DECEL) {
 		spin_unlock_bh(&feci->lock);
-		DEBUG_TRACE("%p: Ignoring wrong mode accel for conn: %p\n", feci, feci->ci);
+		DEBUG_TRACE("%px: Ignoring wrong mode accel for conn: %px\n", feci, feci->ci);
 		return false;
 	}
 
@@ -101,7 +101,7 @@ static inline bool ecm_nss_ipv4_accel_pending_set(struct ecm_front_end_connectio
 		if ((ecm_nss_ipv4_pending_accel_count + ecm_nss_ipv4_accelerated_count) >= nss_ipv4_max_conn_count()) {
 			spin_unlock_bh(&ecm_nss_ipv4_lock);
 			spin_unlock_bh(&feci->lock);
-			DEBUG_INFO("%p: Accel limit reached, accel denied: %p\n", feci, feci->ci);
+			DEBUG_INFO("%px: Accel limit reached, accel denied: %px\n", feci, feci->ci);
 			return false;
 		}
 	}
@@ -135,7 +135,7 @@ static inline bool _ecm_nss_ipv4_accel_pending_clear(struct ecm_front_end_connec
 	/*
 	 * Set the mode away from its accel pending state.
 	 */
-	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%p: Accel mode unexpected: %d\n", feci, feci->accel_mode);
+	DEBUG_ASSERT(feci->accel_mode == ECM_FRONT_END_ACCELERATION_MODE_ACCEL_PENDING, "%px: Accel mode unexpected: %d\n", feci, feci->accel_mode);
 	feci->accel_mode = mode;
 
 	/*

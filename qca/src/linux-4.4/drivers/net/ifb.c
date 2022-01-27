@@ -138,7 +138,7 @@ void ifb_update_offload_stats(struct net_device *dev, struct pcpu_sw_netstats *o
 		return;
 	}
 
-	if (!(dev->priv_flags & IFF_IFB)) {
+	if (!(dev->priv_flags_ext & IFF_EXT_IFB)) {
 		return;
 	}
 
@@ -255,7 +255,7 @@ static void ifb_setup(struct net_device *dev)
 	dev->flags |= IFF_NOARP;
 	dev->flags &= ~IFF_MULTICAST;
 	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
-	dev->priv_flags |= IFF_IFB;	/* Mark the device as an IFB device. */
+	dev->priv_flags_ext |= IFF_EXT_IFB;	/* Mark the device as an IFB device. */
 	netif_keep_dst(dev);
 	eth_hw_addr_random(dev);
 	dev->destructor = ifb_dev_free;

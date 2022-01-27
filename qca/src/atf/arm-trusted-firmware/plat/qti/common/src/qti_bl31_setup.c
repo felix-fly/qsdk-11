@@ -59,6 +59,8 @@ static uint64_t g_qti_cpu_cntfrq;
 extern uint8_t __DIAG_REGION_START__;
 void qtiseclib_diag_init(void);
 
+int uart_init(unsigned long base_addr, unsigned int uart_clk, unsigned int baud_rate);
+
 /*
  * Lock variable to serialize cpuss reset execution.
  */
@@ -130,8 +132,9 @@ void bl31_early_platform_setup(qti_bl31_params_t * from_bl2,
 
 void qti_bl31_early_platform_setup(uint64_t from_bl2)
 {
+#if !QTI_UART_PRINT
 	static qti_console_uart_t g_qti_diag;
-
+#endif
 	qtiseclib_get_entrypoint_param(from_bl2, &bl33_image_ep_info);
 	SET_SECURITY_STATE(bl33_image_ep_info.h.attr, NON_SECURE);
 
@@ -139,8 +142,13 @@ void qti_bl31_early_platform_setup(uint64_t from_bl2)
 	Register ram region __DIAG_REGION_START__ as console to
 	log diagnostics messages.
 	*/
+	qtiseclib_Clock_Init();
+#if !QTI_UART_PRINT
 	qti_diag_register(&g_qti_diag, __DIAG_REGION_START__);
 	qtiseclib_diag_init();
+#else
+	uart_init(UART_BASE, UART_CLK_IN_HZ, UART_BAUDRATE);
+#endif
 }
 
 void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,

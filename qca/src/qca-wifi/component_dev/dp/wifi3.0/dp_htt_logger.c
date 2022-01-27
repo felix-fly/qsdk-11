@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -23,6 +23,8 @@
 #include "qdf_module.h"
 #include "qdf_list.h"
 #include "dp_htt_logger.h"
+#include "dp_types.h"
+#include "dp_internal.h"
 
 #define HTT_DBG_FILE_PERM           (QDF_FILE_USR_READ | QDF_FILE_USR_WRITE | \
 					 QDF_FILE_GRP_READ | \
@@ -32,27 +34,6 @@
  * read at one shot through wdf debugfs framework
  */
 #define HTT_DISPLAY_SIZE 25
-
-/**
- * Used for stop_seq
- * Bit 0: htt_command_log
- * Bit 1: htt_event_log
- * Bit 2: htt_wbm_event_log
- * Bit 3: htt_log_size
- * Bit 4: htt_enable
- * Bit 5: htt_cmd_disable_list
- * Bit 6: htt_event_disable_list
- * Bit 7: htt_wbm_event_disable_list
- * Bit 8-15: Reserved
- */
-#define HTT_COMMAND_LOG_BP         0
-#define HTT_EVENT_LOG_BP           1
-#define HTT_WBM_EVENT_LOG_BP       2
-#define HTT_LOG_SIZE_BP            3
-#define HTT_ENABLE_BP              4
-#define HTT_CMD_DISABLE_LIST_BP    5
-#define HTT_EVENT_DISABLE_LIST     6
-#define HTT_WBM_EVENT_DISABLE_LIST 7
 
 /**
  * Host messages which needs to be enabled by default
@@ -68,6 +49,20 @@
 #define HTT_T2H_MSG_TYPE_RX_DELBA_C       0x6
 #define HTT_T2H_MSG_TYPE_PEER_MAP_V2_C    0x1e
 #define HTT_T2H_MSG_TYPE_PEER_UNMAP_V2_C  0x1f
+
+/**
+ * HTT commands sent by Host to FW which needs to be
+ * enabled by default
+ *
+ * Note: Below macro definition is cloned from
+ * enum htt_h2t_msg_type fw_hdr/fw/htt.h and any
+ * change in enum htt_h2t_msg_type for below field
+ * will need a change here as well.
+ */
+#define HTT_H2T_MSG_TYPE_RX_RING_CFG_C              0x2
+#define HTT_H2T_MSG_TYPE_SRING_SETUP_C              0xb
+#define HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG_C    0xc
+#define HTT_H2T_MSG_TYPE_RX_FULL_MONITOR_MODE_C     0x17
 
 /**
  * disable_all_command(): Disable all command
@@ -86,6 +81,13 @@
 do { \
 	htt_disable_mask = ~(0x1 << eventid); \
 	htt_logger_handle->log_info.htt_event_disable_list &= \
+		htt_disable_mask; \
+} while (0)
+
+#define enable_command(htt_logger_handle, cmd_id) \
+do { \
+	htt_disable_mask = ~(0x1 << cmd_id); \
+	htt_logger_handle->log_info.htt_cmd_disable_list &= \
 		htt_disable_mask; \
 } while (0)
 
@@ -277,25 +279,12 @@ static QDF_STATUS debug_htt_command_log_show(qdf_debugfs_file_t file, void *arg)
 	uint64_t secs, usecs;
 
 	htt_log = &htt_logger_handle->log_info.htt_command_log_buf_info;
-	/* If message already read, return and reset this bit*/
-	/* Bit set to 1 : indicates it is read
-	 * Bit set to 0 : indicates 1st time read
-	 */
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_COMMAND_LOG_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_COMMAND_LOG_BP));
-		return QDF_STATUS_SUCCESS;
-	}
 
 	qdf_spin_lock(&htt_logger_handle->log_info.htt_record_lock);
 	if (!htt_log->length) {
 		qdf_spin_unlock(&htt_logger_handle->log_info.htt_record_lock);
 		qdf_debugfs_printf(file,
 				   "no elements to read from ring buffer!\n");
-		/* setting bit sothat in next come we will return in start */
-		htt_logger_handle->log_info.stop_seq |=
-			(0x1 << HTT_COMMAND_LOG_BP);
 		return QDF_STATUS_SUCCESS;
 	}
 
@@ -333,8 +322,6 @@ static QDF_STATUS debug_htt_command_log_show(qdf_debugfs_file_t file, void *arg)
 		else
 			pos--;
 	}
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_COMMAND_LOG_BP);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -346,20 +333,12 @@ static QDF_STATUS debug_htt_event_log_show(qdf_debugfs_file_t file, void *arg)
 	uint64_t secs, usecs;
 
 	htt_log = &htt_logger_handle->log_info.htt_event_log_buf_info;
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_EVENT_LOG_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_EVENT_LOG_BP));
-		return QDF_STATUS_SUCCESS;
-	}
 
 	qdf_spin_lock(&htt_logger_handle->log_info.htt_record_lock);
 	if (!htt_log->length) {
 		qdf_spin_unlock(&htt_logger_handle->log_info.htt_record_lock);
 		qdf_debugfs_printf(file,
 				   "no elements to read from ring buffer!\n");
-		htt_logger_handle->log_info.stop_seq |=
-			(0x1 << HTT_EVENT_LOG_BP);
 		return QDF_STATUS_SUCCESS;
 	}
 
@@ -396,8 +375,6 @@ static QDF_STATUS debug_htt_event_log_show(qdf_debugfs_file_t file, void *arg)
 		else
 			pos--;
 	}
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_EVENT_LOG_BP);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -411,20 +388,11 @@ static QDF_STATUS debug_htt_wbm_event_log_show(qdf_debugfs_file_t file,
 
 	htt_log = &htt_logger_handle->log_info.htt_wbm_event_log_buf_info;
 
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_WBM_EVENT_LOG_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_WBM_EVENT_LOG_BP));
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_spin_lock(&htt_logger_handle->log_info.htt_record_lock);
 	if (!htt_log->length) {
 		qdf_spin_unlock(&htt_logger_handle->log_info.htt_record_lock);
 		qdf_debugfs_printf(file,
 				   "no elements to read from ring buffer!\n");
-		htt_logger_handle->log_info.stop_seq |=
-			(0x1 << HTT_WBM_EVENT_LOG_BP);
 		return QDF_STATUS_SUCCESS;
 	}
 
@@ -463,8 +431,6 @@ static QDF_STATUS debug_htt_wbm_event_log_show(qdf_debugfs_file_t file,
 			pos--;
 	}
 
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_WBM_EVENT_LOG_BP);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -482,17 +448,8 @@ static QDF_STATUS debug_htt_enable_show(qdf_debugfs_file_t file, void *arg)
 	struct htt_logger *htt_logger_handle = (struct htt_logger *)arg;
 	struct htt_debug_log_info *log_info_p = &htt_logger_handle->log_info;
 
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_ENABLE_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_ENABLE_BP));
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_debugfs_printf(file, "%d\n",
 			   log_info_p->htt_logging_enable);
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_ENABLE_BP);
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -511,18 +468,8 @@ static QDF_STATUS debug_htt_cmd_disable_list_show(qdf_debugfs_file_t file,
 	struct htt_logger *htt_logger_handle = (struct htt_logger *)arg;
 	struct htt_debug_log_info *log_info_p = &htt_logger_handle->log_info;
 
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_CMD_DISABLE_LIST_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_CMD_DISABLE_LIST_BP));
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_debugfs_printf(file, "%llu\n",
 			   log_info_p->htt_cmd_disable_list);
-
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_CMD_DISABLE_LIST_BP);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -542,18 +489,8 @@ static QDF_STATUS debug_htt_event_disable_list_show(qdf_debugfs_file_t file,
 	struct htt_logger *htt_logger_handle = (struct htt_logger *)arg;
 	struct htt_debug_log_info *log_info_p = &htt_logger_handle->log_info;
 
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_EVENT_DISABLE_LIST))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_EVENT_DISABLE_LIST));
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_debugfs_printf(file, "%llu\n",
 			   log_info_p->htt_event_disable_list);
-
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_EVENT_DISABLE_LIST);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -573,18 +510,8 @@ static QDF_STATUS debug_htt_wbm_event_disable_list_show(qdf_debugfs_file_t file
 	struct htt_logger *htt_logger_handle = (struct htt_logger *)arg;
 	struct htt_debug_log_info *log_info_p = &htt_logger_handle->log_info;
 
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_WBM_EVENT_DISABLE_LIST))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_WBM_EVENT_DISABLE_LIST));
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_debugfs_printf(file, "%llu\n",
 			   log_info_p->htt_wbm_event_disable_list);
-
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_WBM_EVENT_DISABLE_LIST);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -600,21 +527,8 @@ static QDF_STATUS debug_htt_wbm_event_disable_list_show(qdf_debugfs_file_t file
  */
 static QDF_STATUS debug_htt_log_size_show(qdf_debugfs_file_t file, void *arg)
 {
-	struct htt_logger *htt_logger_handle = (struct htt_logger *)arg;
-
-	if ((htt_logger_handle->log_info.stop_seq &
-	    (0x1 << HTT_LOG_SIZE_BP))) {
-		htt_logger_handle->log_info.stop_seq &=
-			(~(0x1 << HTT_LOG_SIZE_BP));
-
-		return QDF_STATUS_SUCCESS;
-	}
-
 	qdf_debugfs_printf(file, "HTT command/event log max size:%d\n",
 			   HTT_EVENT_DEBUG_MAX_ENTRY);
-
-	htt_logger_handle->log_info.stop_seq |=
-		(0x1 << HTT_LOG_SIZE_BP);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -967,12 +881,13 @@ static void htt_debugfs_remove(struct htt_logger *htt_logger_handle)
  * Return: init status
  */
 
-static QDF_STATUS htt_debugfs_init(struct htt_logger *htt_logger_handle)
+static QDF_STATUS htt_debugfs_init(struct htt_logger *htt_logger_handle,
+				   uint8_t psoc_id)
 {
 	char buf[32];
 	int i;
 
-	snprintf(buf, sizeof(buf), "HTT_SOC_LOGGER");
+	snprintf(buf, sizeof(buf), "HTT_SOC%d_LOGGER", psoc_id);
 
 	htt_logger_handle->log_info.htt_log_debugfs_dir =
 		qdf_debugfs_create_dir(buf, NULL);
@@ -984,7 +899,8 @@ static QDF_STATUS htt_debugfs_init(struct htt_logger *htt_logger_handle)
 
 	for (i = 0; i < NUM_HTT_DEBUG_INFOS; ++i) {
 		htt_debugfs_infos[i].ops->priv = htt_logger_handle;
-		htt_logger_handle->debugfs_de[i] = qdf_debugfs_create_file(
+		htt_logger_handle->debugfs_de[i] =
+				qdf_debugfs_create_file_simplified(
 				htt_debugfs_infos[i].name, HTT_DBG_FILE_PERM,
 				htt_logger_handle->log_info.htt_log_debugfs_dir,
 				htt_debugfs_infos[i].ops);
@@ -1004,7 +920,8 @@ out:
  * htt_interface_logging_init() - Initialize HTT tracer
  * @ htt_logger_handle: htt logger handler
  */
-void htt_interface_logging_init(struct htt_logger **phtt_logger_handle)
+void htt_interface_logging_init(struct htt_logger **phtt_logger_handle,
+				struct cdp_ctrl_objmgr_psoc *ctrl_psoc)
 {
 	QDF_STATUS ret;
 	struct htt_logger *htt_logger_handle;
@@ -1012,6 +929,7 @@ void htt_interface_logging_init(struct htt_logger **phtt_logger_handle)
 	struct htt_log_buf_t *event_log_buf;
 	struct htt_log_buf_t *wbm_event_log_buf;
 	uint64_t htt_disable_mask;
+	struct wlan_objmgr_psoc *psoc;
 
 	*phtt_logger_handle = (struct htt_logger *)qdf_mem_malloc(
 				sizeof(struct htt_logger));
@@ -1038,8 +956,18 @@ void htt_interface_logging_init(struct htt_logger **phtt_logger_handle)
 	log_buf_init(event_log_buf);
 	log_buf_init(wbm_event_log_buf);
 
-	/* Disable all command */
+	/**
+	 * Disable all command except:
+	 * HTT_H2T_MSG_TYPE_SRING_SETUP, HTT_H2T_MSG_TYPE_RX_RING_CFG
+	 * HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG, HTT_H2T_MSG_TYPE_RX_FULL_MONITOR_MODE
+	 */
 	disable_all_command(htt_logger_handle);
+	enable_command(htt_logger_handle, HTT_H2T_MSG_TYPE_RX_RING_CFG_C);
+	enable_command(htt_logger_handle, HTT_H2T_MSG_TYPE_SRING_SETUP_C);
+	enable_command(htt_logger_handle,
+		       HTT_H2T_MSG_TYPE_RX_RING_SELECTION_CFG_C);
+	enable_command(htt_logger_handle,
+		       HTT_H2T_MSG_TYPE_RX_FULL_MONITOR_MODE_C);
 
 	/* Disable all event except:
 	 * HTT_T2H_MSG_TYPE_PEER_MAP, HTT_T2H_MSG_TYPE_PEER_UNMAP
@@ -1062,7 +990,8 @@ void htt_interface_logging_init(struct htt_logger **phtt_logger_handle)
 	/* Enable HTT logging */
 	enable_htt_logging(htt_logger_handle);
 
-	ret = htt_debugfs_init(*phtt_logger_handle);
+	psoc = (struct wlan_objmgr_psoc *)(ctrl_psoc);
+	ret = htt_debugfs_init(*phtt_logger_handle, wlan_psoc_get_id(psoc));
 	if (QDF_STATUS_SUCCESS != ret)
 		goto debugfs_init_failed;
 	return;
@@ -1092,3 +1021,167 @@ void htt_interface_logging_deinit(struct htt_logger *htt_logger_handle)
 	htt_log_lock_free(htt_logger_handle);
 	qdf_mem_free(htt_logger_handle);
 }
+
+#ifdef HTT_STATS_DEBUGFS_SUPPORT
+void htt_stats_msg_receive(void *data, A_INT32 len);
+
+/* File permission for HTT stats debugfs entry */
+#define PDEV_HTT_STATS_DBGFS_FILE_PERM   (QDF_FILE_USR_READ | \
+					  QDF_FILE_GRP_READ | QDF_FILE_OTH_READ)
+
+/* Delay in ms to get the HTT stats for debugfs entry */
+#define PDEV_HTT_STATS_DBGFS_WAIT_TIME  2000
+
+/* Char array size of parent directory of debugfs HTT stats */
+#define PDEV_HTT_STATS_DBGFS_DIR_SIZE 19
+
+/* Char array size of debugfs file for HTT stats */
+#define PDEV_HTT_STATS_DBGFS_FILE_SIZE 7
+
+/* dp_pdev_htt_stats_dbgfs_show() - Function to display HTT stats
+ * @file: qdf debugfs file handler
+ * @arg: pointer to HTT stats debugfs private object
+ *
+ * Return: QDF_STATUS
+ */
+static inline
+QDF_STATUS
+dp_pdev_htt_stats_dbgfs_show(qdf_debugfs_file_t file, void *arg)
+{
+	struct pdev_htt_stats_dbgfs_priv *priv = arg;
+	struct dp_pdev *pdev = NULL;
+	uint32_t config_param0 = 0;
+	uint32_t config_param1 = 0;
+	uint32_t config_param2 = 0;
+	uint32_t config_param3 = 0;
+	int cookie_val = 0;
+	uint8_t mac_id = 0;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
+
+	pdev = priv->pdev;
+	pdev->dbgfs_cfg->m = file;
+
+	qdf_mutex_acquire(&pdev->dbgfs_cfg->lock);
+
+	dp_h2t_ext_stats_msg_send(pdev, priv->stats_id, config_param0,
+				  config_param1, config_param2, config_param3,
+				  cookie_val, DBG_STATS_COOKIE_HTT_DBGFS,
+				  mac_id);
+	ret = qdf_wait_single_event(&pdev->dbgfs_cfg->htt_stats_dbgfs_event,
+				    PDEV_HTT_STATS_DBGFS_WAIT_TIME);
+	if (ret == QDF_STATUS_E_TIMEOUT)
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "Event timeout: Failed to get response from FW");
+
+	qdf_mutex_release(&pdev->dbgfs_cfg->lock);
+	return ret;
+}
+
+/* dp_pdev_dbgfs_init() - Init debugfs of HTT stats to create
+ * debugfs directories and entries
+ * @pdev: DP pdev handle
+ *
+ * Return: QDF_STATUS
+ */
+static inline
+QDF_STATUS dp_pdev_dbgfs_init(struct dp_pdev *pdev)
+{
+	char dir_name[PDEV_HTT_STATS_DBGFS_DIR_SIZE] = {0};
+	char file_name[PDEV_HTT_STATS_DBGFS_FILE_SIZE] = {0};
+	int idx;
+	char *net_dev_name = NULL;
+
+	if (pdev->soc->cdp_soc.ol_ops->get_device_name) {
+		net_dev_name = pdev->soc->cdp_soc.ol_ops->get_device_name(
+					pdev->soc->ctrl_psoc, pdev->pdev_id);
+	}
+
+	if (net_dev_name == NULL)
+		return QDF_STATUS_E_FAILURE;
+
+	qdf_snprintf(dir_name, sizeof(dir_name), "dp_wifistats_%s", net_dev_name);
+
+	pdev->dbgfs_cfg->debugfs_entry[0] = qdf_debugfs_create_dir(dir_name,
+								   NULL);
+	if (!pdev->dbgfs_cfg->debugfs_entry[0]) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "Failed to create debugfs directory for HTT stats");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	for (idx = 1; idx < PDEV_HTT_STATS_DBGFS_SIZE - 1; idx++) {
+		qdf_snprintf(file_name, sizeof(file_name), "cmd%d", idx);
+		pdev->dbgfs_cfg->priv[idx - 1].pdev = pdev;
+		pdev->dbgfs_cfg->priv[idx - 1].stats_id = idx;
+		pdev->dbgfs_cfg->pdev_htt_stats_dbgfs_ops[idx - 1].show =
+						dp_pdev_htt_stats_dbgfs_show;
+		pdev->dbgfs_cfg->pdev_htt_stats_dbgfs_ops[idx - 1].write = NULL;
+		pdev->dbgfs_cfg->pdev_htt_stats_dbgfs_ops[idx - 1].priv =
+						&pdev->dbgfs_cfg->priv[idx - 1];
+
+		pdev->dbgfs_cfg->debugfs_entry[idx] =
+			qdf_debugfs_create_file_simplified(
+			   file_name, PDEV_HTT_STATS_DBGFS_FILE_PERM,
+			   pdev->dbgfs_cfg->debugfs_entry[0],
+			   &pdev->dbgfs_cfg->pdev_htt_stats_dbgfs_ops[idx - 1]);
+
+		if (!pdev->dbgfs_cfg->debugfs_entry[idx]) {
+			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+				  "Failed to create htt stats dbgfs file for %d", idx);
+			return QDF_STATUS_E_FAILURE;
+		}
+	}
+	return QDF_STATUS_SUCCESS;
+}
+
+/* dp_pdev_htt_stats_dbgfs_init() - Function to allocate memory and initialize
+ * debugfs for HTT stats
+ * @pdev: dp pdev handle
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS dp_pdev_htt_stats_dbgfs_init(struct dp_pdev *pdev)
+{
+	pdev->dbgfs_cfg =
+		qdf_mem_malloc(sizeof(struct pdev_htt_stats_dbgfs_cfg));
+	if (!pdev->dbgfs_cfg) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Memory allocation failed for pdev htt stats dbgfs cfg", __func__);
+		return QDF_STATUS_E_NOMEM;
+	}
+	qdf_mutex_create(&pdev->dbgfs_cfg->lock);
+	qdf_event_create(&pdev->dbgfs_cfg->htt_stats_dbgfs_event);
+	pdev->dbgfs_cfg->htt_stats_dbgfs_msg_process = htt_stats_msg_receive;
+
+	if (dp_pdev_dbgfs_init(pdev)) {
+		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Failed to initialize for pdev htt stats dbgfs", __func__);
+		dp_pdev_htt_stats_dbgfs_deinit(pdev);
+		return QDF_STATUS_E_FAILURE;
+	}
+	return QDF_STATUS_SUCCESS;
+}
+
+/* dp_pdev_htt_stats_dbgfs_deinit() - Function to free memory and remove
+ * debugfs directory and entries for HTT stats
+ * @pdev: dp pdev handle
+ *
+ * Return: none
+ */
+void dp_pdev_htt_stats_dbgfs_deinit(struct dp_pdev *pdev)
+{
+	if (pdev->dbgfs_cfg) {
+		qdf_mutex_destroy(&pdev->dbgfs_cfg->lock);
+		qdf_event_destroy(&pdev->dbgfs_cfg->htt_stats_dbgfs_event);
+		pdev->dbgfs_cfg->htt_stats_dbgfs_msg_process = NULL;
+
+		if (pdev->dbgfs_cfg->debugfs_entry[0]) {
+			qdf_debugfs_remove_dir_recursive(
+					    pdev->dbgfs_cfg->debugfs_entry[0]);
+			pdev->dbgfs_cfg->debugfs_entry[0] = NULL;
+		}
+		qdf_mem_free(pdev->dbgfs_cfg);
+		pdev->dbgfs_cfg = NULL;
+	}
+}
+#endif /* HTT_STATS_DEBUGFS_SUPPORT */

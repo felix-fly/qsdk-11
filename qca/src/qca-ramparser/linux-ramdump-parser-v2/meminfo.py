@@ -16,11 +16,14 @@ import collections
 symbols = {}
 
 nss_modules = [ "qca_nss_dp", "qca_nss_drv", "qca_nss_qdisc" , "qca_nss_crypto",
-                "qca_nss_cfi_ocf" ]
+                "qca_nss_cfi_ocf", "ecm", "qca_ssdk", "nf_conntrack_ipv4",
+                "nf_conntrack", "x_tables", "ip_tables" ]
 wifi_modules = [ "qdf", "wifi_3_0", "qca_ol", "umac", "cfg80211",
                  "qca_spectral" ]
 
 def symbol_info_str(addr, function, offset, size, module):
+    if addr is None:
+        return ""
     if size == 0:
         return " [<{0}>] {1}".format(hex(addr)[2:], hex(addr))
     elif module == None:
@@ -68,7 +71,8 @@ class meminfo_ranked:
     def insert(self, names, pfns, addrs, size, flags, free=0):
         addr_str = ""
         for addr in addrs:
-            addr_str += str(hex(addr)) + " "
+            if addr is not None:
+                addr_str += str(hex(addr)) + " "
         if self.meminfos.has_key(addr_str):
             self.meminfos[addr_str].update_meminfo(names, pfns, addrs, size, flags)
         else:
@@ -149,7 +153,7 @@ class meminfo:
         s += "Flags: " + self.flags + "\n"
         s += "Category: " + self.category + "\n"
         s += "Subcategory: " + self.subcategory + "\n"
-        s += "Modules: " + str(self.modules) + "\n"
+        s += "Modules: " + str(list(set(self.modules))) + "\n"
         if len(self.names) > 0:
             uniq_names = list(set(self.names))
             s += "Slab Name: " + str(uniq_names) + "\n"

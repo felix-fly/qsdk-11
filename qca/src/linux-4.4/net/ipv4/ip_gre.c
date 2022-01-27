@@ -1065,7 +1065,8 @@ static void ipgre_tap_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 	dev->netdev_ops		= &gre_tap_netdev_ops;
-	dev->priv_flags		|= IFF_LIVE_ADDR_CHANGE | IFF_GRE_V4_TAP;
+	dev->priv_flags	|= IFF_LIVE_ADDR_CHANGE;
+	dev->priv_flags_ext	|= IFF_EXT_GRE_V4_TAP;
 	ip_tunnel_setup(dev, gre_tap_net_id);
 }
 

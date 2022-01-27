@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2016, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2016, 2020 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1045,24 +1045,28 @@ static int pppoe_get_channel_protocol(struct ppp_channel *chan)
  * NOTE: This function returns a HOLD to the netdevice
  *
  ***********************************************************************/
-static void pppoe_get_addressing(struct ppp_channel *chan,
+static int pppoe_get_addressing(struct ppp_channel *chan,
 				 struct pppoe_opt *addressing)
 {
 	struct sock *sk = (struct sock *)chan->private;
 	struct pppox_sock *po = pppox_sk(sk);
+	int err = 0;
 
 	*addressing = po->proto.pppoe;
-	if (addressing->dev)
-		dev_hold(addressing->dev);
+	if (!addressing->dev)
+		return -ENODEV;
+
+	dev_hold(addressing->dev);
+	return err;
 }
 
 /* pppoe_channel_addressing_get()
  *	Return PPPoE channel specific addressing information.
  */
-void pppoe_channel_addressing_get(struct ppp_channel *chan,
+int pppoe_channel_addressing_get(struct ppp_channel *chan,
 				  struct pppoe_opt *addressing)
 {
-	pppoe_get_addressing(chan, addressing);
+	return pppoe_get_addressing(chan, addressing);
 }
 EXPORT_SYMBOL(pppoe_channel_addressing_get);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -119,7 +119,7 @@ struct wlan_psoc_host_ppe_threshold {
  * @high_5ghz_chan: higher 5 GHz channels
  */
 struct wlan_psoc_host_hal_reg_cap_ext {
-	uint32_t wireless_modes;
+	uint64_t wireless_modes;
 	uint32_t low_2ghz_chan;
 	uint32_t high_2ghz_chan;
 	uint32_t low_5ghz_chan;
@@ -137,6 +137,7 @@ struct wlan_psoc_host_hal_reg_cap_ext {
  *        by hw_mode_id.
  * @pdev_id: pdev_id starts with 1. pdev_id 1 => phy_id 0, pdev_id 2 => phy_id 1
  * @phy_id: Starts with 0
+ * @phy_idx: Index to mac phy caps structure for the given hw_mode_id and phy_id
  * @hw_mode_config_type: holds the enum wmi_hw_mode_config_type
  * @bitmap of supported modulations
  * @supported_bands: supported bands, enum WLAN_BAND_CAPABILITY
@@ -179,18 +180,27 @@ struct wlan_psoc_host_hal_reg_cap_ext {
  * @chainmask_table_id: chain mask table id
  * @lmac_id: hw mac id
  * @reg_cap_ext: extended regulatory capabilities
+ * @tgt_pdev_id: target pdev id assigned and used by firmware
+ * @nss_ratio_enabled: This flag is set if nss ratio is received from FW as part
+ *                     of service ready ext event.
+ * @nss_ratio: nss ratio is used to calculate the NSS value for 160MHz.
  */
 struct wlan_psoc_host_mac_phy_caps {
 	uint32_t hw_mode_id;
 	uint32_t pdev_id;
 	uint32_t phy_id;
+	uint8_t phy_idx;
 	int hw_mode_config_type;
 	uint32_t supports_11b:1,
 		 supports_11g:1,
 		 supports_11a:1,
 		 supports_11n:1,
 		 supports_11ac:1,
-		 supports_11ax:1;
+		 supports_11ax:1,
+#ifdef WLAN_FEATURE_11BE
+		 supports_11be:1,
+#endif
+		 reserved:25;
 	uint32_t supported_bands;
 	uint32_t ampdu_density;
 	uint32_t max_bw_supported_2G;
@@ -217,6 +227,9 @@ struct wlan_psoc_host_mac_phy_caps {
 	uint32_t chainmask_table_id;
 	uint32_t lmac_id;
 	struct wlan_psoc_host_hal_reg_cap_ext reg_cap_ext;
+	uint32_t tgt_pdev_id;
+	bool nss_ratio_enabled;
+	uint8_t nss_ratio_info;
 };
 
 /**
@@ -230,6 +243,48 @@ struct wlan_psoc_host_hw_mode_caps {
 	uint32_t hw_mode_id;
 	uint32_t phy_id_map;
 	uint32_t hw_mode_config_type;
+};
+
+/*
+ * struct wlan_psoc_host_mac_phy_caps_ext2 - Phy caps received in EXT2 service
+ * @hw_mode_id: HW mode id
+ * @pdev_id: Pdev id
+ * @phy_id: Phy id
+ * @wireless_modes_ext: Extended wireless modes
+ * @eht_cap_info_2G[]: EHT capability info field of 802.11ax, WMI_HE_CAP defines
+ * @eht_supp_mcs_2G: EHT Supported MCS Set field Rx/Tx same
+ * @eht_cap_info_5G[]: EHT capability info field of 802.11ax, WMI_HE_CAP defines
+ * @eht_supp_mcs_5G: EHT Supported MCS Set field Rx/Tx same
+ * @eht_cap_phy_info_2G: 2G EHT capability phy field
+ * @eht_cap_phy_info_5G: 5G EHT capability phy field
+ * @eht_cap_info_internal: EHT PHY internal feature capability
+ */
+struct wlan_psoc_host_mac_phy_caps_ext2 {
+	uint32_t hw_mode_id;
+	uint32_t pdev_id;
+	uint32_t phy_id;
+	uint64_t wireless_modes_ext;
+#ifdef WLAN_FEATURE_11BE
+	uint32_t eht_cap_info_2G[PSOC_HOST_MAX_MAC_SIZE];
+	uint32_t eht_supp_mcs_2G;
+	uint32_t eht_cap_info_5G[PSOC_HOST_MAX_MAC_SIZE];
+	uint32_t eht_supp_mcs_5G;
+	uint32_t eht_cap_phy_info_2G[PSOC_HOST_MAX_PHY_SIZE];
+	uint32_t eht_cap_phy_info_5G[PSOC_HOST_MAX_PHY_SIZE];
+	uint32_t eht_cap_info_internal;
+#endif
+};
+
+/*
+ * struct wlan_psoc_host_scan_radio_caps - scan radio capabilities
+ * @phy_id: phy id
+ * @scan_radio_supported: indicates scan radio support
+ * @dfs_en: indicates DFS needs to be enabled/disabled for scan radio vap
+ */
+struct wlan_psoc_host_scan_radio_caps {
+	uint32_t phy_id;
+	bool scan_radio_supported;
+	bool dfs_en;
 };
 
 /**
@@ -274,6 +329,9 @@ struct wlan_psoc_host_spectral_scaling_params {
  * @supports_chan_width_80: channel width 80 support for this chain mask.
  * @supports_chan_width_160: channel width 160 support for this chain mask.
  * @supports_chan_width_80P80: channel width 80P80 support for this chain mask.
+ * @supports_aSpectral: Agile Spectral support for this chain mask.
+ * @supports_aSpectral_160: Agile Spectral support in 160 MHz.
+ * @supports_aDFS_160: Agile DFS support in 160 MHz for this chain mask.
  * @chain_mask_2G: 2G support for this chain mask.
  * @chain_mask_5G: 5G support for this chain mask.
  * @chain_mask_tx: Tx support for this chain mask.
@@ -287,7 +345,13 @@ struct wlan_psoc_host_chainmask_capabilities {
 		 supports_chan_width_80:1,
 		 supports_chan_width_160:1,
 		 supports_chan_width_80P80:1,
-		 reserved:22,
+#ifdef WLAN_FEATURE_11BE
+		 supports_chan_width_320:1,
+#endif
+		 supports_aSpectral:1,
+		 supports_aSpectral_160:1,
+		 supports_aDFS_160:1,
+		 reserved:19,
 		 chain_mask_2G:1,
 		 chain_mask_5G:1,
 		 chain_mask_tx:1,
@@ -355,6 +419,14 @@ struct wlan_psoc_host_service_ext_param {
  * bdf_reg_db_version_major: BDF REG DB version major number
  * bdf_reg_db_version_minor: BDF REG DB version minor number
  * @num_dbr_ring_caps: Number of direct buf rx ring capabilities
+ * @chwidth_num_peer_caps: Peer limit for peer_chan_width_switch WMI cmd
+ * @max_ndp_sessions: Max number of ndp session fw supports
+ * @preamble_puncture_bw_cap: Preamble Puncturing Tx support
+ * @num_scan_radio_caps: Number of scan radio capabilities
+ * @max_users_dl_ofdma: Max number of users per-PPDU for Downlink OFDMA
+ * @max_users_ul_ofdma: Max number of users per-PPDU for Uplink OFDMA
+ * @max_users_dl_mumimo: Max number of users per-PPDU for Downlink MU-MIMO
+ * @max_users_ul_mumimo: Max number of users per-PPDU for Uplink MU-MIMO
  */
 struct wlan_psoc_host_service_ext2_param {
 	uint8_t reg_db_version_major;
@@ -362,6 +434,14 @@ struct wlan_psoc_host_service_ext2_param {
 	uint8_t bdf_reg_db_version_major;
 	uint8_t bdf_reg_db_version_minor;
 	uint32_t num_dbr_ring_caps;
+	uint32_t chwidth_num_peer_caps;
+	uint32_t max_ndp_sessions;
+	uint32_t preamble_puncture_bw_cap;
+	uint8_t num_scan_radio_caps;
+	uint16_t max_users_dl_ofdma;
+	uint16_t max_users_ul_ofdma;
+	uint16_t max_users_dl_mumimo;
+	uint16_t max_users_ul_mumimo;
 };
 
 #endif /* _SERVICE_READY_PARAM_H_*/

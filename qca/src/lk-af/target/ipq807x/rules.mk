@@ -18,7 +18,7 @@ SCRATCH_ADDR     := 0x50500000
 DEFINES += PERIPH_BLK_BLSP=1
 
 MODULES += \
-	lib/zlib_inflate \
+	lib/zlib \
 	lib/ptable \
 	lib/libfdt
 

@@ -1,6 +1,6 @@
 --- a/wpa_supplicant/ctrl_iface.c
 +++ b/wpa_supplicant/ctrl_iface.c
-@@ -852,6 +852,12 @@ static int wpa_supplicant_ctrl_iface_tdl
+@@ -857,6 +857,12 @@ static int wpa_supplicant_ctrl_iface_tdl
  	u8 peer[ETH_ALEN];
  	int ret;
  
@@ -13,7 +13,7 @@
  	if (hwaddr_aton(addr, peer)) {
  		wpa_printf(MSG_DEBUG, "CTRL_IFACE TDLS_DISCOVER: invalid "
  			   "address '%s'", addr);
-@@ -876,6 +882,12 @@ static int wpa_supplicant_ctrl_iface_tdl
+@@ -881,6 +887,12 @@ static int wpa_supplicant_ctrl_iface_tdl
  	u8 peer[ETH_ALEN];
  	int ret;
  

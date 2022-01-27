@@ -26,6 +26,8 @@
 #include "hal_rx_flow.h"
 #include "dp_htt.h"
 
+QDF_STATUS
+hal_rx_flow_delete_entry(struct hal_rx_fst *fst, void *hal_rx_fse);
 /**
  * In Hawkeye, a hardware bug disallows SW to only clear a single flow entry
  * when added/deleted by upper layer. Workaround is to clear entire cache,
@@ -303,7 +305,7 @@ QDF_STATUS dp_rx_flow_add_entry(struct dp_pdev *pdev,
 
 	flow.reo_destination_handler = HAL_RX_FSE_REO_DEST_FT;
 	flow.fse_metadata = rx_flow_info->fse_metadata;
-	fse->hal_rx_fse = hal_rx_flow_setup_fse(fst->hal_rx_fst,
+	fse->hal_rx_fse = hal_rx_flow_setup_fse(soc->hal_soc, fst->hal_rx_fst,
 						fse->flow_id, &flow);
 	if (qdf_unlikely(!fse->hal_rx_fse)) {
 		dp_err("Unable to alloc FSE entry");
@@ -513,8 +515,9 @@ QDF_STATUS dp_rx_fst_attach(struct dp_soc *soc, struct dp_pdev *pdev)
 		return QDF_STATUS_E_NOSUPPORT;
 	}
 
-	if (!wlan_psoc_nif_fw_ext_cap_get((void *)pdev->ctrl_pdev,
-					  WLAN_SOC_CEXT_RX_FSE_SUPPORT)) {
+	if (!wlan_psoc_nif_fw_ext_cap_get(
+				(struct wlan_objmgr_psoc *)soc->ctrl_psoc,
+				WLAN_SOC_CEXT_RX_FSE_SUPPORT)) {
 		QDF_TRACE(QDF_MODULE_ID_ANY, QDF_TRACE_LEVEL_ERROR,
 			  "rx fse disabled in FW\n");
 		wlan_cfg_set_rx_flow_tag_enabled(cfg, false);

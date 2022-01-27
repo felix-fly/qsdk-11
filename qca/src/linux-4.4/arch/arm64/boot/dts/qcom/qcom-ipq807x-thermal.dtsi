@@ -408,6 +408,7 @@
 		reg = <0x4a8000 0x2000>;
 		interrupts = <0 184 0>;
 		#thermal-sensor-cells = <1>;
+		tsens-up-low-int-clr-deassert-quirk;
 		status = "ok";
 	};
 };

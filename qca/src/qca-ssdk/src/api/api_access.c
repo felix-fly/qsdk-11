@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2017-2019, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -36,6 +36,7 @@
 #include "isisc_api.h"
 #endif
 #else
+#include "ref_api.h"
 #include "fal_api.h"
 #endif
 #elif (defined(USER_MODE))
@@ -53,15 +54,25 @@
 #include "isisc_api.h"
 #endif
 #else
+#include "ref_api.h"
 /*qca808x_start*/
 #include "fal_api.h"
 /*qca808x_end*/
 #endif
 #include "ref_vsi.h"
+#include "ref_vlan.h"
 
 /*qca808x_start*/
-static sw_api_func_t sw_api_func[] = { SSDK_API };
-static sw_api_param_t sw_api_param[] = { SSDK_PARAM };
+static sw_api_func_t sw_api_func[] = {
+/*qca808x_end*/
+	SSDK_REF_API
+/*qca808x_start*/
+	SSDK_API };
+static sw_api_param_t sw_api_param[] = {
+/*qca808x_end*/
+	SSDK_REF_PARAM
+/*qca808x_start*/
+	SSDK_PARAM };
 
 sw_api_func_t *
 sw_api_func_find(a_uint32_t api_id)

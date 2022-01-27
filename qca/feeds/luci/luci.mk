@@ -1,7 +1,7 @@
 #
 # Copyright (C) 2008-2015 The LuCI Team <luci@lists.subsignal.org>
 #
-# This is free software, licensed under the Apache License, Version 2.0 .
+#  This is free software, licensed under the Apache License, Version 2.0 .
 #
 
 LUCI_NAME?=$(notdir ${CURDIR})

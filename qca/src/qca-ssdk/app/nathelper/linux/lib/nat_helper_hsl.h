@@ -48,70 +48,82 @@
 #define ARP_AGE 6
 
 #if !defined (HSL_STANDALONG)
+extern a_uint32_t nat_dev_id;
+
 /*NAT API*/
-#define NAPT_ADD fal_napt_add
-#define NAPT_GET fal_napt_get
-#define NAT_PUB_ADDR_ADD fal_nat_pub_addr_add
-#define NAPT_NEXT fal_napt_next
-#define NAT_PRV_BASE_ADDR_SET fal_nat_prv_base_addr_set
-#define NAT_PRV_BASE_MASK_SET fal_nat_prv_base_mask_set
-#define NAPT_DEL fal_napt_del
-#define NAT_DEL fal_nat_del
-#define NAT_PUB_ADDR_DEL fal_nat_pub_addr_del
-#define NAT_ADD fal_nat_add
-#define NAT_PRV_ADDR_MODE_GET fal_nat_prv_addr_mode_get
+#define NAPT_ADD(dev_id, ...) fal_napt_add(nat_dev_id, ##__VA_ARGS__)
+#define NAPT_GET(dev_id, ...) fal_napt_get(nat_dev_id, ##__VA_ARGS__)
+#define NAT_PUB_ADDR_ADD(dev_id, ...) fal_nat_pub_addr_add(nat_dev_id, ##__VA_ARGS__)
+#define NAPT_NEXT(dev_id, ...) fal_napt_next(nat_dev_id, ##__VA_ARGS__)
+#define NAT_PRV_BASE_ADDR_SET(dev_id, ...) fal_nat_prv_base_addr_set(nat_dev_id, ##__VA_ARGS__)
+#define NAT_PRV_BASE_MASK_SET(dev_id, ...) fal_nat_prv_base_mask_set(nat_dev_id, ##__VA_ARGS__)
+#define NAPT_DEL(dev_id, ...) fal_napt_del(nat_dev_id, ##__VA_ARGS__)
+#define NAT_DEL(dev_id, ...) fal_nat_del(nat_dev_id, ##__VA_ARGS__)
+#define NAT_PUB_ADDR_DEL(dev_id, ...) fal_nat_pub_addr_del(nat_dev_id, ##__VA_ARGS__)
+#define NAT_ADD(dev_id, ...) fal_nat_add(nat_dev_id, ##__VA_ARGS__)
+#define NAT_PRV_ADDR_MODE_GET(dev_id, ...) fal_nat_prv_addr_mode_get(nat_dev_id, ##__VA_ARGS__)
 
 /*IP API*/
-#define IP_INTF_ENTRY_ADD fal_ip_intf_entry_add
-#define IP_HOST_ADD fal_ip_host_add
-#define IP_HOST_DEL fal_ip_host_del
-#define IP_HOST_GET fal_ip_host_get
-#define IP_HOST_NEXT fal_ip_host_next
-#define IP_INTF_ENTRY_DEL fal_ip_intf_entry_del
-#define IP_HOST_PPPOE_BIND fal_ip_host_pppoe_bind
-#define IP_ROUTE_STATUS_SET fal_ip_route_status_set
-#define IP_HOST_ROUTE_ADD fal_ip_host_route_set
-#define IP_PRV_BASE_ADDR_SET fal_ip_vrf_base_addr_set
-#define IP_PRV_BASE_MASK_SET fal_ip_vrf_base_mask_set
+#define IP_INTF_ENTRY_ADD(dev_id, ...) fal_ip_intf_entry_add(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_ADD(dev_id, ...) fal_ip_host_add(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_DEL(dev_id, ...) fal_ip_host_del(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_GET(dev_id, ...) fal_ip_host_get(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_NEXT(dev_id, ...) fal_ip_host_next(nat_dev_id, ##__VA_ARGS__)
+#define IP_INTF_ENTRY_DEL(dev_id, ...) fal_ip_intf_entry_del(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_PPPOE_BIND(dev_id, ...) fal_ip_host_pppoe_bind(nat_dev_id, ##__VA_ARGS__)
+#define IP_ROUTE_STATUS_SET(dev_id, ...) fal_ip_route_status_set(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_ROUTE_ADD(dev_id, ...) fal_ip_host_route_set(nat_dev_id, ##__VA_ARGS__)
+#define IP_PRV_BASE_ADDR_SET(dev_id, ...) fal_ip_vrf_base_addr_set(nat_dev_id, ##__VA_ARGS__)
+#define IP_PRV_BASE_MASK_SET(dev_id, ...) fal_ip_vrf_base_mask_set(nat_dev_id, ##__VA_ARGS__)
 
 /* PPPOE */
-#define PPPOE_STATUS_GET fal_pppoe_status_get
-#define PPPOE_STATUS_SET fal_pppoe_status_set
-#define PPPOE_SESSION_ID_SET fal_pppoe_session_id_set
-#define PPPOE_SESSION_TABLE_ADD fal_pppoe_session_table_add
-#define PPPOE_SESSION_TABLE_DEL fal_pppoe_session_table_del
-#define RTD_PPPOE_EN_SET fal_rtd_pppoe_en_set
+#define PPPOE_STATUS_GET(dev_id, ...) fal_pppoe_status_get(nat_dev_id, ##__VA_ARGS__)
+#define PPPOE_STATUS_SET(dev_id, ...) fal_pppoe_status_set(nat_dev_id, ##__VA_ARGS__)
+#define PPPOE_SESSION_ID_SET(dev_id, ...) fal_pppoe_session_id_set(nat_dev_id, ##__VA_ARGS__)
+#define PPPOE_SESSION_TABLE_ADD(dev_id, ...) fal_pppoe_session_table_add(nat_dev_id, ##__VA_ARGS__)
+#define PPPOE_SESSION_TABLE_DEL(dev_id, ...) fal_pppoe_session_table_del(nat_dev_id, ##__VA_ARGS__)
+#define RTD_PPPOE_EN_SET(dev_id, ...) fal_rtd_pppoe_en_set(nat_dev_id, ##__VA_ARGS__)
 
 /*MISC API*/
-#define MISC_ARP_CMD_SET fal_arp_cmd_set
-#define CPU_VID_EN_SET fal_cpu_vid_en_set
-#define PORT_ARP_ACK_STATUS_SET fal_port_arp_ack_status_set
-#define CPU_PORT_STATUS_SET fal_cpu_port_status_set
+#define MISC_ARP_CMD_SET(dev_id, ...) fal_arp_cmd_set(nat_dev_id, ##__VA_ARGS__)
+#define CPU_VID_EN_SET(dev_id, ...) fal_cpu_vid_en_set(nat_dev_id, ##__VA_ARGS__)
+#define PORT_ARP_ACK_STATUS_SET(dev_id, ...) fal_port_arp_ack_status_set(nat_dev_id, ##__VA_ARGS__)
+#define CPU_PORT_STATUS_SET(dev_id, ...) fal_cpu_port_status_set(nat_dev_id, ##__VA_ARGS__)
 
 /*ACL API*/
-#define ACL_RULE_ADD fal_acl_rule_add
-#define ACL_RULE_DEL fal_acl_rule_delete
-#define ACL_LIST_CREATE fal_acl_list_creat
-#define ACL_LIST_DESTROY fal_acl_list_destroy
-#define ACL_LIST_BIND fal_acl_list_bind
-#define ACL_LIST_UNBIND fal_acl_list_unbind
-#define ACL_STATUS_GET fal_acl_status_get
-#define ACL_STATUS_SET fal_acl_status_set
-#define ACL_PORT_UDF_PROFILE_SET fal_acl_port_udf_profile_set
+#define ACL_RULE_ADD(dev_id, ...) fal_acl_rule_add(nat_dev_id, ##__VA_ARGS__)
+#define ACL_RULE_DEL(dev_id, ...) fal_acl_rule_delete(nat_dev_id, ##__VA_ARGS__)
+#define ACL_LIST_CREATE(dev_id, ...) fal_acl_list_creat(nat_dev_id, ##__VA_ARGS__)
+#define ACL_LIST_DESTROY(dev_id, ...) fal_acl_list_destroy(nat_dev_id, ##__VA_ARGS__)
+#define ACL_LIST_BIND(dev_id, ...) fal_acl_list_bind(nat_dev_id, ##__VA_ARGS__)
+#define ACL_LIST_UNBIND(dev_id, ...) fal_acl_list_unbind(nat_dev_id, ##__VA_ARGS__)
+#define ACL_STATUS_GET(dev_id, ...) fal_acl_status_get(nat_dev_id, ##__VA_ARGS__)
+#define ACL_STATUS_SET(dev_id, ...) fal_acl_status_set(nat_dev_id, ##__VA_ARGS__)
+#define ACL_PORT_UDF_PROFILE_SET(dev_id, ...) fal_acl_port_udf_profile_set(nat_dev_id, ##__VA_ARGS__)
 
 /*VLAN API */
-#define VLAN_NEXT fal_vlan_next
+#define VLAN_NEXT(dev_id, ...) fal_vlan_next(nat_dev_id, ##__VA_ARGS__)
 
 /* PORTVLAN API */
 #define PORTVLAN_ROUTE_DEFV_SET(dev_id, port_id)
-#define NETISOLATE_SET fal_netisolate_set
+#define NETISOLATE_SET(dev_id, ...) fal_netisolate_set(nat_dev_id, ##__VA_ARGS__)
 
 /* PORT_CTRL API */
-#define HEADER_TYPE_SET fal_header_type_set
-#define PORT_TXHDR_MODE_SET fal_port_txhdr_mode_set
+#define HEADER_TYPE_SET(dev_id, ...) fal_header_type_set(nat_dev_id, ##__VA_ARGS__)
+#define PORT_TXHDR_MODE_SET(dev_id, ...) fal_port_txhdr_mode_set(nat_dev_id, ##__VA_ARGS__)
 
 /* REG ACCESS API */
-#define REG_GET fal_reg_get
+#define REG_GET(dev_id, ...) fal_reg_get(nat_dev_id, ##__VA_ARGS__)
+
+
+#define L3_STATUS_SET(dev_id, ...) napt_l3_status_set(nat_dev_id, ##__VA_ARGS__)
+#define L3_STATUS_GET(dev_id, ...) napt_l3_status_get(nat_dev_id, ##__VA_ARGS__)
+
+#define FDB_ENTRY_SEARCH(dev_id, ...) fal_fdb_entry_search(nat_dev_id, ##__VA_ARGS__)
+#define IP_HOST_ROUTE_GET(dev_id, ...) fal_ip_host_route_get(nat_dev_id, ##__VA_ARGS__)
+
+#define REG_ENTRY_SET(rv, dev_id, ...) HSL_REG_ENTRY_SET(rv, nat_dev_id, ##__VA_ARGS__)
+#define REG_ENTRY_GET(rv, dev_id, ...) HSL_REG_ENTRY_GET(rv, nat_dev_id, ##__VA_ARGS__)
 #endif
 
 extern int nf_athrs17_hnat;

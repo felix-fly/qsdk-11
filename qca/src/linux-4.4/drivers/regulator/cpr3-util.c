@@ -1539,19 +1539,19 @@ int cpr3_determine_part_type(struct cpr3_regulator *vreg, int fuse_volt)
 {
 	int i, rc, len;
 	u32 volt;
-	const int *soc_version_major;
+	u32 soc_version_major;
 	char prop_name[100];
 	const char prop_name_def[] = "qcom,cpr-parts-voltage";
 	const char prop_name_v2[] = "qcom,cpr-parts-voltage-v2";
 
 	soc_version_major = read_ipq_soc_version_major();
-        BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
 	if (of_property_read_u32(vreg->of_node, "qcom,cpr-part-types",
 				  &vreg->part_type_supported))
 		return 0;
 
-	if (*soc_version_major > 1)
+	if (soc_version_major > 1)
 		strlcpy(prop_name, prop_name_v2, sizeof(prop_name_v2));
 	else
 		strlcpy(prop_name, prop_name_def, sizeof(prop_name_def));
@@ -1589,12 +1589,12 @@ int cpr3_determine_temp_base_open_loop_correction(struct cpr3_regulator *vreg,
 	int i, rc, prev_volt;
 	int *volt_adjust;
 	char prop_str[75];
-	const int *soc_version_major = read_ipq_soc_version_major();
+	int soc_version_major = read_ipq_soc_version_major();
 
-	BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
 	if (vreg->part_type_supported) {
-		if (*soc_version_major > 1)
+		if (soc_version_major > 1)
 			snprintf(prop_str, sizeof(prop_str),
 			"qcom,cpr-cold-temp-voltage-adjustment-v2-%d",
 			vreg->part_type);
@@ -1653,11 +1653,11 @@ done:
 bool cpr3_can_adjust_cold_temp(struct cpr3_regulator *vreg)
 {
 	char prop_str[75];
-	const int *soc_version_major = read_ipq_soc_version_major();
+	int soc_version_major = read_ipq_soc_version_major();
 
-	BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
-	if (*soc_version_major > 1)
+	if (soc_version_major > 1)
 		strlcpy(prop_str, "qcom,cpr-cold-temp-threshold-v2",
 			sizeof(prop_str));
 	else
@@ -1687,12 +1687,12 @@ int cpr3_get_cold_temp_threshold(struct cpr3_regulator *vreg, int *cold_temp)
 	int rc;
 	u32 temp;
 	char req_prop_str[75], prop_str[75];
-	const int *soc_version_major = read_ipq_soc_version_major();
+	int soc_version_major = read_ipq_soc_version_major();
 
-	BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
 	if (vreg->part_type_supported) {
-		if (*soc_version_major > 1)
+		if (soc_version_major > 1)
 			snprintf(req_prop_str, sizeof(req_prop_str),
 			"qcom,cpr-cold-temp-voltage-adjustment-v2-%d",
 			vreg->part_type);
@@ -1705,7 +1705,7 @@ int cpr3_get_cold_temp_threshold(struct cpr3_regulator *vreg, int *cold_temp)
 			sizeof(req_prop_str));
 	}
 
-	if (*soc_version_major > 1)
+	if (soc_version_major > 1)
 		strlcpy(prop_str, "qcom,cpr-cold-temp-threshold-v2",
 			sizeof(prop_str));
 	else
@@ -1753,12 +1753,12 @@ int cpr3_adjust_fused_open_loop_voltages(struct cpr3_regulator *vreg,
 	int i, rc, prev_volt;
 	int *volt_adjust;
 	char prop_str[75];
-	const int *soc_version_major = read_ipq_soc_version_major();
+	int soc_version_major = read_ipq_soc_version_major();
 
-	BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
 	if (vreg->part_type_supported) {
-		if (*soc_version_major > 1)
+		if (soc_version_major > 1)
 			snprintf(prop_str, sizeof(prop_str),
 			"qcom,cpr-open-loop-voltage-fuse-adjustment-v2-%d",
 			vreg->part_type);

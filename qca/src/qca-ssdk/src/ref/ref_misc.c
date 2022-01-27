@@ -46,6 +46,10 @@
 #include <linux/netdevice.h>
 #include "ssdk_plat.h"
 #include "ref_vlan.h"
+#ifdef MP
+#include <adpt.h>
+#include "hsl_phy.h"
+#endif
 
 int
 qca_ar8327_sw_set_max_frame_size(struct switch_dev *dev,
@@ -70,6 +74,25 @@ qca_ar8327_sw_set_max_frame_size(struct switch_dev *dev,
 			}
 		}
 	}
+	else if (priv->version == QCA_VER_SCOMPHY)
+	{
+#ifdef MP
+		if(adapt_scomphy_revision_get(priv->device_id)
+			== MP_GEPHY)
+		{
+			for(port_id = SSDK_PHYSICAL_PORT1; port_id <= SSDK_PHYSICAL_PORT2;
+				port_id++)
+			{
+				ret = fal_port_max_frame_size_set(priv->device_id,
+					port_id, size);
+				if(ret)
+				{
+					return -1;
+				}
+			}
+		}
+#endif
+	}
 	else
 	{
 		ret = fal_frame_max_size_set(priv->device_id, size);
@@ -89,12 +112,23 @@ qca_ar8327_sw_get_max_frame_size(struct switch_dev *dev,
 {
 	struct qca_phy_priv *priv = qca_phy_priv_get(dev);
 	a_uint32_t size = 0;
-	a_uint32_t ret;
+	a_uint32_t ret = 0;
 
 	if (priv->version == QCA_VER_HPPE)
 	{
 		ret = fal_port_max_frame_size_get(priv->device_id,
 			SSDK_PHYSICAL_PORT1, &size);
+	}
+	else if (priv->version == QCA_VER_SCOMPHY)
+	{
+#ifdef MP
+		if(adapt_scomphy_revision_get(priv->device_id)
+			== MP_GEPHY)
+		{
+			ret = fal_port_max_frame_size_get(priv->device_id,
+				SSDK_PHYSICAL_PORT1, &size);
+		}
+#endif
 	}
 	else
 	{

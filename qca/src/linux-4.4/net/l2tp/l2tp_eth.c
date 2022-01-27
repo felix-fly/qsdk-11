@@ -137,7 +137,7 @@ static void l2tp_eth_dev_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 	dev->priv_flags		&= ~IFF_TX_SKB_SHARING;
-	dev->priv_flags		|= IFF_PPP_L2TPV3;
+	dev->priv_flags_ext	|= IFF_EXT_PPP_L2TPV3;
 	dev->features		|= NETIF_F_LLTX;
 	dev->netdev_ops		= &l2tp_eth_netdev_ops;
 	dev->destructor		= free_netdev;

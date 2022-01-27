@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015-2017, 2019-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -27,7 +27,9 @@
 #include "mc_api.h"
 #include "mc_osdep.h"
 
-
+/* mc_br_port_get
+ *	get bridge port by ifindex
+ */
 static struct net_bridge_port *mc_br_port_get(int ifindex)
 {
 	struct net_device *dev = NULL;
@@ -43,6 +45,10 @@ static struct net_bridge_port *mc_br_port_get(int ifindex)
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 3, 0))
+
+/* mc_pre_routing_hook
+ *	prerouting hook
+ */
 static unsigned int mc_pre_routing_hook(void *priv,
 				    struct sk_buff *skb,
 				    const struct nf_hook_state *state)
@@ -85,8 +91,7 @@ static unsigned int mc_pre_routing_hook(unsigned int hooknum, struct sk_buff *sk
 				ip_eth_mc_map(iph->daddr, eh->h_dest);
 
 				if (mc->debug && printk_ratelimit()) {
-					MC_PRINT("Decap the group "MC_IP4_STR" back to "MC_MAC_STR"\n",
-							 MC_IP4_FMT((u8 *)(&iph->daddr)), MC_MAC_FMT(eh->h_dest));
+					MC_PRINT("Decap the group %pI4 back to %pM\n", &iph->daddr, eh->h_dest);
 				}
 				skb->pkt_type = PACKET_MULTICAST;
 			}
@@ -101,8 +106,7 @@ static unsigned int mc_pre_routing_hook(unsigned int hooknum, struct sk_buff *sk
 				ipv6_eth_mc_map(&iph6->daddr, eh->h_dest);
 
 				if (mc->debug && printk_ratelimit()) {
-					MC_PRINT("Decap the group "MC_IP6_STR" back to "MC_MAC_STR"\n",
-							 MC_IP6_FMT((__be16 *)(&iph6->daddr)), MC_MAC_FMT(eh->h_dest));
+					MC_PRINT("Decap the group %pI6 back to %pM\n", &iph6->daddr, eh->h_dest);
 				}
 				skb->pkt_type = PACKET_MULTICAST;
 			}
@@ -115,6 +119,9 @@ out:
 	return NF_ACCEPT;
 }
 
+/* mc_is_ipv4_report_or_leave
+ *	if the skb is a ipv4 report or leave message
+ */
 static bool mc_is_ipv4_report_or_leave(struct sk_buff *skb)
 {
 	__be32 len, offset;
@@ -152,6 +159,11 @@ static bool mc_is_ipv4_report_or_leave(struct sk_buff *skb)
 
 	return false;
 }
+
+#ifdef MC_SUPPORT_MLD
+/* mc_is_ipv6_report_or_leave
+ *	skb is ipv6 report or leave message
+ */
 static bool mc_is_ipv6_report_or_leave(struct sk_buff *skb)
 {
 	struct ipv6hdr *ip6h;
@@ -198,7 +210,11 @@ static bool mc_is_ipv6_report_or_leave(struct sk_buff *skb)
 	}
 	return false;
 }
+#endif
 
+/* mc_is_report_or_leave
+ *	skb is a report or leave message
+ */
 static bool mc_is_report_or_leave(struct sk_buff *skb)
 {
 	switch (ntohs(skb->protocol)) {
@@ -213,6 +229,10 @@ static bool mc_is_report_or_leave(struct sk_buff *skb)
 
 }
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 3, 0))
+
+/* mc_forward_hook
+ *	forward hook to the linux kernel
+ */
 static unsigned int mc_forward_hook(void *priv,
 				    struct sk_buff *skb,
 				    const struct nf_hook_state *state)
@@ -260,12 +280,15 @@ static unsigned int mc_forward_hook(unsigned int hooknum, struct sk_buff *skb,
 		else
 			rhead = &mc->rp.mld_rlist;
 #endif
+		if (rhead == NULL)
+			goto accept;
+
 		if (!hlist_empty(rhead)) {
 			struct mc_querier_entry *qe;
 			struct hlist_node *h;
 
 			os_hlist_for_each_entry_rcu(qe, h, rhead, rlist) {
-				if (((struct net_bridge_port *)qe->port)->dev == out)
+				if (qe->dev == out)
 					goto accept;
 			}
 		}
@@ -306,18 +329,34 @@ static struct nf_hook_ops mc_hook_ops[] __read_mostly = {
 	}
 };
 
-
+/* mc_netfilter_init
+ *	function module init
+ */
 int __init mc_netfilter_init(void)
 {
 	int ret = 0;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	ret = nf_register_net_hook(&init_net,&mc_hook_ops[0]);
+	ret |= nf_register_net_hook(&init_net,&mc_hook_ops[1]);
+#else
 	ret = nf_register_hook(&mc_hook_ops[0]);
 	ret |= nf_register_hook(&mc_hook_ops[1]);
+#endif
 	return ret;
 }
 
+/* mc_netfilter_exit
+ *	function module exit
+ */
 void mc_netfilter_exit(void)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	nf_unregister_net_hook(&init_net,&mc_hook_ops[0]);
+	nf_unregister_net_hook(&init_net,&mc_hook_ops[1]);
+#else
 	nf_unregister_hook(&mc_hook_ops[0]);
 	nf_unregister_hook(&mc_hook_ops[1]);
+#endif
 }
 

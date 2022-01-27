@@ -1,5 +1,4 @@
-/*
- * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -31,6 +30,7 @@
 #include "rmnet_data_vnd.h"
 #include "rmnet_data_stats.h"
 #include "rmnet_data_trace.h"
+#include <linux/rmnet_nss.h>
 
 RMNET_LOG_MODULE(RMNET_DATA_LOGMASK_VND);
 
@@ -107,7 +107,7 @@ static void rmnet_vnd_add_qos_header(struct sk_buff *skb,
 /* ***************** RX/TX Fixup ******************************************** */
 
 /**
- * rmnet_vnd_rx_fixup() - Virtual Network Device receive fixup hook
+ * rmnet_data_vnd_rx_fixup() - Virtual Network Device receive fixup hook
  * @skb:        Socket buffer ("packet") to modify
  * @dev:        Virtual network device
  *
@@ -118,7 +118,7 @@ static void rmnet_vnd_add_qos_header(struct sk_buff *skb,
  *      - RX_HANDLER_CONSUMED if packet should not be processed in stack
  *
  */
-int rmnet_vnd_rx_fixup(struct sk_buff *skb, struct net_device *dev)
+int rmnet_data_vnd_rx_fixup(struct sk_buff *skb, struct net_device *dev)
 {
 	if (unlikely(!dev || !skb))
 		BUG();
@@ -130,7 +130,7 @@ int rmnet_vnd_rx_fixup(struct sk_buff *skb, struct net_device *dev)
 }
 
 /**
- * rmnet_vnd_tx_fixup() - Virtual Network Device transmic fixup hook
+ * rmnet_data_vnd_tx_fixup() - Virtual Network Device transmic fixup hook
  * @skb:      Socket buffer ("packet") to modify
  * @dev:      Virtual network device
  *
@@ -140,7 +140,7 @@ int rmnet_vnd_rx_fixup(struct sk_buff *skb, struct net_device *dev)
  *      - RX_HANDLER_PASS if packet should continue to be transmitted
  *      - RX_HANDLER_CONSUMED if packet should not be transmitted by stack
  */
-int rmnet_vnd_tx_fixup(struct sk_buff *skb, struct net_device *dev)
+int rmnet_data_vnd_tx_fixup(struct sk_buff *skb, struct net_device *dev)
 {
 	struct rmnet_vnd_private_s *dev_conf;
 	dev_conf = (struct rmnet_vnd_private_s *) netdev_priv(dev);
@@ -181,7 +181,7 @@ static netdev_tx_t rmnet_vnd_start_xmit(struct sk_buff *skb,
 						 dev,
 						 dev_conf->qos_version);
 		skb_orphan(skb);
-		rmnet_egress_handler(skb, &dev_conf->local_ep);
+		rmnet_data_egress_handler(skb, &dev_conf->local_ep);
 	} else {
 		dev->stats.tx_dropped++;
 		rmnet_kfree_skb(skb, RMNET_STATS_SKBFREE_VND_NO_EGRESS);
@@ -496,7 +496,7 @@ static void rmnet_vnd_setup(struct net_device *dev)
 	/* Raw IP mode */
 	dev->header_ops = 0;  /* No header */
 	dev->type = ARPHRD_RAWIP;
-	dev->hard_header_len = 0;
+	dev->hard_header_len = RMNET_QMAP_HEADER_LENGTH;
 	dev->flags &= ~(IFF_BROADCAST | IFF_MULTICAST);
 
 	/* This perm addr will be used as interface identifier by IPv6 */
@@ -572,6 +572,7 @@ int rmnet_vnd_create_dev(int id, struct net_device **new_device,
 			 const char *prefix, int use_name)
 {
 	struct net_device *dev;
+	struct rmnet_nss_cb *nss_cb;
 	char dev_prefix[IFNAMSIZ];
 	int p, rc = 0;
 
@@ -637,6 +638,19 @@ int rmnet_vnd_create_dev(int id, struct net_device **new_device,
 
 	rmnet_vnd_disable_offload(dev);
 
+	nss_cb = rcu_dereference(rmnet_nss_callbacks);
+	if (nss_cb) {
+		rc = nss_cb->nss_create(dev);
+		if (rc) {
+			/* Log, but don't fail the device creation */
+			LOGH("Device %s will not use NSS path: %d",
+			     dev->name, rc);
+			rc = 0;
+		} else {
+			LOGH("NSS context for %s created", dev->name);
+		}
+	}
+
 	LOGM("Registered device %s", dev->name);
 	return rc;
 }
@@ -661,6 +675,7 @@ int rmnet_vnd_free_dev(int id)
 {
 	struct rmnet_logical_ep_conf_s *epconfig_l;
 	struct net_device *dev;
+	struct rmnet_nss_cb *nss_cb;
 
 	rtnl_lock();
 	if ((id < 0) || (id >= RMNET_DATA_MAX_VND) || !rmnet_devices[id]) {
@@ -680,6 +695,9 @@ int rmnet_vnd_free_dev(int id)
 	rtnl_unlock();
 
 	if (dev) {
+		nss_cb = rcu_dereference(rmnet_nss_callbacks);
+		if (nss_cb)
+			nss_cb->nss_free(dev);
 		unregister_netdev(dev);
 		free_netdev(dev);
 		return 0;
@@ -1015,7 +1033,7 @@ int rmnet_vnd_del_tc_flow(uint32_t id, uint32_t map_flow, uint32_t tc_flow)
 }
 
 /**
- * rmnet_vnd_do_flow_control() - Process flow control request
+ * rmnet_data_vnd_do_flow_control() - Process flow control request
  * @dev: Virtual network device node to do lookup on
  * @map_flow_id: Flow ID from MAP message
  * @v4_seq: pointer to IPv4 indication sequence number
@@ -1027,7 +1045,7 @@ int rmnet_vnd_del_tc_flow(uint32_t id, uint32_t map_flow, uint32_t tc_flow)
  *      - 1 if no mapping is found
  *      - 2 if dev is not RmNet virtual network device node
  */
-int rmnet_vnd_do_flow_control(struct net_device *dev,
+int rmnet_data_vnd_do_flow_control(struct net_device *dev,
 			       uint32_t map_flow_id,
 			       uint16_t v4_seq,
 			       uint16_t v6_seq,

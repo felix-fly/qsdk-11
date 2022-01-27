@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -23,8 +23,6 @@
 
 #ifndef _WMI_UNIFIED_VDEV_API_H_
 #define _WMI_UNIFIED_VDEV_API_H_
-
-#ifdef TGT_IF_VDEV_MGR_CONV
 
 #include <wmi_unified_api.h>
 
@@ -86,7 +84,7 @@ QDF_STATUS wmi_unified_beacon_send_cmd(struct wmi_unified *wmi_handle,
  */
 QDF_STATUS
 wmi_extract_vdev_start_resp(struct wmi_unified *wmi_handle, void *evt_buf,
-			    wmi_host_vdev_start_resp *vdev_start_resp);
+			    struct vdev_start_response *vdev_rsp);
 
 /**
  * wmi_extract_vdev_stopped_param() - extract vdev stop param from event
@@ -110,21 +108,21 @@ wmi_extract_vdev_stopped_param(struct wmi_unified *wmi_handle, void *evt_buf,
  */
 QDF_STATUS
 wmi_extract_vdev_delete_resp(struct wmi_unified *wmi_handle, void *evt_buf,
-			     struct wmi_host_vdev_delete_resp *vdev_del_resp);
+			     struct vdev_delete_response *vdev_del_resp);
 
 /**
  * wmi_extract_vdev_peer_delete_all_response_event() - extract peer delete all
  * response
  * @wmi_handle: wmi handle
  * @param evt_buf: pointer to event buffer
- * @param delete_rsp: Pointer to hold peer delete al response
+ * @param delete_rsp: Pointer to hold peer delete all response
  *
  * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
  */
 QDF_STATUS wmi_extract_vdev_peer_delete_all_response_event(
 	struct wmi_unified *wmi_handle,
 	void *evt_buf,
-	struct wmi_host_vdev_peer_delete_all_response_event *delete_rsp);
+	struct peer_delete_all_response *delete_rsp);
 
 /**
  * wmi_extract_ext_tbttoffset_num_vdevs() - extract ext tbtt offset num vdev
@@ -139,87 +137,6 @@ wmi_extract_ext_tbttoffset_num_vdevs(struct wmi_unified *wmi_handle,
 				     void *evt_buf, uint32_t *num_vdevs);
 
 /**
- * send_vdev_config_ratemask_cmd_tlv() - config ratemask param in fw
- * @wmi_handle: wmi handle
- * @param: pointer to hold config ratemask params
- *
- *  @return QDF_STATUS_SUCCESS  on success and -ve on failure.
- */
-QDF_STATUS
-send_vdev_config_ratemask_cmd_tlv(struct wmi_unified *wmi_handle,
-				  struct config_ratemask_params *param);
-
-/**
- * send_beacon_send_cmd_tlv() - send beacon tlv command in fw
- * @wmi_handle: wmi handle
- * @param: pointer to hold config beacon params
- *
- *  @return QDF_STATUS_SUCCESS  on success and -ve on failure.
- */
-QDF_STATUS send_beacon_send_cmd_tlv(struct wmi_unified *wmi_handle,
-				    struct beacon_params *param);
-
-/**
- * extract_tbttoffset_num_vdevs_tlv() - extract tbtt offset num vdev
- * @wmi_handle: wmi handle
- * @param evt_buf: pointer to event buffer
- * @param num_vdevs: Pointer to hold num vdev
- *
- * Return: QDF_STATUS_SUCCESS for success or error code
- */
-QDF_STATUS
-extract_tbttoffset_num_vdevs_tlv(struct wmi_unified *wmi_handle, void *evt_buf,
-				 uint32_t *num_vdevs);
-
-/**
- * send_vdev_set_neighbour_rx_cmd_tlv() - set neighbour rx param in fw
- * @wmi_handle: wmi handle
- * @macaddr: vdev mac address
- * @param: pointer to hold neigbour rx param
- *
- *  @return QDF_STATUS_SUCCESS  on success and -ve on failure.
- */
-QDF_STATUS
-send_vdev_set_neighbour_rx_cmd_tlv(struct wmi_unified *wmi_handle,
-				   uint8_t macaddr[QDF_MAC_ADDR_SIZE],
-				   struct set_neighbour_rx_params *param);
-
-/**
- * extract_vdev_start_resp_tlv() - extract vdev start response
- * @wmi_handle: wmi handle
- * @param evt_buf: pointer to event buffer
- * @param vdev_rsp: Pointer to hold vdev response
- *
- * Return: QDF_STATUS_SUCCESS for success or error code
- */
-QDF_STATUS
-extract_vdev_start_resp_tlv(struct wmi_unified *wmi_handle, void *evt_buf,
-			    wmi_host_vdev_start_resp *vdev_rsp);
-
-/**
- * extract_vdev_delete_resp_tlv() - extract vdev delete response
- * @wmi_handle: wmi handle
- * @param evt_buf: pointer to event buffer
- * @param delete_rsp: Pointer to hold vdev delete response
- *
- * Return: QDF_STATUS_SUCCESS for success or error code
- */
-QDF_STATUS
-extract_vdev_delete_resp_tlv(struct wmi_unified *wmi_handle, void *evt_buf,
-			     struct wmi_host_vdev_delete_resp *delete_rsp);
-
-/**
- * extract_vdev_stopped_param_tlv() - extract vdev stop param from event
- * @wmi_handle: wmi handle
- * @param evt_buf: pointer to event buffer
- * @param vdev_id: Pointer to hold vdev identifier
- *
- * Return: QDF_STATUS_SUCCESS for success or error code
- */
-QDF_STATUS extract_vdev_stopped_param_tlv(struct wmi_unified *wmi_handle,
-					  void *evt_buf, uint32_t *vdev_id);
-
-/**
  * wmi_extract_tbttoffset_num_vdevs() - extract tbtt offset num vdev
  * @wmi_handle: wmi handle
  * @param evt_buf: pointer to event buffer
@@ -230,5 +147,29 @@ QDF_STATUS extract_vdev_stopped_param_tlv(struct wmi_unified *wmi_handle,
 QDF_STATUS
 wmi_extract_tbttoffset_num_vdevs(struct wmi_unified *wmi_handle, void *evt_buf,
 				 uint32_t *num_vdevs);
-#endif
+
+/**
+ * wmi_extract_multi_vdev_restart_resp_event() - extract multi vdev restart
+ * response
+ * @wmi_handle: wmi handle
+ * @evt_buf: pointer to event buffer
+ * @restart_rsp: Pointer to hold multi vdev restart response
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_extract_multi_vdev_restart_resp_event(
+		struct wmi_unified *wmi_handle,
+		void *evt_buf,
+		struct multi_vdev_restart_resp *restart_rsp);
+
+/**
+ * wmi_unified_multisoc_tbtt_sync_cmd() - Send cmd to sync tbtt in multisoc case
+ * @wmi_handle: wmi handle
+ * @param: params received in rnr_tbtt_multisoc_sync_param
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS
+wmi_unified_multisoc_tbtt_sync_cmd(wmi_unified_t wmi_handle,
+				   struct rnr_tbtt_multisoc_sync_param *param);
 #endif

@@ -27,7 +27,6 @@
 			interrupts = <0 320 1>, /* o_wcss_apps_intr[0] =  */
 				<0 319 1>,
 				<0 318 1>,
-				<0 317 1>,
 				<0 316 1>,
 				<0 315 1>,
 				<0 314 1>,
@@ -84,7 +83,6 @@
 			interrupt-names = "misc-pulse1",
 				"misc-latch",
 				"sw-exception",
-				"watchdog",
 				"ce0",
 				"ce1",
 				"ce2",

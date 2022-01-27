@@ -24,6 +24,19 @@ struct qcom_glink_pipe {
 		      const void *data, size_t dlen);
 };
 
+struct glink_smem_pipe {
+	struct qcom_glink_pipe native;
+
+	__le32 *tail;
+	__le32 *head;
+
+	void *fifo;
+
+	int remote_pid;
+};
+
+#define to_smem_pipe(p) container_of(p, struct glink_smem_pipe, native)
+
 struct qcom_glink;
 
 struct qcom_glink *qcom_glink_native_probe(struct device *dev,

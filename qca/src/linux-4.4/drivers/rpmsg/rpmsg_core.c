@@ -322,7 +322,7 @@ field##_show(struct device *dev,					\
 {									\
 	struct rpmsg_device *rpdev = to_rpmsg_device(dev);		\
 									\
-	return sprintf(buf, format_string, rpdev->path);		\
+	return snprintf(buf, PAGE_SIZE, format_string, rpdev->path);	\
 }									\
 static DEVICE_ATTR_RO(field);
 
@@ -359,7 +359,7 @@ field##_show(struct device *dev,					\
 {									\
 	struct rpmsg_device *rpdev = to_rpmsg_device(dev);		\
 									\
-	return sprintf(buf, "%s\n", rpdev->member);			\
+	return snprintf(buf, PAGE_SIZE, "%s\n", rpdev->member);		\
 }									\
 static DEVICE_ATTR_RW(field)
 
@@ -380,7 +380,8 @@ static ssize_t modalias_show(struct device *dev,
 	if (len != -ENODEV)
 		return len;
 
-	return sprintf(buf, RPMSG_DEVICE_MODALIAS_FMT "\n", rpdev->id.name);
+	return snprintf(buf, PAGE_SIZE, RPMSG_DEVICE_MODALIAS_FMT "\n",
+								rpdev->id.name);
 }
 static DEVICE_ATTR_RO(modalias);
 
@@ -455,7 +456,7 @@ static int rpmsg_dev_probe(struct device *dev)
 		pr_info("No pm domain\n");
 
 	if (rpdrv->callback) {
-		strncpy(chinfo.name, rpdev->id.name, RPMSG_NAME_SIZE);
+		strlcpy(chinfo.name, rpdev->id.name, RPMSG_NAME_SIZE);
 		chinfo.src = rpdev->src;
 		chinfo.dst = RPMSG_ADDR_ANY;
 

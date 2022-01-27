@@ -35,7 +35,7 @@ $(call Package/openswan/Default)
   SECTION:=net
   CATEGORY:=Network
   TITLE+= (daemon)
-  DEPENDS+= +libgmp +kmod-openswan
+  DEPENDS+= +libgmp +PACKAGE_kmod-crypto-ocf:kmod-openswan
 endef
 
 define Package/openswan/description
@@ -47,7 +47,7 @@ define KernelPackage/openswan
 $(call Package/openswan/Default)
   SUBMENU:=Network Support
   TITLE+= (kernel module)
-  DEPENDS:=+kmod-crypto-ocf
+  DEPENDS:=+PACKAGE_kmod-crypto-ocf:kmod-crypto-ocf
   FILES:=$(PKG_BUILD_DIR)/modobj*/ipsec.$(LINUX_KMOD_SUFFIX)
 endef
 
@@ -74,7 +74,9 @@ OPENSWAN_MAKEFLAGS:= \
 
 define Build/Compile
 	+$(MAKE) $(PKG_JOBS) $(OPENSWAN_MAKEFLAGS) programs
+ifeq ($(CONFIG_PACKAGE_kmod-crypto-ocf),y)
 	+$(MAKE) $(PKG_JOBS) $(OPENSWAN_MAKEFLAGS) module
+endif
 endef
 
 define Build/Install

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -30,19 +30,6 @@ u_int32_t son_ol_get_peer_rate(struct wlan_objmgr_peer *peer, u_int8_t type)
 	return ol_if_peer_get_rate(peer, type);
 }
 
-
-bool son_ol_enable(struct wlan_objmgr_pdev *pdev, bool enable)
-{
-	return true;
-}
-
-int8_t son_ol_sanitize_util_invtl(struct wlan_objmgr_pdev *pdev,
-				  u_int32_t *sample_period,
-				  u_int32_t *num_of_sample)
-{
-	return 0;
-}
-
 QDF_STATUS son_ol_send_null(struct wlan_objmgr_pdev *pdev,
 			 u_int8_t *macaddr,
 			 struct wlan_objmgr_vdev *vdev)
@@ -65,66 +52,62 @@ QDF_STATUS son_ol_send_null(struct wlan_objmgr_pdev *pdev,
 	return wmi_unified_stats_request_send(wmi_handle, macaddr, &param);
 }
 
-int son_ol_lmac_create(struct wlan_objmgr_pdev *pdev)
+QDF_STATUS son_ol_peer_ext_stats_enable(struct wlan_objmgr_pdev *pdev,
+					uint8_t *peer_addr,
+					struct wlan_objmgr_vdev *vdev,
+					uint32_t stats_count, uint32_t enable)
 {
-	return 0;
-}
+	struct peer_set_params param = {0};
+	struct wlan_objmgr_psoc *psoc = NULL;
+	struct target_psoc_info *tgt_hdl;
+	target_resource_config *tgt_cfg;
+	wmi_unified_t wmi_handle;
 
-int son_ol_lmac_destroy(struct wlan_objmgr_pdev *pdev)
-{
-	return 0;
+	psoc = wlan_pdev_get_psoc(pdev);
+	if (!psoc)
+		return QDF_STATUS_E_INVAL;
 
-}
+	tgt_hdl = wlan_psoc_get_tgt_if_handle(psoc);
+	if (!tgt_hdl)
+		return QDF_STATUS_E_INVAL;
 
-void  son_ol_rx_rssi_update(struct wlan_objmgr_pdev *pdev, u_int8_t *macaddres,
-			    u_int8_t status, int8_t rssi, u_int8_t subtype)
-{
-	return;
+	tgt_cfg = target_psoc_get_wlan_res_cfg(tgt_hdl);
+	if (!tgt_cfg)
+		return QDF_STATUS_E_INVAL;
 
-}
+	if (enable && stats_count >= tgt_cfg->max_peer_ext_stats)
+		return QDF_STATUS_E_NOMEM;
 
-void son_ol_rx_rate_update(struct wlan_objmgr_pdev *pdev, u_int8_t *macaddres,
-			   u_int8_t status, u_int32_t rateKbps)
-{
-	return;
+	wmi_handle = get_wmi_unified_hdl_from_pdev(pdev);
+	if (!wmi_handle)
+		return QDF_STATUS_E_INVAL;
+
+	param.param_id = WMI_HOST_PEER_EXT_STATS_ENABLE;
+	param.vdev_id = wlan_vdev_get_id(vdev);
+	param.param_value = enable;
+
+	return wmi_set_peer_param_send(wmi_handle, peer_addr, &param);
 }
 
 void target_if_son_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 {
 	/* wlan son related function handler */
-	tx_ops->son_tx_ops.son_enable = son_ol_enable;
-	tx_ops->son_tx_ops.lmac_create = son_ol_lmac_create;
-	tx_ops->son_tx_ops.lmac_destroy = son_ol_lmac_destroy;
 	tx_ops->son_tx_ops.son_send_null = son_ol_send_null;
-	tx_ops->son_tx_ops.son_rssi_update = son_ol_rx_rssi_update;
-	tx_ops->son_tx_ops.son_rate_update = son_ol_rx_rate_update;
-	tx_ops->son_tx_ops.son_sanity_util_intvl = son_ol_sanitize_util_invtl;
 	tx_ops->son_tx_ops.get_peer_rate = son_ol_get_peer_rate;
+	tx_ops->son_tx_ops.peer_ext_stats_enable = son_ol_peer_ext_stats_enable;
 	return;
 }
-#else
-void target_if_son_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
-{
-	return;
-}
-int8_t son_ol_sanitize_util_intvl(struct wlan_objmgr_pdev *pdev,
-				  u_int32_t *sample_period,
-				  u_int32_t *num_of_sample)
-{
-	return -EINVAL;
 
-}
+#else
 
 u_int32_t son_ol_get_peer_rate(struct wlan_objmgr_peer *peer, u_int8_t type)
 {
 	return 0;
 }
 
-
-bool son_ol_enable(struct wlan_objmgr_pdev *pdev, bool enable)
+void target_if_son_register_tx_ops(struct wlan_lmac_if_tx_ops *tx_ops)
 {
-	return -EINVAL;
-
+	return;
 }
 
 QDF_STATUS son_ol_send_null(struct wlan_objmgr_pdev *pdev,
@@ -132,38 +115,6 @@ QDF_STATUS son_ol_send_null(struct wlan_objmgr_pdev *pdev,
 			    struct wlan_objmgr_vdev *vdev)
 {
 	return QDF_STATUS_SUCCESS;
-}
-int8_t son_ol_sanitize_util_invtl(struct wlan_objmgr_pdev *pdev,
-				  u_int32_t *sample_period,
-				  u_int32_t *num_of_sample)
-{
-	return 0;
-}
-
-int son_ol_lmac_create(struct wlan_objmgr_pdev *pdev)
-{
-	return 0;
-}
-
-
-int son_ol_lmac_destroy(struct wlan_objmgr_pdev *pdev)
-{
-	return 0;
-
-}
-
-
-void  son_ol_rx_rssi_update(struct wlan_objmgr_pdev *pdev, u_int8_t *macaddres,
-			    u_int8_t status, int8_t rssi, u_int8_t subtype)
-{
-	return;
-
-}
-
-void son_ol_rx_rate_update(struct wlan_objmgr_pdev *pdev, u_int8_t *macaddres,
-			   u_int8_t status, u_int32_t rateKbps)
-{
-	return;
 }
 
 #endif

@@ -598,6 +598,7 @@ hppe_l2_global_conf_age_ctrl_mode_set(
 		a_uint32_t dev_id,
 		unsigned int value);
 
+#ifndef IN_FDB_MINI
 sw_error_t
 hppe_l2_global_conf_service_code_loop_get(
 		a_uint32_t dev_id,
@@ -607,6 +608,7 @@ sw_error_t
 hppe_l2_global_conf_service_code_loop_set(
 		a_uint32_t dev_id,
 		unsigned int value);
+#endif
 
 sw_error_t
 hppe_l2_dbgcnt_cmd_type_get(

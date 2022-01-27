@@ -278,6 +278,10 @@ struct list_head *kdb_modules = &modules; /* kdb needs the list of modules */
 #ifdef CONFIG_CRASHLOG
 struct list_head *crashlog_modules = &modules;
 #endif
+#ifdef CONFIG_QCA_MINIDUMP
+struct list_head *minidump_modules = &modules;
+EXPORT_SYMBOL(minidump_modules);
+#endif
 
 static void module_assert_mutex(void)
 {

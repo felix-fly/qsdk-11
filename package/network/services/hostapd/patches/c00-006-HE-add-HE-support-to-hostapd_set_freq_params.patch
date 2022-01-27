@@ -12,13 +12,11 @@ Signed-off-by: John Crispin <john@phrozen.org>
  src/common/hw_features_common.c | 69 ++++++++++++++++++++++++++++++++++-------
  1 file changed, 58 insertions(+), 11 deletions(-)
 
-diff --git a/src/common/hw_features_common.c b/src/common/hw_features_common.c
-index 3fdbf89..841c888 100644
 --- a/src/common/hw_features_common.c
 +++ b/src/common/hw_features_common.c
-@@ -381,13 +381,44 @@ int hostapd_set_freq_params(struct hostapd_freq_params *data,
- 	data->center_freq2 = 0;
- 	data->bandwidth = sec_channel_offset ? 40 : 20;
+@@ -450,13 +450,44 @@ int hostapd_set_freq_params(struct hosta
+ 		return 0;
+ 	}
  
 -	if (data->vht_enabled) switch (oper_chwidth) {
 +	if (data->he_enabled) switch (oper_chwidth) {
@@ -42,7 +40,7 @@ index 3fdbf89..841c888 100644
 +		      HE_PHYCAP_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G)) {
 +			wpa_printf(MSG_ERROR,
 +				   "40/80 channel width is not supported!");
-+			return -1;
+ 			return -1;
 +		}
 +		break;
 +	case CHANWIDTH_80P80MHZ:
@@ -50,7 +48,7 @@ index 3fdbf89..841c888 100644
 +		      HE_PHYCAP_CHANNEL_WIDTH_SET_80PLUS80MHZ_IN_5G)) {
 +			wpa_printf(MSG_ERROR,
 +				   "80+80 channel width is not supported!");
- 			return -1;
++			return -1;
 +		}
 +		break;
 +	case CHANWIDTH_160MHZ:
@@ -66,7 +64,7 @@ index 3fdbf89..841c888 100644
  		break;
  	case CHANWIDTH_80P80MHZ:
  		if (!(vht_caps & VHT_CAP_SUPP_CHAN_WIDTH_160_80PLUS80MHZ)) {
-@@ -395,6 +426,28 @@ int hostapd_set_freq_params(struct hostapd_freq_params *data,
+@@ -464,6 +495,28 @@ int hostapd_set_freq_params(struct hosta
  				   "80+80 channel width is not supported!");
  			return -1;
  		}
@@ -95,7 +93,7 @@ index 3fdbf89..841c888 100644
  		if (center_segment1 == center_segment0 + 4 ||
  		    center_segment1 == center_segment0 - 4)
  			return -1;
-@@ -439,12 +492,6 @@ int hostapd_set_freq_params(struct hostapd_freq_params *data,
+@@ -508,12 +561,6 @@ int hostapd_set_freq_params(struct hosta
  		break;
  	case CHANWIDTH_160MHZ:
  		data->bandwidth = 160;
@@ -108,6 +106,3 @@ index 3fdbf89..841c888 100644
  		if (center_segment1)
  			return -1;
  		if (!sec_channel_offset)
--- 
-2.7.4
-

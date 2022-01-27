@@ -35,6 +35,9 @@ typedef volatile unsigned char	vu_char;
 #elif defined(CONFIG_IPQ806X)
 #include <../board/qca/arm/ipq806x/ipq806x.h>
 
+#elif defined(CONFIG_IPQ5018)
+#include <../board/qca/arm/ipq5018/ipq5018.h>
+
 #elif defined(CONFIG_IPQ6018)
 #include <../board/qca/arm/ipq6018/ipq6018.h>
 
@@ -356,6 +359,8 @@ void board_show_dram(phys_size_t size);
  */
 int arch_fixup_fdt(void *blob);
 
+void parse_fdt_fixup(char* buf, void *blob);
+
 /* common/flash.c */
 void flash_perror (int);
 
@@ -408,7 +413,7 @@ ulong getenv_hex(const char *varname, ulong default_val);
  * Return -1 if variable does not exist (default to true)
  */
 int getenv_yesno(const char *var);
-#if defined(CONFIG_IPQ40XX_ENV) || defined(CONFIG_IPQ807X_ENV) || defined(CONFIG_IPQ806X_ENV) || defined(CONFIG_IPQ6018_ENV)
+#if defined(CONFIG_IPQ40XX_ENV) || defined(CONFIG_IPQ807X_ENV) || defined(CONFIG_IPQ806X_ENV) || defined(CONFIG_IPQ5018_ENV) || defined(CONFIG_IPQ6018_ENV)
 extern int (*saveenv)(void);
 #else
 int	saveenv	     (void);

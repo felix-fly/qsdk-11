@@ -29,3 +29,4 @@ obj-$(CONFIG_USB_ULPI_VIEWPORT)		+= phy-ulpi-viewport.o
 obj-$(CONFIG_KEYSTONE_USB_PHY)		+= phy-keystone.o
 obj-$(CONFIG_USB_QCOM_QUSB_PHY)		+= phy-msm-qusb.o
 obj-$(CONFIG_USB_QCOM_QMP_PHY)		+= phy-msm-ssusb-qmp.o
+obj-$(CONFIG_USB_QCA_M31_PHY)		+= phy-qca-m31.o

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -165,7 +165,7 @@ scomphy_init(a_uint32_t dev_id, ssdk_init_cfg *cfg)
 
 	aos_mem_copy(scomphy_cfg[dev_id], cfg, sizeof (ssdk_init_cfg));
 
-	SW_RTN_ON_ERROR(scomphy_reg_access_init(dev_id, cfg->reg_mode));
+	SW_RTN_ON_ERROR(scomphy_reg_access_init(dev_id, cfg));
 
 	SW_RTN_ON_ERROR(scomphy_dev_init(dev_id, cfg->cpu_mode));
 

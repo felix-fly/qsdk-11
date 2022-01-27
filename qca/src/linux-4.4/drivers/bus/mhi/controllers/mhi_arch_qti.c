@@ -2,6 +2,7 @@
 /* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.*/
 
 #include <linux/async.h>
+#include <linux/sched.h>
 #include <linux/debugfs.h>
 #include <linux/device.h>
 #include <linux/dma-direction.h>

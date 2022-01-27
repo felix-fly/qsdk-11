@@ -22,6 +22,7 @@
 #include "core.h"
 #include "regs-v5.h"
 #include "sha.h"
+#include "dma.h"
 
 #define QCE_SECTOR_SIZE		512
 
@@ -312,6 +313,266 @@ go_proc:
 	return 0;
 }
 
+static int qce_setup_regs_ahash_dma(struct crypto_async_request *async_req,
+				u32 totallen, u32 offset)
+{
+	struct ahash_request *req = ahash_request_cast(async_req);
+	struct crypto_ahash *ahash = __crypto_ahash_cast(async_req->tfm);
+	struct qce_sha_reqctx *rctx = ahash_request_ctx(req);
+	struct qce_alg_template *tmpl = to_ahash_tmpl(async_req->tfm);
+	struct qce_device *qce = tmpl->qce;
+	unsigned int digestsize = crypto_ahash_digestsize(ahash);
+	unsigned int blocksize = crypto_tfm_alg_blocksize(async_req->tfm);
+	__be32 auth[SHA256_DIGEST_SIZE / sizeof(__be32)] = {0};
+	__be32 mackey[QCE_SHA_HMAC_KEY_SIZE / sizeof(__be32)] = {0};
+	u32 auth_cfg = 0, config;
+	unsigned int iv_words;
+	int i, ret;
+
+	/* if not the last, the size has to be on the block boundary */
+	if (!rctx->last_blk && req->nbytes % blocksize)
+		return -EINVAL;
+
+	qce_clear_bam_transaction(qce);
+
+	/* get big endianness */
+	config = qce_config_reg(qce, 0);
+	/* clear status */
+	qce_write_reg_dma(qce, REG_STATUS, 0, 1, 0);
+	qce_write_reg_dma(qce, REG_CONFIG, config, 1, 0);
+
+	if (IS_CMAC(rctx->flags)) {
+		qce_write_reg_dma(qce, REG_AUTH_SEG_CFG, 0, 1, 0);
+		qce_write_reg_dma(qce, REG_ENCR_SEG_CFG, 0, 1, 0);
+		qce_write_reg_dma(qce, REG_ENCR_SEG_SIZE, 0, 1, 0);
+
+		for (i = 0; i < 16; i++)
+			qce_write_reg_dma(qce, REG_AUTH_IV0 + i * sizeof(u32), 0, 1, 0);
+		for (i = 0; i < 16; i++)
+			qce_write_reg_dma(qce, REG_AUTH_KEY0 + i * sizeof(u32), 0, 1, 0);
+		for (i = 0; i < 4; i++)
+			qce_write_reg_dma(qce, REG_AUTH_BYTECNT0 + i * sizeof(u32), 0, 1, 0);
+
+		auth_cfg = qce_auth_cfg(rctx->flags, rctx->authklen);
+	}
+
+	if (IS_SHA_HMAC(rctx->flags) || IS_CMAC(rctx->flags)) {
+		u32 authkey_words = rctx->authklen / sizeof(u32);
+
+		qce_cpu_to_be32p_array(mackey, rctx->authkey, rctx->authklen);
+		for (i = 0; i < authkey_words; i++)
+			qce_write_reg_dma(qce, REG_AUTH_KEY0 + i * sizeof(u32), mackey[i], 1, 0);
+
+	}
+
+	if (IS_CMAC(rctx->flags))
+		goto go_proc;
+
+	if (rctx->first_blk)
+		memcpy(auth, rctx->digest, digestsize);
+	else
+		qce_cpu_to_be32p_array(auth, rctx->digest, digestsize);
+
+	iv_words = (IS_SHA1(rctx->flags) || IS_SHA1_HMAC(rctx->flags)) ? 5 : 8;
+	for (i = 0; i < iv_words; i++)
+		qce_write_reg_dma(qce, REG_AUTH_IV0 + i * sizeof(u32), auth[i], 1, 0);
+
+	if (rctx->first_blk) {
+		for (i = 0; i < 4; i++)
+			qce_write_reg_dma(qce, REG_AUTH_BYTECNT0 + i * sizeof(u32), 0, 1, 0);
+	} else {
+		for (i = 0; i < 2; i++)
+			qce_write_reg_dma(qce, REG_AUTH_BYTECNT0 + i * sizeof(u32),
+					rctx->byte_count[i], 1, 0);
+	}
+
+	auth_cfg = qce_auth_cfg(rctx->flags, 0);
+
+	if (rctx->last_blk)
+		auth_cfg |= BIT(AUTH_LAST_SHIFT);
+	else
+		auth_cfg &= ~BIT(AUTH_LAST_SHIFT);
+
+	if (rctx->first_blk)
+		auth_cfg |= BIT(AUTH_FIRST_SHIFT);
+	else
+		auth_cfg &= ~BIT(AUTH_FIRST_SHIFT);
+
+go_proc:
+	qce_write_reg_dma(qce, REG_AUTH_SEG_CFG, auth_cfg, 1, 0);
+	qce_write_reg_dma(qce, REG_AUTH_SEG_SIZE, req->nbytes, 1, 0);
+	qce_write_reg_dma(qce, REG_AUTH_SEG_START, 0, 1, 0);
+	qce_write_reg_dma(qce, REG_ENCR_SEG_CFG, 0, 1, 0);
+	qce_write_reg_dma(qce, REG_SEG_SIZE, req->nbytes, 1, 0);
+
+	/* get little endianness */
+	config = qce_config_reg(qce, 1);
+	qce_write_reg_dma(qce, REG_CONFIG, config, 1, 0);
+
+	qce_write_reg_dma(qce, REG_GOPROC,  BIT(GO_SHIFT) | BIT(RESULTS_DUMP_SHIFT),
+			1, 0);
+
+	ret = qce_submit_cmd_desc(qce);
+	if (ret) {
+		dev_err(qce->dev, "%s:Error in submitting cmd descriptor\n",__func__);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int qce_setup_regs_ablkcipher_dma(struct crypto_async_request *async_req,
+		u32 totallen, u32 offset)
+{
+	struct ablkcipher_request *req = ablkcipher_request_cast(async_req);
+	struct qce_cipher_reqctx *rctx = ablkcipher_request_ctx(req);
+	struct qce_cipher_ctx *ctx = crypto_tfm_ctx(async_req->tfm);
+	struct qce_alg_template *tmpl = to_cipher_tmpl(async_req->tfm);
+	struct qce_device *qce = tmpl->qce;
+	__be32 enckey[QCE_MAX_CIPHER_KEY_SIZE / sizeof(__be32)] = {0};
+	__be32 enciv[QCE_MAX_IV_SIZE / sizeof(__be32)] = {0};
+	unsigned int enckey_words, enciv_words;
+	unsigned int keylen;
+	u32 encr_cfg = 0, config;
+	unsigned int ivsize = rctx->ivsize;
+	unsigned long flags = rctx->flags;
+	u32 ret;
+	u32 i;
+	u32 xtskey[QCE_MAX_CIPHER_KEY_SIZE / sizeof(u32)] = {0};
+	unsigned int xtsklen;
+	unsigned int xtsdusize;
+
+	qce_clear_bam_transaction(qce);
+	/* get big endianness */
+	config = qce_config_reg(qce, 0);
+
+	qce_write_reg_dma(qce, REG_STATUS, 0, 1, 0);
+	qce_write_reg_dma(qce, REG_CONFIG, config, 1, 0);
+	qce_write_reg_dma(qce, REG_AUTH_SEG_CFG, 0, 1, 0);
+
+	if (IS_XTS(flags))
+		keylen = ctx->enc_keylen / 2;
+	else
+		keylen = ctx->enc_keylen;
+
+	qce_cpu_to_be32p_array(enckey, ctx->enc_key, keylen);
+	enckey_words = keylen / sizeof(u32);
+
+	encr_cfg = qce_encr_cfg(flags, keylen);
+
+	if (IS_DES(flags)) {
+		enciv_words = 2;
+		enckey_words = 2;
+	} else if (IS_3DES(flags)) {
+		enciv_words = 2;
+		enckey_words = 6;
+	} else if (IS_AES(flags)) {
+		if (IS_XTS(flags)) {
+			qce_xtskey(qce, ctx->enc_key, ctx->enc_keylen,
+					rctx->cryptlen);
+			xtsklen = ctx->enc_keylen / (2 * sizeof(u32));
+
+			qce_cpu_to_be32p_array((__be32 *)xtskey, ctx->enc_key + ctx->enc_keylen / 2,
+					ctx->enc_keylen / 2);
+			for (i = 0; i < xtsklen; i++)
+				qce_write_reg_dma(qce, REG_ENCR_XTS_KEY0 + i * sizeof(u32), xtskey[i], 1, 0);
+
+			/* xts du size 512B */
+			xtsdusize = min_t(u32, QCE_SECTOR_SIZE, rctx->cryptlen);
+			qce_write_reg_dma(qce, REG_ENCR_XTS_DU_SIZE, xtsdusize, 1, 0);
+
+		}
+		enciv_words = 4;
+	} else {
+		return -EINVAL;
+	}
+
+	/* configure pipe key register */
+	if (!use_fixed_key) {
+		for (i = 0; i < enckey_words; i++)
+			qce_write_reg_dma(qce, REG_ENCR_KEY0 + i * sizeof(u32),
+					enckey[i], 1, 0);
+	}
+
+	if (!IS_ECB(flags)) {
+		if (IS_XTS(flags))
+			qce_xts_swapiv(enciv, rctx->iv, ivsize);
+		else
+			qce_cpu_to_be32p_array(enciv, rctx->iv, ivsize);
+		for (i = 0; i < enciv_words; i++)
+			qce_write_reg_dma(qce, REG_CNTR0_IV0 + i * sizeof(u32), enciv[i], 1, 0);
+	}
+
+	if (IS_ENCRYPT(flags))
+		encr_cfg |= BIT(ENCODE_SHIFT);
+
+	if (use_fixed_key)
+		encr_cfg |= (USE_PIPE_KEY_ENCR_ENABLED << USE_PIPE_KEY_ENCR_SHIFT);
+
+	qce_write_reg_dma(qce, REG_ENCR_SEG_CFG, encr_cfg, 1, 0);
+	qce_write_reg_dma(qce, REG_ENCR_SEG_SIZE, rctx->cryptlen, 1, 0);
+	qce_write_reg_dma(qce, REG_ENCR_SEG_START, (offset & 0xffff), 1, 0);
+
+	if (IS_CTR(flags)) {
+		qce_write_reg_dma(qce, REG_CNTR_MASK, ~0, 1, 0);
+		qce_write_reg_dma(qce, REG_CNTR_MASK0, ~0, 1, 0);
+		qce_write_reg_dma(qce, REG_CNTR_MASK1, ~0, 1, 0);
+		qce_write_reg_dma(qce, REG_CNTR_MASK2, ~0, 1, 0);
+	}
+
+	qce_write_reg_dma(qce, REG_SEG_SIZE, totallen, 1, 0);
+
+	/* get little endianness */
+	config = qce_config_reg(qce, 1);
+	qce_write_reg_dma(qce, REG_CONFIG, config, 1, 0);
+
+	qce_write_reg_dma(qce, REG_GOPROC,  BIT(GO_SHIFT) | BIT(RESULTS_DUMP_SHIFT),
+			1, 0);
+
+	ret = qce_submit_cmd_desc(qce);
+	if (ret) {
+		dev_err(qce->dev, "%s:Error in submitting cmd descriptor\n",__func__);
+		return ret;
+	}
+
+	return 0;
+}
+
+int qce_read_dma_get_lock(struct qce_device *qce)
+{
+	int ret;
+	u32 val = 0;
+	qce_clear_bam_transaction(qce);
+
+	qce_read_reg_dma(qce, REG_CONFIG, &val, 1, QCE_DMA_DESC_FLAG_LOCK);
+
+	ret = qce_submit_cmd_desc(qce);
+	if (ret) {
+		dev_err(qce->dev, "%s:Error in submitting cmd descriptor\n",__func__);
+		return ret;
+	}
+
+	return 0;
+}
+
+int qce_unlock_reg_dma(struct qce_device *qce)
+{
+	int ret;
+	u32 val = 0;
+	qce_clear_bam_transaction(qce);
+
+	qce_read_reg_dma(qce, REG_CONFIG, &val, 1, QCE_DMA_DESC_FLAG_UNLOCK);
+
+	ret = qce_submit_cmd_desc(qce);
+	if (ret) {
+		dev_err(qce->dev, "%s:Error in submitting cmd descriptor\n",__func__);
+		return ret;
+	}
+
+	return 0;
+}
+
+
 static int qce_setup_regs_ablkcipher(struct crypto_async_request *async_req,
 				     u32 totallen, u32 offset)
 {
@@ -407,6 +668,19 @@ int qce_start(struct crypto_async_request *async_req, u32 type, u32 totallen,
 	}
 }
 
+int qce_start_dma(struct crypto_async_request *async_req, u32 type, u32 totallen,
+		u32 offset)
+{
+	switch (type) {
+		case CRYPTO_ALG_TYPE_ABLKCIPHER:
+			return qce_setup_regs_ablkcipher_dma(async_req, totallen, offset);
+		case CRYPTO_ALG_TYPE_AHASH:
+			return qce_setup_regs_ahash_dma(async_req, totallen, offset);
+		default:
+			return -EINVAL;
+	}
+}
+
 #define STATUS_ERRORS	\
 		(BIT(SW_ERR_SHIFT) | BIT(AXI_ERR_SHIFT) | BIT(HSD_ERR_SHIFT))
 
@@ -416,6 +690,9 @@ int qce_check_status(struct qce_device *qce, u32 *status)
 
 	*status = qce_read(qce, REG_STATUS);
 
+	/* Unlock the crypto pipe here */
+	if (qce->qce_cmd_desc_enable)
+		qce_unlock_reg_dma(qce);
 	/*
 	 * Don't use result dump status. The operation may not be complete.
 	 * Instead, use the status we just read from device. In case, we need to

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2017, 2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -46,13 +46,12 @@
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_bridge.h>
 #include <linux/if_bridge.h>
-#include <linux/if_bonding.h>
+#include <net/bonding.h>
 #include <net/arp.h>
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_acct.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
@@ -72,8 +71,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_tracker_udp.h"
 #include "ecm_tracker_tcp.h"
 #include "ecm_tracker_datagram.h"
@@ -219,7 +218,7 @@ static void ecm_nss_bond_notifier_bond_delete_by_mac(uint8_t *mac)
 {
 	DEBUG_INFO("Bond notifier for node %pM\n", mac);
 
-	ecm_interface_node_connections_defunct(mac);
+	ecm_interface_node_connections_defunct(mac, ECM_DB_IP_VERSION_IGNORE);
 }
 
 void ecm_nss_bond_notifier_stop(int num)

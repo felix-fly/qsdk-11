@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/moduleparam.h>
@@ -307,6 +307,7 @@ __acquires(&sta->tid_rx_lock) __releases(&sta->tid_rx_lock)
 	/* statistics */
 	memset(&sta->stats, 0, sizeof(sta->stats));
 	sta->stats.tx_latency_min_us = U32_MAX;
+	wil_sta_info_amsdu_init(sta);
 }
 
 static void _wil6210_disconnect_complete(struct wil6210_vif *vif,
@@ -619,6 +620,12 @@ static void wil_fw_error_worker(struct work_struct *work)
 	struct net_device *ndev = wil->main_ndev;
 
 	wil_dbg_misc(wil, "fw error worker\n");
+	if (wil->fw_state == WIL_FW_STATE_READY)
+		wil_nl_60g_fw_state_change(wil,
+					   WIL_FW_STATE_ERROR);
+	else
+		wil_nl_60g_fw_state_change(wil,
+					   WIL_FW_STATE_ERROR_BEFORE_READY);
 
 	if (!ndev || !(ndev->flags & IFF_UP)) {
 		wil_info(wil, "No recovery - interface is down\n");
@@ -712,6 +719,13 @@ void wil_bcast_fini_all(struct wil6210_priv *wil)
 	}
 }
 
+void wil_sta_info_amsdu_init(struct wil_sta_info *sta)
+{
+	sta->amsdu_drop_sn = -1;
+	sta->amsdu_drop_tid = -1;
+	sta->amsdu_drop = 0;
+}
+
 int wil_priv_init(struct wil6210_priv *wil)
 {
 	uint i;
@@ -791,6 +805,7 @@ int wil_priv_init(struct wil6210_priv *wil)
 	wil->rx_buff_id_count = WIL_RX_BUFF_ARR_SIZE_DEFAULT;
 
 	wil->amsdu_en = 1;
+	wil->fw_state = WIL_FW_STATE_DOWN;
 
 	return 0;
 
@@ -1505,6 +1520,7 @@ static int wil_wait_for_fw_ready(struct wil6210_priv *wil)
 	} else {
 		wil_info(wil, "FW ready after %d ms. HW version 0x%08x\n",
 			 jiffies_to_msecs(to-left), wil->hw_version);
+		wil_nl_60g_fw_state_change(wil, WIL_FW_STATE_READY);
 	}
 	return 0;
 }
@@ -1697,6 +1713,7 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
 
 		ether_addr_copy(ndev->perm_addr, mac);
 		ether_addr_copy(ndev->dev_addr, ndev->perm_addr);
+		wil->fw_state = WIL_FW_STATE_UNKNOWN;
 		return 0;
 	}
 
@@ -1722,6 +1739,7 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
 				rc);
 	}
 
+	wil_nl_60g_fw_state_change(wil, WIL_FW_STATE_DOWN);
 	set_bit(wil_status_resetting, wil->status);
 	mutex_lock(&wil->vif_mutex);
 	wil_abort_scan_all_vifs(wil, false);
@@ -1877,6 +1895,10 @@ int wil_reset(struct wil6210_priv *wil, bool load_fw)
 						 ftm->rx_offset);
 		}
 
+		wil->tx_reserved_entries = ((drop_if_ring_full || ac_queues) ?
+					    WIL_DEFAULT_TX_RESERVED_ENTRIES :
+					    0);
+
 		if (wil->platform_ops.notify) {
 			rc = wil->platform_ops.notify(wil->platform_handle,
 						      WIL_PLATFORM_EVT_FW_RDY);
@@ -1915,6 +1937,14 @@ int __wil_up(struct wil6210_priv *wil)
 	int rc;
 
 	WARN_ON(!mutex_is_locked(&wil->mutex));
+
+	if (wil->fail_iface_updown_on_fw_assert &&
+	    (wil->fw_state == WIL_FW_STATE_ERROR ||
+	     wil->fw_state == WIL_FW_STATE_ERROR_BEFORE_READY)) {
+		wil_err(wil,
+			"Failing iface up request as fail_iface_updown_on_fw_assert is set\n");
+		return -EINVAL;
+	}
 
 	down_write(&wil->mem_lock);
 	rc = wil_reset(wil, true);
@@ -1992,6 +2022,14 @@ int __wil_down(struct wil6210_priv *wil)
 {
 	int rc;
 	WARN_ON(!mutex_is_locked(&wil->mutex));
+
+	if (wil->fail_iface_updown_on_fw_assert &&
+	    (wil->fw_state == WIL_FW_STATE_ERROR ||
+	     wil->fw_state == WIL_FW_STATE_ERROR_BEFORE_READY)) {
+		wil_err(wil,
+			"Failing iface down request as fail_iface_updown_on_fw_assert is set\n");
+		return -EINVAL;
+	}
 
 	set_bit(wil_status_resetting, wil->status);
 

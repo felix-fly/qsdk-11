@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/moduleparam.h>
@@ -144,8 +144,10 @@ const struct fw_map talyn_fw_mapping[] = {
 	{0x8a0000, 0x8a1000, 0x8a0000, "otp", true, false},
 	/* DMA EXT RGF 64k */
 	{0x8b0000, 0x8c0000, 0x8b0000, "dma_ext_rgf", true, true},
-	/* upper area 1536k */
-	{0x900000, 0xa80000, 0x900000, "upper", true, true},
+	/* upper1 area 768k */
+	{0x900000, 0x9c0000, 0x900000, "upper1", true, true},
+	/* upper2 area 512k */
+	{0xa00000, 0xa80000, 0xa00000, "upper2", true, true},
 	/* UCODE areas - accessible by debugfs blobs but not by
 	 * wmi_addr_remap. UCODE areas MUST be added AFTER FW areas!
 	 */
@@ -199,8 +201,10 @@ const struct fw_map talyn_mb_fw_mapping[] = {
 	{0x8c2000, 0x8c2128, 0x8c2000, "dma_ofu", true, true},
 	/* ucode debug 4k */
 	{0x8c3000, 0x8c4000, 0x8c3000, "ucode_debug", true, true},
-	/* upper area 1536k */
-	{0x900000, 0xa80000, 0x900000, "upper", true, true},
+        /* upper1 area 768k */
+        {0x900000, 0x9c0000, 0x900000, "upper1", true, true},
+        /* upper2 area 512k */
+        {0xa00000, 0xa80000, 0xa00000, "upper2", true, true},
 	/* UCODE areas - accessible by debugfs blobs but not by
 	 * wmi_addr_remap. UCODE areas MUST be added AFTER FW areas!
 	 */
@@ -1102,6 +1106,7 @@ static void wmi_evt_connect(struct wil6210_vif *vif, int id, void *d, int len)
 	ether_addr_copy(wil->sta[evt->cid].addr, evt->bssid);
 	wil->sta[evt->cid].mid = vif->mid;
 	wil->sta[evt->cid].status = wil_sta_conn_pending;
+	wil_sta_info_amsdu_init(&wil->sta[evt->cid]);
 
 	rc = wil_ring_init_tx(vif, evt->cid);
 	if (rc) {
@@ -2256,8 +2261,8 @@ int wmi_rbufcap_cfg(struct wil6210_priv *wil, bool enable, u16 threshold)
 	return rc;
 }
 
-int wmi_pcp_start(struct wil6210_vif *vif,
-		  int bi, u8 wmi_nettype, u8 chan, u8 hidden_ssid, u8 is_go)
+int wmi_pcp_start(struct wil6210_vif *vif, int bi, u8 wmi_nettype,
+		  u8 chan, u8 wmi_edmg_chan, u8 hidden_ssid, u8 is_go)
 {
 	struct wil6210_priv *wil = vif_to_wil(vif);
 	int rc;
@@ -2270,6 +2275,7 @@ int wmi_pcp_start(struct wil6210_vif *vif,
 		.network_type = wmi_nettype,
 		.disable_sec_offload = 1,
 		.channel = chan - 1,
+		.edmg_channel = wmi_edmg_chan,
 		.pcp_max_assoc_sta = max_assoc_sta,
 		.hidden_ssid = hidden_ssid,
 		.is_go = is_go,

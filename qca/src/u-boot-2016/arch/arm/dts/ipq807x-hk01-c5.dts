@@ -15,8 +15,6 @@
 #include "ipq807x-soc.dtsi"
 #include <dt-bindings/qcom/gpio-ipq807x.h>
 / {
-	model ="QCA, IPQ807x-HK01.C5";
-	compatible = "qca,ipq807x", "qca,ipq807x-hk01.c5";
 	machid = <0x08010400>;
 	config_name = "config@hk01.c5";
 
@@ -24,7 +22,6 @@
 		console = "/serial@78B3000";
 		uart2 = "/serial@78B0000";
 		i2c0 = "/i2c@78b6000";
-		pci0 = "/pci@20000000";
 		mmc = "/sdhci@07824000";
 	};
 	ess-switch {

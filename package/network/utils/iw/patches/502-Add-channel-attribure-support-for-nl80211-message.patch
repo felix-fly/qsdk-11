@@ -7,7 +7,7 @@ Add channel attribure support for nl80211 message
 
 --- a/info.c
 +++ b/info.c
-@@ -169,13 +169,18 @@ static int print_phy_handler(struct nl_m
+@@ -177,13 +177,18 @@ static int print_phy_handler(struct nl_m
  					band_had_freq = true;
  				}
  				nla_for_each_nested(nl_freq, tb_band[NL80211_BAND_ATTR_FREQS], rem_freq) {
@@ -30,7 +30,7 @@ Add channel attribure support for nl80211 message
  					    !tb_freq[NL80211_FREQUENCY_ATTR_DISABLED])
 --- a/nl80211.h
 +++ b/nl80211.h
-@@ -3478,6 +3478,7 @@ enum nl80211_frequency_attr {
+@@ -3561,6 +3561,7 @@ enum nl80211_frequency_attr {
  	NL80211_FREQUENCY_ATTR_NO_20MHZ,
  	NL80211_FREQUENCY_ATTR_NO_10MHZ,
  	NL80211_FREQUENCY_ATTR_WMM,

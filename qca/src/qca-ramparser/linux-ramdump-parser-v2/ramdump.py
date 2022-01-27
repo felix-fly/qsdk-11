@@ -19,6 +19,8 @@ import string
 import random
 import platform
 import stat
+import glob
+import shutil
 
 from boards import get_supported_boards, get_supported_ids
 from tempfile import NamedTemporaryFile
@@ -463,17 +465,27 @@ class RamDump():
 
         def mod_get_symbol(self, mod_list, mod_sec_addr, val):
             if (re.search('3.14.77', self.ramdump.version) is not None or (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (4, 4)):
-                kallsyms = self.ramdump.read_word(mod_list + self.ramdump.kallsyms_offset);
-                module_symtab_count = self.ramdump.read_u32(kallsyms + self.ramdump.module_symtab_count_offset)
-                module_strtab = self.ramdump.read_word(kallsyms + self.ramdump.module_strtab_offset)
-                module_symtab = self.ramdump.read_word(kallsyms + self.ramdump.module_symtab_offset)
+                if self.ramdump.kallsyms_offset >= 0:
+                    kallsyms = self.ramdump.read_word(mod_list + self.ramdump.kallsyms_offset);
+                    module_symtab_count = self.ramdump.read_u32(kallsyms + self.ramdump.module_symtab_count_offset)
+                    module_strtab = self.ramdump.read_word(kallsyms + self.ramdump.module_strtab_offset)
+                    module_symtab = self.ramdump.read_word(kallsyms + self.ramdump.module_symtab_offset)
+                else:
+                    kallsyms = -1
+                    module_symtab_count = -1
+                    module_strtab = -1
+                    module_symtab = -1
             else:
                 module_symtab_count = self.ramdump.read_word(mod_list + self.ramdump.module_symtab_count_offset)
                 module_symtab = self.ramdump.read_word(mod_list + self.ramdump.module_symtab_offset)
                 module_strtab = self.ramdump.read_word(mod_list + self.ramdump.module_strtab_offset)
 
-            module_init_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_text_size_offset)
-            module_core_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_text_size_offset)
+            if (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (5, 4):
+                module_init_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_init_offset + self.ramdump.module_text_size_offset)
+                module_core_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_core_offset + self.ramdump.module_text_size_offset)
+            else:
+                module_init_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_text_size_offset)
+                module_core_text_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_text_size_offset)
             name = self.mod_addr_name
             best = 0
             addr = self.mod_addr
@@ -512,8 +524,13 @@ class RamDump():
             except MemoryError:
                  pass #print_out_str('MemoryError caught here')
             if (best == 0):
-                self.sym_name = "UNKNOWN"
-                self.sym_off = 0
+                gs = self.ramdump.gdbmi.get_symbol_info(addr)
+                if gs is not None:
+                    self.sym_name = gs.symbol
+                    self.sym_off = gs.offset
+                else:
+                    self.sym_name = "UNKNOWN"
+                    self.sym_off = 0
                 #print_out_str('not able to resolve addr 0x{0} in module section'.format(addr))
                 #return None
             else:
@@ -528,11 +545,16 @@ class RamDump():
                 self.symtab_st_size = symtab_st_size
 
         def mod_addr_func(self, mod_list):
-            if(self.ramdump.Is_Hawkeye() and self.ramdump.isELF64() and (mod_list & 0xfff0000000 != 0xbff0000000)):
+
+            high_mem_addr = self.ramdump.addr_lookup('high_memory')
+            vmalloc_offset = 0x800000
+            vmalloc_start = self.ramdump.read_u32(high_mem_addr) + vmalloc_offset & (~int(vmalloc_offset - 0x1))
+
+            if(self.ramdump.Is_Hawkeye() and self.ramdump.isELF64() and (mod_list & 0xfff0000000 != self.ramdump.mod_start_addr)):
                 return
-            elif(self.ramdump.Is_Hawkeye() and self.ramdump.isELF32() and ((mod_list & 0xff000000 != 0x7f000000) and (mod_list & 0x80000000 != 0x80000000))):
+            elif(self.ramdump.isELF32() and self.ramdump.Is_Hawkeye() and mod_list & 0xff000000 != self.ramdump.mod_start_addr and not ((vmalloc_start & 0xff000000 <= mod_list & 0xff000000) and (mod_list & 0xff000000 <= 0xff000000))):
                 return
-            elif(not self.ramdump.Is_Hawkeye() and self.ramdump.isELF32() and (mod_list & 0xff000000 !=  0xbf000000)):
+            elif(not self.ramdump.Is_Hawkeye() and self.ramdump.isELF32() and (mod_list & 0xff000000 != self.ramdump.mod_start_addr)):
                 return
 
             name = self.ramdump.read_cstring(mod_list + self.ramdump.mod_name_offset, 30)
@@ -540,10 +562,16 @@ class RamDump():
             if name is None or len(name) <= 1:
                 return
 
-            module_init_addr = self.ramdump.read_word(mod_list + self.ramdump.module_init_offset)
-            module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_size_offset)
-            module_core_addr = self.ramdump.read_word(mod_list + self.ramdump.module_core_offset)
-            module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_size_offset)
+            if (self.ramdump.kernel_version[0], self.ramdump.kernel_version[1]) >= (5, 4):
+                module_init_addr = self.ramdump.read_word(mod_list + self.ramdump.module_layout_init_offset + self.ramdump.module_offset)
+                module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_init_offset + self.ramdump.module_size_offset)
+                module_core_addr = self.ramdump.read_word(mod_list + self.ramdump.module_layout_core_offset + self.ramdump.module_offset)
+                module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_layout_core_offset + self.ramdump.module_size_offset)
+            else:
+                module_init_addr = self.ramdump.read_word(mod_list + self.ramdump.module_init_offset)
+                module_init_size = self.ramdump.read_u32(mod_list + self.ramdump.module_init_size_offset)
+                module_core_addr = self.ramdump.read_word(mod_list + self.ramdump.module_core_offset)
+                module_core_size = self.ramdump.read_u32(mod_list + self.ramdump.module_core_size_offset)
 
             if ((module_init_size > 0) and (module_init_addr <= self.mod_addr) and (self.mod_addr < (module_init_addr + module_init_size))):
                     self.mod_addr_name = name
@@ -555,7 +583,7 @@ class RamDump():
 
 
         def get_module_name_from_addr(self, addr):
-    
+
             if (self.ramdump.mod_start == 0 or self.ramdump.mod_start is None):
                 print_out_str("cannot get the modules start addr");
                 return None
@@ -575,10 +603,10 @@ class RamDump():
             else:
                 return None
 
-    def __init__(self, vmlinux_path, nm_path, gdb_path, readelf_path, qca_nss_drv_path, objdump_path, ebi,
+    def __init__(self, vmlinux_path, nm_path, gdb_path, readelf_path, ko_path, objdump_path, ebi,
                  file_path, phys_offset, outdir,qtf_path, custom, cpu0_reg_path=None, cpu1_reg_path=None,
                  hw_id=None,hw_version=None, arm64=False, page_offset=None,
-                 qtf=False, t32_host_system=None):
+                 qtf=False, t32_host_system=None, ath11k=None):
         self.ebi_files = []
         self.phys_offset = None
         self.tz_start = 0
@@ -589,6 +617,7 @@ class RamDump():
         self.offset_table = []
         self.vmlinux = vmlinux_path
         self.nm_path = nm_path
+        self.ko_path = ko_path
         self.gdb_path = gdb_path
         self.readelf_path = readelf_path
         self.objdump_path = objdump_path
@@ -605,34 +634,52 @@ class RamDump():
         self.cpu1_reg_path = cpu1_reg_path
         self.custom = custom
         self.kernel_version = (0, 0, 0)
+        self.ath11k = ath11k
+
+        if self.Is_Ath11k() and readelf_path is not None:
+            self.ath11k_path = self.ko_path + "/ath11k.ko"
+            if os.path.isfile(self.ath11k_path):
+                self.ath11k_gnu_linkonce_this_size = self.get_gnu_linkonce_size(self.readelf_path, self.ath11k_path)
+                seg_info_cmd = '{0} {1} --quiet -ex "print &ath11k_coredump_seg_info" -ex "quit" '.format(self.gdb_path, self.ath11k_path)
+                seg_info_nm_cmd = '{0} {1} | grep "B ath11k_coredump_seg_info"'.format(self.nm_path, self.ath11k_path)
+                fd = os.popen(seg_info_cmd)
+                fd_nm = os.popen(seg_info_nm_cmd)
+                ret_nm = fd_nm.read()
+                ret = fd.read()
+                try:
+                    start_pos = ret.index(") 0x")
+                    self.seg_info_offset = ret[start_pos+2:].strip().split(' ')[0]
+                    self.seg_info_offset = self.seg_info_offset and ret_nm[2:].strip().split(' ')[0]
+                except:
+                    self.seg_info_offset = None
+            else:
+                self.ath11k_gnu_linkonce_this_size = None
+                self.seg_info_offset = None
+                print_out_str("ath11k module file not present")
 
         if self.Is_Hawkeye() and self.isELF32():
             self.page_offset = 0x80000000
         else:
             self.page_offset = 0xc0000000
-        if qca_nss_drv_path is not None and readelf_path is not None:
+        if self.ko_path is not None and readelf_path is not None:
             #nss driver module path
-            self.qca_nss_drv_path = qca_nss_drv_path
-            #readelf command
-            nss_readelf_cmd = '{0} -S {1}'.format(self.readelf_path, self.qca_nss_drv_path)
-            #Get offset of  stats_drv[21] variables using gdb command
-            nss_top_main_stats_drv_cmd = '{0} {1} --quiet -ex "print &nss_top_main->stats_drv[21]" -ex "quit" '.format(self.gdb_path, self.qca_nss_drv_path)
-            f1 = os.popen(nss_readelf_cmd)
-            ret1 = f1.read()
-            f2 = os.popen(nss_top_main_stats_drv_cmd)
-            ret2 = f2.read()
-            try:
-                # get string after this word from readelf output
-                secondpart = ret1.split(".gnu.linkonce.thi")[1]
-                t = re.sub('\s+', ' ', secondpart ).strip()
-                fhex = t.split(" ")[3]
-                #get size of .gnu.linkonce.thi from section header
-                self.gnu_linkonce_this_size = fhex.strip()
-                start_pos2 = ret2.index(") 0x")
-                self.stats_drv_offset = ret2[start_pos2+2:].strip()
-            except:
+            self.qca_nss_drv_path = self.ko_path + "/qca-nss-drv.ko"
+            if os.path.isfile(self.qca_nss_drv_path):
+                #readelf command
+                self.gnu_linkonce_this_size = self.get_gnu_linkonce_size(self.readelf_path, self.qca_nss_drv_path)
+                #Get offset of  stats_drv[21] variables using gdb command
+                nss_top_main_stats_drv_cmd = '{0} {1} --quiet -ex "print &nss_top_main->stats_drv[21]" -ex "quit" '.format(self.gdb_path, self.qca_nss_drv_path)
+                f2 = os.popen(nss_top_main_stats_drv_cmd)
+                ret2 = f2.read()
+                try:
+                    start_pos2 = ret2.index(") 0x")
+                    self.stats_drv_offset = ret2[start_pos2+2:].strip()
+                except:
+                    self.stats_drv_offset = None
+            else:
                 self.gnu_linkonce_this_size = None
                 self.stats_drv_offset = None
+                print_out_str("qca-nss-drv module file not present")
         else:
             self.gnu_linkonce_this_size = None
             self.stats_drv_offset = None
@@ -666,14 +713,50 @@ class RamDump():
         self.CONFIG_SLUB_DEBUG_ON = False
         self.CONFIG_HIGHMEM = False
         self.CONFIG_DONT_MAP_HOLE_AFTER_MEMBANK0 = False
+
+        if not self.get_version_from_vmlinux():
+            print_out_str('!!! Could not get the Linux version from vmlinux!')
+            print_out_str('!!! Exiting now')
+            sys.exit(1)
         if self.arm64:
-            self.page_offset = 0xffffffc000000000
+            if (self.kernel_version[0], self.kernel_version[1]) >= (5, 4):
+                self.page_offset = 0xffffffc010000000
+            else:
+                self.page_offset = 0xffffffc000000000
             self.thread_size = 16384
         if page_offset is not None:
             print_out_str(
                 '[!!!] Page offset was set to {0:x}'.format(page_offset))
             self.page_offset = page_offset
         self.setup_symbol_tables()
+
+        if not self.get_version():
+            print_out_str('!!! Could not get the Linux version!')
+            # self.ebi_start - Starting address of EBICS0.bin
+            ebi_filePath = self.ebi_files[0][3]
+            fd = open(ebi_filePath, 'rb')
+            file_content = fd.read()
+            lv = re.search("Linux version", file_content)
+            if lv is not None:
+                banner_addr_phys = int(hex(lv.start()), 16)
+                banner_addr_virt = self.addr_lookup('linux_banner')
+                phys_offset = banner_addr_phys - banner_addr_virt + self.ebi_start + self.page_offset
+                if self.phys_offset != phys_offset:
+                    self.phys_offset = phys_offset
+                    print_out_str('[!!!] Physical offset was changed to {0:x}'.format(self.phys_offset))
+                    print_out_str('Check for Linux banner match with changed physical offset')
+                    if not self.get_version():
+                        print_out_str('!!! Your vmlinux is probably wrong for these dumps')
+                        print_out_str('!!! Exiting now')
+                        sys.exit(1)
+                else:
+                    print_out_str('!!! Your vmlinux is probably wrong for these dumps')
+                    print_out_str('!!! Exiting now')
+                    sys.exit(1)
+            else:
+                print_out_str('!!! Linux banner is not present in dumps')
+                print_out_str('!!! Exiting now')
+                sys.exit(1)
 
         # The address of swapper_pg_dir can be used to determine
         # whether or not we're running with LPAE enabled since an
@@ -734,12 +817,6 @@ class RamDump():
                 '!!! This is a BUG in the parser and should be reported.')
             sys.exit(1)
 
-        if not self.get_version():
-            print_out_str('!!! Could not get the Linux version!')
-            print_out_str(
-                '!!! Your vmlinux is probably wrong for these dumps')
-            print_out_str('!!! Exiting now')
-            sys.exit(1)
         if not self.get_config():
             print_out_str('!!! Could not get saved configuration')
             print_out_str(
@@ -747,18 +824,42 @@ class RamDump():
             print_out_str('!!! Some features may be disabled!')
         self.unwind = self.Unwinder(self)
 
+        self.next_mod_offset = self.field_offset('struct module','list')
+        self.mod_start = self.read_word('modules')
         self.mod_name_offset = self.field_offset('struct module', 'name')
-        self.module_init_offset = self.field_offset('struct module','module_init')
-        self.module_core_offset = self.field_offset('struct module','module_core')
-        self.module_init_size_offset = self.field_offset('struct module','init_size')
-        self.module_core_size_offset = self.field_offset('struct module','core_size')
-        self.module_init_text_size_offset = self.field_offset('struct module','init_text_size')
-        self.module_core_text_size_offset = self.field_offset('struct module','core_text_size')
+        if (self.kernel_version[0], self.kernel_version[1]) >= (5, 4):
+            self.module_layout_init_offset = self.field_offset('struct module', 'init_layout')
+            self.module_layout_core_offset = self.field_offset('struct module', 'core_layout')
+            self.module_offset = self.field_offset('struct module_layout', 'base')
+            self.module_size_offset = self.field_offset('struct module_layout', 'size')
+            self.module_text_size_offset = self.field_offset('struct module_layout', 'text_size')
+        else:
+            self.module_init_offset = self.field_offset('struct module','module_init')
+            self.module_core_offset = self.field_offset('struct module','module_core')
+            self.module_init_size_offset = self.field_offset('struct module','init_size')
+            self.module_core_size_offset = self.field_offset('struct module','core_size')
+            self.module_init_text_size_offset = self.field_offset('struct module','init_text_size')
+            self.module_core_text_size_offset = self.field_offset('struct module','core_text_size')
         if (re.search('3.14.77', self.version) is not None or (self.kernel_version[0], self.kernel_version[1]) >= (4, 4)):
             self.kallsyms_offset = self.field_offset('struct module', 'kallsyms')
-            self.module_symtab_offset = self.field_offset('struct mod_kallsyms','symtab')
-            self.module_strtab_offset = self.field_offset('struct mod_kallsyms','strtab')
-            self.module_symtab_count_offset = self.field_offset('struct mod_kallsyms','num_symtab')
+            if self.kallsyms_offset >= 0:
+                self.module_symtab_offset = self.field_offset('struct mod_kallsyms','symtab')
+                self.module_strtab_offset = self.field_offset('struct mod_kallsyms','strtab')
+                self.module_symtab_count_offset = self.field_offset('struct mod_kallsyms','num_symtab')
+                if self.ko_path is not None:
+                    print_out_str("CONFIG_KALLSYMS is set. Hence not parsing ko modules generically. Modules would be loaded for specific cases")
+            else:
+                # CONFIG_KALLSYMS is not set
+                self.syms_offset = self.field_offset('struct module', 'syms')
+                self.num_syms_offset = self.field_offset('struct module', 'num_syms')
+                self.module_symtab_offset = -1
+                self.module_strtab_offset = -1
+                self.module_symtab_count_offset = -1
+                print_out_str("CONFIG_KALLSYMS not set")
+                if self.ko_path is not None:
+                    list_walker = llist.ListWalker(self, self.mod_start, self.next_mod_offset)
+                    list_walker.walk(self.mod_start, self.add_sym_file)
+
         else:
             self.module_symtab_offset = self.field_offset('struct module','symtab')
             self.module_strtab_offset = self.field_offset('struct module','strtab')
@@ -776,12 +877,32 @@ class RamDump():
             self.symtab_st_info_offset = self.field_offset('struct elf32_sym', 'st_info')
             self.symtab_st_size_offset = self.field_offset('struct elf32_sym', 'st_size')
 
+        if (self.isELF64() and (self.kernel_version[0], self.kernel_version[1]) >= (5, 4)):
+            self.mod_start_addr = 0xc000000000
+        elif(self.isELF64()):
+            self.mod_start_addr = 0xbff0000000
+        else:
+            self.mod_start_addr = 0x7f000000
+
         if(self.isELF64()):
             self.symtab_size = self.sizeof('struct elf64_sym')
         else:
             self.symtab_size = self.sizeof('struct elf32_sym')
-        self.next_mod_offset = self.field_offset('struct module','list')
-        self.mod_start = self.read_word('modules')
+
+    def add_sym_file(self, mod_list):
+
+        name = self.read_cstring(mod_list + self.mod_name_offset, 50)
+
+        if name is None or len(name) <= 1:
+            return
+
+        name = self.ko_path + "/" + name + ".ko"
+        g = glob.glob(name.replace("_", "?"))
+        if len(g) < 1:
+            return
+
+        module_core_addr = self.read_word(mod_list + self.module_core_offset)
+        self.gdbmi.add_sym_file(g[0], module_core_addr)
 
     def __del__(self):
         self.gdbmi.close()
@@ -801,9 +922,20 @@ class RamDump():
         kconfig_addr = self.addr_lookup('kernel_config_data')
         if kconfig_addr is None:
             return
-        kconfig_size = self.sizeof('kernel_config_data')
-        # size includes magic, offset from it
-        kconfig_size = kconfig_size - 16 - 1
+        if (self.kernel_version[0], self.kernel_version[1]) >= (5, 4):
+            kconfig_addr_end = self.addr_lookup('kernel_config_data_end')
+            if kconfig_addr_end is None:
+                return
+            # kconfig_size doesn't include magic strings
+            kconfig_size = kconfig_addr_end - kconfig_addr
+            # magic is 8 bytes before kconfig_addr and data
+            # starts at kconfig_addr for kernel > 5.4
+            # subtract 8 bytes to perform sanity check
+            kconfig_addr -= 8
+        else:
+            kconfig_size = self.sizeof('kernel_config_data')
+            # size includes magic, offset from it
+            kconfig_size = kconfig_size - 16 - 1
         zconfig = NamedTemporaryFile(mode='wb', delete=False)
         # kconfig data starts with magic 8 byte string, go past that
         s = self.read_cstring(kconfig_addr, 8)
@@ -846,19 +978,33 @@ class RamDump():
         s = config + '=y'
         return s in self.config
 
-    def get_version(self):
-       	s = '{0} -ex "print linux_banner" -ex "quit" {1}'.format(self.gdb_path, self.vmlinux)
-	f = os.popen(s)
+    def get_version_from_vmlinux(self):
+        s = '{0} -ex "print linux_banner" -ex "quit" {1}'.format(self.gdb_path, self.vmlinux)
+        f = os.popen(s)
         now = f.read()
-	try:
+        try:
                 start_pos = now.index("Linux version")
-                banner=now[start_pos:]
-                flen = len(banner)
-                flen = flen - 4
+                self.banner = now[start_pos:]
+                self.flen = len(self.banner)
+                self.flen = self.flen - 4
         except:
                 print('not able to find linux banner')
+		return False
 
-	banner_addr = self.addr_lookup('linux_banner')
+	v = re.search('Linux version (\d{0,2}\.\d{0,2}\.\d{0,3})', self.banner)
+        if v is None:
+            print_out_str('!!! Could not match version! {0}'.format(self.banner))
+            return False
+        self.version = v.group(1)
+        match = re.search('(\d+)\.(\d+)\.(\d+)', self.version)
+        if match is not None:
+            self.kernel_version = tuple(map(int, match.groups()))
+        else:
+            print_out_str('!!! Could not extract version info! {0}'.format(self.version))
+        return True
+
+    def get_version(self):
+        banner_addr = self.addr_lookup('linux_banner')
         if banner_addr is not None:
             # Don't try virt to phys yet, compute manually
             banner_addr = banner_addr - self.page_offset + self.phys_offset
@@ -867,7 +1013,7 @@ class RamDump():
                 print_out_str('!!! Could not read banner address!')
                 return False
 
-            if (format(banner[0:flen]) != format(b[0:flen])):
+            if (format(self.banner[0:self.flen]) != format(b[0:self.flen])):
                 # special custom case for gale issues
                 if (self.custom is not None and self.custom.lower() == "gale".lower()):
                     print_out_str ("!!! It is a gale issue!")
@@ -876,35 +1022,25 @@ class RamDump():
                         lbc = 'readbanner {0} linux_banner'.format(self.vmlinux)
                         lbp = os.popen(lbc)
                         lb = lbp.read()
-                        banner = lb
-                        if (format(banner[0:flen]) == format(b[0:flen])):
-                            print_out_str ('readbanner={0}'.format(banner))
+                        self.banner = lb
+                        if (format(self.banner[0:self.flen]) == format(b[0:self.flen])):
+                            print_out_str ('readbanner={0}'.format(self.banner))
                         else:
                             print_out_str('!!! linux banner version mismatch!')
-                            print_out_str('!!! In vmlinux : {0}'.format(banner[0:flen]))
-                            print_out_str('!!! In Dump    : {0}'.format(b[0:flen]))
+                            print_out_str('!!! In vmlinux : {0}'.format(self.banner[0:self.flen]))
+                            print_out_str('!!! In Dump    : {0}'.format(b[0:self.flen]))
                             return False
                     except:
                         print_out_str ('!!! Unable to read linux_banner by readbanner utility !!')
                         print_out_str('!!! linux banner version mismatch!')
-                        print_out_str('!!! In vmlinux : {0}'.format(banner[0:flen]))
-                        print_out_str('!!! In Dump    : {0}'.format(b[0:flen]))
+                        print_out_str('!!! In vmlinux : {0}'.format(self.banner[0:self.flen]))
+                        print_out_str('!!! In Dump    : {0}'.format(b[0:self.flen]))
                         return False
                 else:
                     print_out_str('!!! linux banner version mismatch!')
-                    print_out_str('!!! In vmlinux : {0}'.format(banner[0:flen]))
-                    print_out_str('!!! In Dump    : {0}'.format(b[0:flen]))
+                    print_out_str('!!! In vmlinux : {0}'.format(self.banner[0:self.flen]))
+                    print_out_str('!!! In Dump    : {0}'.format(b[0:self.flen]))
                     return False
-            v = re.search('Linux version (\d{0,2}\.\d{0,2}\.\d{0,3})', b)
-            if v is None:
-                print_out_str('!!! Could not match version! {0}'.format(b))
-                return False
-            self.version = v.group(1)
-            match = re.search('(\d+)\.(\d+)\.(\d+)', self.version)
-            if match is not None:
-                self.kernel_version = tuple(map(int, match.groups()))
-            else:
-                print_out_str('!!! Could not extract version info! {0}'.format(self.version))
 
             print_out_str('Linux Banner: ' + b.rstrip())
             print_out_str('version = {0}'.format(self.version))
@@ -985,6 +1121,11 @@ class RamDump():
             magic, status, read_ptr, write_ptr = struct.unpack("<IIII", fd.read(16))
 
             etr_file_path = os.path.join(self.outdir, "q6_etr.bin")
+            if os.path.exists(etr_file_path):
+                try:
+                    os.remove(etr_file_path)
+                except:
+                    print_out_str("!!! Cannot delete old etr dump")
             try:
                 #Write etr dump to a file
                 with open(etr_file_path, 'ab') as etr_file:
@@ -999,6 +1140,7 @@ class RamDump():
                         etr_file.write(fd.read(end - read_ptr))
                         fd.seek(offset)
                         etr_file.write(fd.read(write_ptr - etr_addr))
+                print_out_str("etr binary generated at " + etr_file_path)
                 return True
             except:
                 print_out_str("!!! Cannot write etr dump to output file")
@@ -1023,13 +1165,349 @@ class RamDump():
             length = length * 256 + self.read_byte(command_addr + 7)
             # length does not include the dtb header 'd00dfeed'
             blob = self.read_physical(self.virt_to_phys(command_addr), length + 4, False)
+
             return blob
         else:
             print_out_str('!!! Cannot read dtb start address')
 
         return None
 
-    def auto_parse(self, file_path):
+    def __get_section_file(self, sec_type):
+        switcher = {
+                0: "paging.bin",
+                1: "fwdump.bin",
+                2: "remote.bin",
+                }
+        return switcher.get(sec_type, None)
+
+    def __dump_rddm_segments(self, dump_data_vaddr, dump_path, paging_header=False):
+        PAGING_SEC = 0x0
+        SRAM_SEC = 0x1
+        REMOTE_SEC = 0x2
+
+        dump_seg = self.read_word(dump_data_vaddr)
+        if dump_seg is None:
+            return
+
+        if self.Is_Ath11k():
+            seg_address = self.read_structure_field(dump_seg, "struct ath11k_dump_segment", "addr")
+        else:
+            seg_address = self.read_structure_field(dump_seg, "struct cnss_dump_seg", "address")
+        if seg_address is 0 or seg_address is None:
+            return
+
+        if not os.path.exists(dump_path):
+            print_out_str('!!! RDDM binaries extracted to {0}'.format(dump_path))
+            os.makedirs(dump_path)
+
+        if paging_header:
+            seg_file = self.__get_section_file(PAGING_SEC)
+            seg_file = os.path.join(dump_path, seg_file)
+            with open(seg_file, 'wb') as fp:
+                fp.write("\0" * 512)
+                offset = 0
+                fp.seek(offset)
+                fp.write(struct.pack('<Q', 1))
+                offset = offset + 8
+
+        index = 0
+        paging_seg_count = 0
+        while seg_address is not 0 and seg_address is not None:
+            if self.Is_Ath11k():
+                seg_size = self.read_structure_field(dump_seg, "struct ath11k_dump_segment", "len")
+                seg_type = self.read_structure_field(dump_seg, "struct ath11k_dump_segment", "type")
+                next_dump_seg = dump_seg + self.sizeof("struct ath11k_dump_segment")
+                next_seg_address = self.read_structure_field(next_dump_seg, "struct ath11k_dump_segment", "addr")
+            else:
+                seg_size = self.read_structure_field(dump_seg, "struct cnss_dump_seg", "size")
+                seg_type = self.read_structure_field(dump_seg, "struct cnss_dump_seg", "type")
+                next_dump_seg = dump_seg + self.sizeof("struct cnss_dump_seg")
+                next_seg_address = self.read_structure_field(next_dump_seg, "struct cnss_dump_seg", "address")
+
+            seg_file = self.__get_section_file(seg_type)
+            seg_file = os.path.join(dump_path, seg_file)
+
+            if paging_header:
+                if seg_type == PAGING_SEC:
+                    paging_seg_count = paging_seg_count + 1
+                    with open(seg_file, 'r+b') as fp:
+                        offset = offset + 8
+                        fp.seek(offset)
+                        fp.write(struct.pack('<Q', seg_address))
+                        offset = offset + 8
+                        fp.seek(offset)
+                        fp.write(struct.pack('<Q', seg_size))
+            else:
+                seg = self.read_physical(seg_address, seg_size, False)
+                with open(seg_file, 'ab') as fp:
+                    fp.write(seg)
+
+            dump_seg = next_dump_seg
+            seg_address = next_seg_address
+            index = index + 1
+
+        if paging_header:
+            seg_file = self.__get_section_file(PAGING_SEC)
+            seg_file = os.path.join(dump_path, seg_file)
+            with open(seg_file, 'r+b') as fp:
+                fp.seek(8)
+                fp.write(struct.pack('<Q', paging_seg_count))
+
+    def get_mod_func(self, mod_list):
+        high_mem_addr = self.addr_lookup('high_memory')
+        vmalloc_offset = 0x800000
+        vmalloc_start = self.read_u32(high_mem_addr) + vmalloc_offset & (~int(vmalloc_offset - 0x1))
+
+        if(self.isELF64() and (mod_list & 0xfff0000000 != self.mod_start_addr)):
+            return
+        elif (self.isELF32() and self.Is_Hawkeye() and mod_list & 0xff000000 != self.mod_start_addr and not ((vmalloc_start & 0xff000000 <= mod_list & 0xff000000) and (mod_list & 0xff000000 <= 0xff000000))):
+            return
+        elif(self.isELF32() and not self.Is_Hawkeye() and mod_list & 0xff000000 != self.mod_start_addr):
+            return
+        name = self.read_cstring(mod_list + self.mod_name_offset, 30)
+        if (name is None):
+            return
+        if len(name) < 1 and name.isalpha() is False:
+            return
+        if (name == self.mod_name):
+            self.mod_list_addr = mod_list
+
+    def get_module(self, name):
+        if (self.mod_start is None):
+           print_out_str('module variable not valid')
+           return
+
+        self.mod_name = name
+        #simple walk through to get address of module
+        name_list_walker = llist.ListWalker(self, self.mod_start, self.next_mod_offset)
+        name_list_walker.walk(self.mod_start, self.get_mod_func)
+
+    def get_rddm_dump(self, outdir):
+        if self.Is_Ath11k():
+            self.get_module("ath11k")
+
+            if self.mod_list_addr is None:
+                print_out_str('Unable to get ath11k module address')
+                return
+
+            if self.ath11k_gnu_linkonce_this_size is None:
+                print_out_str('Unable to get gnu linkonce size')
+                return
+
+            if self.seg_info_offset is None:
+                print_out_str('Unable to get segment info address')
+                return
+
+            seg_info = self.mod_list_addr + int (self.seg_info_offset, 16) + int (self.ath11k_gnu_linkonce_this_size, 16)
+
+            self.gdbmi.close()
+
+            self.gdbmi = gdbmi.GdbMI(self.gdb_path, self.ath11k_path)
+            self.gdbmi.open()
+
+            qrtr_node_id = self.read_structure_field(seg_info, "struct ath11k_coredump_segment_info", "qrtr_id")
+            if qrtr_node_id is not 0:
+                print_out_str('!!! Found RDDM dumps with qrtr node id {0}'.format(qrtr_node_id))
+
+                dump_path = os.path.join(outdir, "rddm_dump")
+
+                if os.path.exists(dump_path):
+                    shutil.rmtree(dump_path)
+
+                dump_seg_off = self.field_offset("struct ath11k_coredump_segment_info", "seg")
+                dump_seg = seg_info + dump_seg_off
+
+                self.__dump_rddm_segments(dump_seg, dump_path, True)
+                self.__dump_rddm_segments(dump_seg, dump_path, False)
+
+            self.gdbmi.close()
+
+            self.gdbmi = gdbmi.GdbMI(self.gdb_path, self.vmlinux)
+            self.gdbmi.open()
+        else:
+            plat_env_index = self.addr_lookup('plat_env_index')
+
+            if plat_env_index is not None:
+                plat_env_index = self.read_int(plat_env_index)
+
+            dump_data_vaddr_off = self.field_offset("struct cnss_ramdump_info_v2", "dump_data_vaddr")
+            dump_data_vaddr_off = dump_data_vaddr_off + self.field_offset("struct cnss_plat_data", "ramdump_info_v2")
+
+            for i in range(plat_env_index):
+                plat_env = self.addr_lookup("plat_env[{0}]".format(i))
+                if plat_env is not None:
+                    plat_env = self.read_word(plat_env)
+
+                qrtr_node_id = self.read_structure_field(plat_env, "struct cnss_plat_data", "qrtr_node_id")
+                if qrtr_node_id is not 0:
+                    print_out_str('!!! Found RDDM dumps with qrtr node id {0}'.format(qrtr_node_id))
+
+                dump_path = os.path.join(outdir, "rddm_dump_id_{0}".format(qrtr_node_id))
+
+                if os.path.exists(dump_path):
+                    shutil.rmtree(dump_path)
+
+                dump_data_vaddr = plat_env + dump_data_vaddr_off
+
+                self.__dump_rddm_segments(dump_data_vaddr, dump_path, True)
+                self.__dump_rddm_segments(dump_data_vaddr, dump_path, False)
+
+    def parse_struct_rpm_cmd_log(self, ptr, length, file_path):
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        print_out_str('!!! Generating {0}'.format(file_path))
+        for i in range(length):
+            timestamp = self.read_structure_field(ptr, "struct rpm_cmd_log", "timestamp")
+            cmd = self.read_structure_field(ptr, "struct rpm_cmd_log", "cmd")
+            param1 = self.read_structure_field(ptr, "struct rpm_cmd_log", "param1")
+            param2 = self.read_structure_field(ptr, "struct rpm_cmd_log", "param2")
+            rxtail = self.read_structure_field(ptr, "struct rpm_cmd_log", "rxtail")
+            rxhead = self.read_structure_field(ptr, "struct rpm_cmd_log", "rxhead")
+            global_timer_lo = self.read_structure_field(ptr, "struct rpm_cmd_log", "global_timer_lo")
+            global_timer_hi = self.read_structure_field(ptr, "struct rpm_cmd_log", "global_timer_hi")
+            hdr = self.read_structure_field(ptr, "struct rpm_cmd_log", "hdr")
+            hdr = self.read_physical(self.virt_to_phys(ptr + self.field_offset("struct rpm_cmd_log", "hdr")), 60, False)
+            Ahdr = ["{:02x}".format(ord(c)) for c in hdr]
+
+            ptr = ptr + self.sizeof("struct rpm_cmd_log")
+
+            with open(file_path, 'a') as fp:
+                fp.write("timestamp = {0}; cmd = {1}; param1 = {2}; param2 = {3}; rxtail = {4}; rxhead = {5}; global_timer_lo = {6}; global_timer_hi = {7}; hdr[60] = {8};\n".format(timestamp, cmd, param1, param2, rxtail, rxhead, global_timer_lo, global_timer_hi, Ahdr))
+
+    def parse_struct_glinkwork(self, ptr, length, file_path):
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        print_out_str('!!! Generating {0}'.format(file_path))
+        for i in range(length):
+            timestamp = self.read_structure_field(ptr, "struct glinkwork", "timestamp")
+            cmd = self.read_structure_field(ptr, "struct glinkwork", "cmd")
+            param1 = self.read_structure_field(ptr, "struct glinkwork", "param1")
+            param2 = self.read_structure_field(ptr, "struct glinkwork", "param2")
+
+            ptr = ptr + self.sizeof("struct glinkwork")
+
+            with open(file_path, 'a') as fp:
+                fp.write("timestamp = {0}; cmd = {1}; param1 = {2}; param2 = {3};\n".format(timestamp, cmd, param1, param2))
+
+    def parse_struct_glinkwork_sche_cancel(self, ptr, length, file_path):
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        print_out_str('!!! Generating {0}'.format(file_path))
+        for i in range(length):
+            timestamp = self.read_structure_field(ptr, "struct work_queue_timelog", "timestamp")
+
+            ptr = ptr + self.sizeof("struct work_queue_timelog")
+
+            with open(file_path, 'a') as fp:
+                fp.write("timestamp = {0};\n".format(timestamp))
+
+    def get_glink_logging(self,  outdir):
+        RPMLOG_SIZE = 256
+
+        glinkintr = self.addr_lookup('glinkintr')
+        glinkintrindex = self.addr_lookup('glinkintrindex')
+
+        glinksend = self.addr_lookup('glinksend')
+        glinksendindex = self.addr_lookup('glinksendindex')
+
+        glinkwork = self.addr_lookup('glink_work')
+        glinkworkindex = self.addr_lookup('glinkworkindex')
+
+	glinkworksche = self.addr_lookup('glinkwork_schedule')
+	glinkworkscheindex = self.addr_lookup('glinkwork_sche_index')
+
+	glinkworkcancel = self.addr_lookup('glinkwork_cancel')
+	glinkworkcancelindex = self.addr_lookup('glinkwork_cancel_index')
+
+        if glinkintrindex is None or glinksendindex is None or glinkworkindex is None \
+        or glinkworkscheindex is None or glinkworkcancelindex is None \
+        or glinkintr is None or glinksend is None or glinkwork is None \
+        or glinkworksche is None or glinkworkcancel is None:
+            print_out_str('!!! Required symbol(s) not found! Skipping..')
+            return
+
+        glinkintrindex = self.read_int(glinkintrindex)
+        glinksendindex = self.read_int(glinksendindex)
+        glinkworkindex = self.read_int(glinkworkindex)
+        glinkworkscheindex = self.read_int(glinkworkscheindex)
+        glinkworkcancelindex = self.read_int(glinkworkcancelindex)
+
+        file_path = os.path.join(outdir, "glinkintr.txt")
+        self.parse_struct_rpm_cmd_log(glinkintr, glinkintrindex, file_path)
+
+        file_path = os.path.join(outdir, "glinksend.txt")
+        self.parse_struct_rpm_cmd_log(glinksend, glinksendindex, file_path)
+
+        file_path = os.path.join(outdir, "glinkwork.txt")
+        self.parse_struct_glinkwork(glinkwork, glinkworkindex, file_path)
+
+        file_path = os.path.join(outdir, "glinkwork-schedule.txt")
+        self.parse_struct_glinkwork_sche_cancel(glinkworksche, glinkworkscheindex, file_path)
+
+        file_path = os.path.join(outdir, "glinkwork-cancel.txt")
+        self.parse_struct_glinkwork_sche_cancel(glinkworkcancel, glinkworkcancelindex, file_path)
+
+    def extract_modules_from_console(self, file_path):
+        print_out_str("Extracting functions and modules from Hex symbols in console log!!")
+        consoleLogString = ""
+
+        if self.isELF64():
+            ptr_re = "[0-9a-f]{16}"
+        else:
+            ptr_re = "[0-9a-f]{8}"
+
+        PCLRPattern = "pc : \[<" + ptr_re + ">\].* lr : \[<" + ptr_re + ">\].*"
+        FunctionPattern = "Function entered at \[<" + ptr_re + ">\].* from \[<" + ptr_re + ">\].*"
+
+        with open(file_path, 'r') as Lines:
+            for partial in Lines:
+                if (self.kallsyms_offset < 0 and not (self.arm64 and (self.kernel_version[0], self.kernel_version[1]) >= (5, 4)) and
+                    (re.search(PCLRPattern, partial) or re.search(FunctionPattern, partial))):
+                    x = re.findall(ptr_re, partial)
+                    x0, x1 = x[0], x[1]
+
+                    try:
+                        s = self.gdbmi.get_symbol_info(int(x0, 16))
+                    except:
+                        s = None
+                    if s is not None:
+                        if len(s.mod):
+                            s.mod = " " + s.mod
+                        x0 = s.symbol + "+" + hex(s.offset) + s.mod
+                    else:
+                        x0 = "0x" + x0
+
+                    try:
+                        s1 = self.gdbmi.get_symbol_info(int(x1, 16))
+                    except:
+                        s1 = None
+                    if s1 is not None:
+                        if len(s1.mod):
+                            s1.mod = " " + s1.mod
+                        x1 = s1.symbol + "+" + hex(s1.offset) + s1.mod
+                    else:
+                        x1 = "0x" + x1
+
+                    if re.search(PCLRPattern, partial):
+                        timestamp = partial.split("pc :")[0]
+                        f = '{0}{1}\n'.format(timestamp, "PC is at " + str(x0))
+                        consoleLogString += f
+                        f = '{0}{1}\n'.format(timestamp, "LR is at " + str(x1))
+                        consoleLogString += f
+                    else:
+                        timestamp = partial.split("Function entered at")[0]
+                        if s is not None and s1 is not None:
+                            partial = timestamp + "[<" + x[0] + ">] (" + x0 + ") from [<" + x[1] + ">] (" + x1 + ")\n"
+
+                f = '{0}'.format(partial)
+                consoleLogString += f
+            with open(file_path, 'w') as console_log:
+                console_log.write(consoleLogString)
+
+    def auto_parse(self):
         first_mem_path = None
 
         for f in first_mem_file_names:
@@ -1193,7 +1671,7 @@ class RamDump():
             #startup_script.write('mmu.pt.list 0xffffff8000000000\n'.encode('ascii', 'ignore'))
         elif self.Is_Hawkeye() and self.isELF32():
                 startup_script.write('r.s M 0x13\n'.encode('ascii', 'ignore'))
-                startup_script.write('PER.Set.simple SPR:0x30200 %Quad 0x41204000\n'.encode('ascii', 'ignore'))
+                startup_script.write('PER.Set.simple SPR:0x30200 %Quad 0x{0:x}\n'.format(self.swapper_pg_dir_addr + self.phys_offset).encode('ascii', 'ignore'))
                 startup_script.write('PER.Set.simple C15:0x1 %Long 0x1025\n'.encode('ascii', 'ignore'))
                 startup_script.write('Data.Set SPR:0x36110 %Quad 0x535\n'.encode('ascii', 'ignore'))
                 startup_script.write('mmu.on\n'.encode('ascii', 'ignore'))
@@ -1414,22 +1892,15 @@ class RamDump():
                 self.lookup_table.append((int(s[0], 16), s[3].rstrip(), int(s[1], 16)))
         stream.close()
 
-    def address_of(self, symbol):
-        """Returns the address of a symbol.
-
-        Example:
-
-        >>> hex(dump.address_of('linux_banner'))
-        '0xffffffc000c7a0a8L'
-        """
+    def addr_lookup(self, symbol):
         try:
             return self.gdbmi.address_of(symbol)
         except gdbmi.GdbMIException:
             pass
 
-    def addr_lookup(self, symbol):
+    def symbol_lookup_fail_safe(self, addr):
         try:
-            return self.gdbmi.address_of(symbol)
+            return self.gdbmi.get_symbol_info_fail_safe(addr)
         except gdbmi.GdbMIException:
             pass
 
@@ -1506,8 +1977,11 @@ class RamDump():
         vmalloc_offset = 0x800000
         vmalloc_start = self.read_u32(high_mem_addr) + vmalloc_offset & (~int(vmalloc_offset - 0x1))
 
-        if(self.Is_Hawkeye() and self.isELF64() and check_modules == 1 and (0xffffffbffc000000 <= addr < 0xffffffc000000000)):
-            return self.unwind.get_module_name_from_addr(addr)
+        if(self.Is_Hawkeye() and self.isELF64() and check_modules == 1):
+            if (self.kernel_version[0], self.kernel_version[1]) >= (5, 4) and (0xffffffc008000000 <= addr < 0xffffffc010000000):
+                return self.unwind.get_module_name_from_addr(addr)
+            elif (0xffffffbffc000000 <= addr < 0xffffffc000000000):
+                return self.unwind.get_module_name_from_addr(addr)
         elif(self.Is_Hawkeye() and self.isELF32() and check_modules == 1 and (0x7f000000 <= addr < 0x7fe00000)):
             return self.unwind.get_module_name_from_addr(addr)
         elif(self.Is_Hawkeye() and self.isELF32() and check_modules == 1 and self.is_config_defined('CONFIG_ARM_MODULE_PLTS') and (vmalloc_start <= addr < 0xff800000)):
@@ -1625,10 +2099,15 @@ class RamDump():
         else:
             return s[0]
 
-    def read_s64(self, addr_or_name, virtual=True, cpu=None):
-        """returns a value guaranteed to be 64 bits"""
-        s = self.read_string(addr_or_name, '<q', virtual, cpu)
-        return s[0] if s is not None else None
+    # returns a value guaranteed to be 64 bits
+    def read_s64(self, address, virtual=True, trace=False, cpu=None):
+        if trace:
+            print_out_str('reading {0:x}'.format(address))
+        s = self.read_string(address, '<q', virtual, trace, cpu)
+        if s is None:
+            return None
+        else:
+            return s[0]
 
     # returns a value guaranteed to be 64 bits
     def read_u64(self, address, virtual=True, trace=False, cpu=None):
@@ -1673,16 +2152,6 @@ class RamDump():
         else:
             return s[0]
 
-    def read_pointer(self, addr_or_name, virtual=True, cpu=None):
-        """Reads ``addr_or_name`` as a pointer variable.
-
-        The read length is either 32-bit or 64-bit depending on the
-        architecture.  This returns the *value* of the pointer variable
-        (i.e. the address it contains), not the data it points to.
-        """
-        fn = self.read_u32 if self.sizeof('void *') == 4 else self.read_u64
-        return fn(addr_or_name, virtual, cpu)
-
     # reads a 4 or 8 byte field from a structure
     def read_structure_field(self, address, struct_name, field):
         size = self.sizeof("(({0} *)0)->{1}".format(struct_name, field))
@@ -1692,23 +2161,20 @@ class RamDump():
             return self.read_u64(address + self.field_offset(struct_name, field))
         return None
 
-    def resolve_virt(self, virt_or_name):
-        """Takes a virtual address or variable name, returns a virtual
-        address
-        """
+    def deference_variable(self, virt_or_name):
+        """deference if the input is not a pointer."""
         if not isinstance(virt_or_name, basestring):
             return virt_or_name
-        return self.address_of(virt_or_name)
+        return self.addr_lookup(virt_or_name)
 
     def read_structure_cstring(self, addr_or_name, struct_name, field,
                                max_length=100):
         """reads a C string from a structure field.  The C string field will be
-        dereferenced before reading, so it should be a ``char *``, not a
-        ``char []``.
+        dereferenced before reading, so it will be always ``char *``.
         """
-        virt = self.resolve_virt(addr_or_name)
+        virt = self.deference_variable(addr_or_name)
         cstring_addr = virt + self.field_offset(struct_name, field)
-        return self.read_cstring(self.read_pointer(cstring_addr), max_length)
+        return self.read_cstring(self.read_word(cstring_addr), max_length)
 
     def read_cstring(self, address, max_length, virtual=True, cpu=None, trace=False):
         addr = address
@@ -1892,7 +2358,10 @@ class RamDump():
         return self.read_word(per_cpu_offset_addr_indexed)
 
     def get_num_cpus(self):
-        cpu_present_bits_addr = self.addr_lookup('cpu_present_bits')
+        if (self.kernel_version[0], self.kernel_version[1]) >= (5, 4):
+            cpu_present_bits_addr = self.addr_lookup('__cpu_present_mask')
+        else:
+            cpu_present_bits_addr = self.addr_lookup('cpu_present_bits')
         cpu_present_bits = self.read_word(cpu_present_bits_addr)
 
         b = self.get_command_line()
@@ -1941,3 +2410,23 @@ class RamDump():
             if ((hex(addr) >= hex(ebi_files[i][1])) and (hex(addr) <= hex(ebi_files[i][2]))):
                 return 1
         return 0
+
+    def Is_Ath11k(self):
+        if self.ath11k is not None:
+            return True
+        else:
+            return False
+
+    def get_gnu_linkonce_size(self, elf_path, bin_path):
+        cmd = '{0} -S {1}'.format(elf_path, bin_path)
+        fd = os.popen(cmd)
+        rd = fd.read()
+        try:
+            # get string after this word from readelf output
+            part = rd.split(".gnu.linkonce.thi")[1]
+            temp = re.sub('\s+', ' ', part ).strip()
+            f_hex = temp.split(" ")[3]
+            #get size of .gnu.linkonce.thi from section header
+            return f_hex.strip()
+        except:
+            return None

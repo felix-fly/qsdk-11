@@ -41,7 +41,7 @@ class IommuLib(object):
 
         root = self.ramdump.read_word('domain_root')
 
-        list_head_attachments = self.ramdump.read_pointer(
+        list_head_attachments = self.ramdump.read_word(
                                                     'iommu_debug_attachments')
 
         if list_head_attachments is not None:
@@ -76,7 +76,7 @@ class IommuLib(object):
         else:
             priv_ptr = None
 
-        arm_smmu_ops = self.ramdump.address_of('arm_smmu_ops')
+        arm_smmu_ops = self.ramdump.addr_lookup('arm_smmu_ops')
 
         ptr = self.ramdump.read_structure_field(
             node, 'struct iommu_debug_attachment', 'group')
@@ -121,7 +121,7 @@ class IommuLib(object):
             level = 0
             fn = self.ramdump.read_structure_field(pgtbl_ops_ptr,
                     'struct io_pgtable_ops', 'map')
-            if fn == self.ramdump.address_of('av8l_fast_map'):
+            if fn == self.ramdump.addr_lookup('av8l_fast_map'):
                 level = 3
             else:
                 arm_lpae_io_pgtable_ptr = self.ramdump.container_of(

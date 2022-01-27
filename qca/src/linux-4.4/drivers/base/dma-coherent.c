@@ -181,7 +181,7 @@ int dma_alloc_from_coherent(struct device *dev, ssize_t size,
 	 */
 	*dma_handle = mem->device_base + (pageno << PAGE_SHIFT);
 	*ret = mem->virt_base + (pageno << PAGE_SHIFT);
-	memset(*ret, 0, size);
+	memset_io(*ret, 0, size);
 	spin_unlock_irqrestore(&mem->spinlock, flags);
 
 	return 1;

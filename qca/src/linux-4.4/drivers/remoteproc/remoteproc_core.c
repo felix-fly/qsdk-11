@@ -1050,7 +1050,7 @@ unroll_preparation:
 	return ret;
 }
 
-static int rproc_start_subdevices(struct rproc *rproc)
+int rproc_start_subdevices(struct rproc *rproc)
 {
 	struct rproc_subdev *subdev;
 	int ret;
@@ -1073,8 +1073,9 @@ unroll_registration:
 
 	return ret;
 }
+EXPORT_SYMBOL(rproc_start_subdevices);
 
-static void rproc_stop_subdevices(struct rproc *rproc, bool crashed)
+void rproc_stop_subdevices(struct rproc *rproc, bool crashed)
 {
 	struct rproc_subdev *subdev;
 
@@ -1083,6 +1084,7 @@ static void rproc_stop_subdevices(struct rproc *rproc, bool crashed)
 			subdev->stop(subdev, crashed);
 	}
 }
+EXPORT_SYMBOL(rproc_stop_subdevices);
 
 static void rproc_unprepare_subdevices(struct rproc *rproc)
 {
@@ -1301,7 +1303,9 @@ static int rproc_fw_boot(struct rproc *rproc, const struct firmware *fw)
 	if (ret)
 		return ret;
 
-	dev_info(dev, "Booting fw image %s, size %zd\n", name, fw->size);
+	if (fw)
+		dev_info(dev, "Booting fw image %s, size %zd\n", name,
+								fw->size);
 
 	/*
 	 * if enabling an IOMMU isn't relevant for this rproc, this is
@@ -1579,7 +1583,7 @@ static void rproc_coredump(struct rproc *rproc)
  */
 int rproc_trigger_recovery(struct rproc *rproc)
 {
-	const struct firmware *firmware_p;
+	const struct firmware *firmware_p = NULL;
 	struct device *dev = &rproc->dev;
 	int ret;
 
@@ -1597,10 +1601,12 @@ int rproc_trigger_recovery(struct rproc *rproc)
 	rproc_coredump(rproc);
 
 	/* load firmware */
-	ret = request_firmware(&firmware_p, rproc->firmware, dev);
-	if (ret < 0) {
-		dev_err(dev, "request_firmware failed: %d\n", ret);
-		goto unlock_mutex;
+	if (rproc->firmware != NULL) {
+		ret = request_firmware(&firmware_p, rproc->firmware, dev);
+		if (ret < 0) {
+			dev_err(dev, "request_firmware failed: %d\n", ret);
+			goto unlock_mutex;
+		}
 	}
 
 	/* boot the remote processor up again */
@@ -1613,6 +1619,61 @@ unlock_mutex:
 	return ret;
 }
 
+static void update_child_crash_status(struct rproc *rproc)
+{
+	struct rproc_child *rp_child;
+
+	/*Update crash status of active child's, if recovery is enabled*/
+	list_for_each_entry(rp_child, &rproc->child, node) {
+		struct rproc *c_rproc = (struct rproc *)rp_child->handle;
+
+		if (c_rproc->state == RPROC_RUNNING) {
+			if (c_rproc->recovery_disabled) {
+				mutex_unlock(&rproc->lock);
+				panic("remoteproc %s: Resetting the SoC - %s crashed",
+					dev_name(&c_rproc->dev), c_rproc->name);
+			}
+			c_rproc->state = RPROC_CRASHED;
+		}
+	}
+}
+
+static void suspend_active_child(struct rproc *rproc)
+{
+	struct rproc_child *rp_child;
+
+	list_for_each_entry(rp_child, &rproc->child, node) {
+		struct rproc *c_rproc = (struct rproc *)rp_child->handle;
+		int ret;
+
+		if (c_rproc->state != RPROC_CRASHED)
+			continue;
+		ret = rproc_stop(c_rproc, true);
+		if (ret)
+			dev_err(&c_rproc->dev, "fail to suspend %s\n",
+					c_rproc->name);
+		c_rproc->state = RPROC_SUSPENDED;
+	}
+}
+
+static void resume_child(struct rproc *rproc)
+{
+	struct rproc_child *rp_child;
+
+	list_for_each_entry(rp_child, &rproc->child, node) {
+		struct rproc *c_rproc = (struct rproc *)rp_child->handle;
+		int ret;
+
+		if (c_rproc->state != RPROC_SUSPENDED)
+			continue;
+		/* boot the remote processor up again */
+		ret = rproc_start(c_rproc, NULL);
+		if (ret)
+			dev_err(&c_rproc->dev, "fail to resume %s\n",
+					c_rproc->name);
+	}
+}
+
 /**
  * rproc_crash_handler_work() - handle a crash
  *
@@ -1623,6 +1684,7 @@ static void rproc_crash_handler_work(struct work_struct *work)
 {
 	struct rproc *rproc = container_of(work, struct rproc, crash_handler);
 	struct device *dev = &rproc->dev;
+	struct rproc_child *rp_child;
 
 	dev_dbg(dev, "enter %s\n", __func__);
 
@@ -1638,13 +1700,23 @@ static void rproc_crash_handler_work(struct work_struct *work)
 	dev_err(dev, "handling crash #%u in %s\n", ++rproc->crash_cnt,
 		rproc->name);
 
+	list_for_each_entry(rp_child, &rproc->child, node) {
+		update_child_crash_status(rproc);
+		suspend_active_child(rproc);
+	}
+
 	mutex_unlock(&rproc->lock);
 
 	if (!rproc->recovery_disabled)
 		rproc_trigger_recovery(rproc);
 	else
 		panic("remoteproc %s: Resetting the SoC - %s crashed",
-		      dev_name(&rproc->dev), rproc->name);
+				dev_name(&rproc->dev), rproc->name);
+
+	mutex_lock(&rproc->lock);
+	list_for_each_entry(rp_child, &rproc->child, node)
+		resume_child(rproc);
+	mutex_unlock(&rproc->lock);
 }
 
 /**
@@ -1660,13 +1732,21 @@ static void rproc_crash_handler_work(struct work_struct *work)
  */
 int rproc_boot(struct rproc *rproc)
 {
-	const struct firmware *firmware_p;
+	const struct firmware *firmware_p = NULL;
 	struct device *dev;
 	int ret;
 
 	if (!rproc) {
 		pr_err("invalid rproc handle\n");
 		return -EINVAL;
+	}
+
+	if (rproc->parent && rproc->is_parent_dependent) {
+		ret = rproc_boot(rproc->parent);
+		if (ret) {
+			pr_err("Couldn't boot %s rproc\n", rproc->parent->name);
+			return ret;
+		}
 	}
 
 	dev = &rproc->dev;
@@ -1692,10 +1772,12 @@ int rproc_boot(struct rproc *rproc)
 	dev_info(dev, "powering up %s\n", rproc->name);
 
 	/* load firmware */
-	ret = request_firmware(&firmware_p, rproc->firmware, dev);
-	if (ret < 0) {
-		dev_err(dev, "request_firmware failed: %d\n", ret);
-		goto downref_rproc;
+	if (rproc->firmware != NULL) {
+		ret = request_firmware(&firmware_p, rproc->firmware, dev);
+		if (ret < 0) {
+			dev_err(dev, "request_firmware failed: %d\n", ret);
+			goto downref_rproc;
+		}
 	}
 
 	ret = rproc_fw_boot(rproc, firmware_p);
@@ -1760,6 +1842,9 @@ void rproc_shutdown(struct rproc *rproc)
 	kfree(rproc->cached_table);
 	rproc->cached_table = NULL;
 	rproc->table_ptr = NULL;
+
+	if (rproc->parent && rproc->is_parent_dependent)
+		rproc_shutdown(rproc->parent);
 out:
 	mutex_unlock(&rproc->lock);
 }
@@ -1814,6 +1899,59 @@ struct rproc *rproc_get_by_phandle(phandle phandle)
 }
 #endif
 EXPORT_SYMBOL(rproc_get_by_phandle);
+
+#ifdef CONFIG_OF
+struct rproc *rproc_get_by_name(const char *rproc_name)
+{
+	struct rproc *temp, *rproc = NULL;
+
+	mutex_lock(&rproc_list_mutex);
+	list_for_each_entry(temp, &rproc_list, node) {
+		if (!strcmp(temp->name, rproc_name)) {
+			rproc = temp;
+			get_device(&rproc->dev);
+			break;
+		}
+	}
+	mutex_unlock(&rproc_list_mutex);
+	return rproc;
+}
+#else
+struct rproc *rproc_get_by_name(const char *rproc_name)
+{
+	return NULL;
+}
+#endif
+EXPORT_SYMBOL(rproc_get_by_name);
+
+#ifdef CONFIG_OF
+int rproc_get_child_cnt(const char *rproc_parent_name)
+{
+	struct rproc *rproc = NULL, *temp;
+	int cnt = 0;
+	struct rproc_child *rp_child;
+
+	mutex_lock(&rproc_list_mutex);
+	list_for_each_entry(temp, &rproc_list, node) {
+		if (!strcmp(temp->name, rproc_parent_name)) {
+			rproc = temp;
+			break;
+		}
+	}
+	mutex_unlock(&rproc_list_mutex);
+	if (!rproc)
+		return cnt;
+	list_for_each_entry(rp_child, &rproc->child, node)
+		cnt += 1;
+	return cnt;
+}
+#else
+int rproc_get_child_cnt(void)
+{
+	return NULL;
+}
+#endif
+EXPORT_SYMBOL(rproc_get_child_cnt);
 
 /**
  * rproc_add() - register a remote processor
@@ -2000,6 +2138,7 @@ struct rproc *rproc_alloc(struct device *dev, const char *name,
 	INIT_LIST_HEAD(&rproc->rvdevs);
 	INIT_LIST_HEAD(&rproc->subdevs);
 	INIT_LIST_HEAD(&rproc->dump_segments);
+	INIT_LIST_HEAD(&rproc->child);
 
 	INIT_WORK(&rproc->crash_handler, rproc_crash_handler_work);
 
@@ -2081,6 +2220,19 @@ int rproc_del(struct rproc *rproc)
 	return 0;
 }
 EXPORT_SYMBOL(rproc_del);
+
+void rproc_add_child(struct rproc *rproc_p, struct rproc_child *child)
+{
+	list_add(&child->node, &rproc_p->child);
+}
+EXPORT_SYMBOL(rproc_add_child);
+
+void rproc_remove_child(struct rproc *rproc_p, struct rproc_child *child)
+{
+	list_del(&child->node);
+}
+EXPORT_SYMBOL(rproc_remove_child);
+
 
 /**
  * rproc_add_subdev() - add a subdevice to a remoteproc

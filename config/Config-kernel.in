@@ -157,6 +157,10 @@ config KERNEL_DEBUG_KERNEL
 	bool
 	default n
 
+config KERNEL_DEBUG_MEM_USAGE
+	bool "Compile the kernel with memory allocation tracking"
+	default n
+
 config KERNEL_DEBUG_INFO
 	bool "Compile the kernel with debug information"
 	default y
@@ -195,6 +199,18 @@ config KERNEL_DYNAMIC_DEBUG
 	  function, module, format string, and line number. This mechanism
 	  implicitly compiles in all pr_debug() and dev_dbg() calls, which
 	  enlarges the kernel text size by about 2%.
+
+config KERNEL_DEVMEM
+        bool "/dev/mem virtual device support"
+        default y
+        help
+          Say Y here if you want to support the /dev/mem device.
+          The /dev/mem device is used to access areas of physical
+          memory.
+
+config KERNEL_I2C_COMPAT
+	bool "Enable compatibility bits for old user-space"
+	default y
 
 config KERNEL_EARLY_PRINTK
 	bool "Compile the kernel with early printk"
@@ -244,6 +260,14 @@ config KERNEL_FANOTIFY
 config KERNEL_BLK_DEV_BSG
 	bool "Compile the kernel with SCSI generic v4 support for any block device"
 	default n
+
+config KERNEL_BLK_DEV_RAM
+	bool "Complie the kernel with RAM block device support"
+	default y
+
+config KERNEL_BLK_DEV_NVME
+	bool "Compile the kernel with NVM Express block device"
+	default y
 
 config KERNEL_MAGIC_SYSRQ
 	bool "Compile the kernel with SysRq support"
@@ -296,6 +320,14 @@ config  KERNEL_DEBUG_RODATA
 	depends on KERNEL_ARM_KERNMEM_PERMS
 	default y if arm || aarch64
 	default n
+
+config KERNEL_DEBUG_GPIO
+	bool "Enable kernel Debug GPIO calls"
+	default y
+
+config KERNEL_DEBUG_BUGVERBOSE
+	bool "Enable kernel Verbose BUG() reporting"
+	default y
 
 config  KERNEL_DEBUG_SET_MODULE_RONX
 	bool "Enable loadable kernel module data as NX and text as RO"
@@ -724,3 +756,15 @@ config HAS_IOMEM
         depends on !NO_IOMEM
         select GENERIC_IO
         default y
+
+config KERNEL_IPQ_FLASH_16M_PROFILE_DEBUG
+	bool "Enable 16M debug profile"
+	default n
+
+config KERNEL_STACKTRACE
+	bool "stack-trace"
+	default n
+
+config KERNEL_SRD_TRACE
+	bool "Enable SRD TRACE"
+	default n

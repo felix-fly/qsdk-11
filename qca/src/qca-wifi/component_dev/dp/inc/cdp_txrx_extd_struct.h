@@ -28,8 +28,10 @@
 #define RX_ENH_CB_BUF_ALIGNMENT 4
 
 #define RX_ENH_CAPTURE_TRAILER_LEN 8
-#define RX_ENH_CAPTURE_MODE_MASK 0x0F
+#define CDP_RX_ENH_CAPTURE_MODE_MASK 0x0F
 #define RX_ENH_CAPTURE_TRAILER_ENABLE_MASK 0x10
+#define CDP_RX_ENH_CAPTURE_PEER_MASK 0xFFFFFFF0
+#define CDP_RX_ENH_CAPTURE_PEER_LSB  4
 
 /**
  * struct cdp_rx_indication_mpdu_info - Rx MPDU info
@@ -40,7 +42,7 @@
  *       <enum 1 bw_40_MHz>
  *       <enum 2 bw_80_MHz>
  *       <enum 3 bw_160_MHz>
- * @ofdma_info_valid: RU info valid
+ * @mu_ul_info_valid: RU info valid
  * @ofdma_ru_start_index: RU index number(0-73)
  * @ofdma_ru_width: size of RU in units of 1(26tone)RU
  * @nss: NSS 1,2, ...8
@@ -66,7 +68,7 @@ struct cdp_rx_indication_mpdu_info {
 	uint32_t ppdu_id;
 	uint16_t duration;
 	uint64_t bw:4,
-		 ofdma_info_valid:1,
+		 mu_ul_info_valid:1,
 		 ofdma_ru_start_index:7,
 		 ofdma_ru_width:7,
 		 nss:4,
@@ -83,6 +85,7 @@ struct cdp_rx_indication_mpdu_info {
 	uint32_t length;
 	uint8_t per_chain_rssi[CDP_MAX_RX_CHAINS];
 	uint8_t channel;
+	qdf_freq_t chan_freq;
 };
 
 #ifdef __KERNEL__
@@ -167,6 +170,10 @@ struct ol_ath_radiostats {
 	uint32_t    rx_last_msdu_unset_cnt;
 	uint32_t    rx_data_bytes;
 	uint32_t    tx_retries;
+	uint32_t    created_vap;
+	uint32_t    active_vap;
+	uint32_t    rnr_count;
+	uint32_t    soc_status_6ghz;
 };
 
 /* Enumeration of PDEV Configuration parameter */

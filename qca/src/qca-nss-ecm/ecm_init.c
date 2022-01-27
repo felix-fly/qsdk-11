@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2016, 2018, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2016, 2018, 2020-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -36,8 +36,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_db.h"
 #include "ecm_front_end_ipv4.h"
 #ifdef ECM_IPV6_ENABLE
@@ -58,6 +58,11 @@ extern void ecm_db_exit(void);
 
 extern int ecm_classifier_default_init(struct dentry *dentry);
 extern void ecm_classifier_default_exit(void);
+
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+extern int ecm_classifier_ovs_init(struct dentry *dentry);
+extern void ecm_classifier_ovs_exit(void);
+#endif
 
 #ifdef ECM_CLASSIFIER_MARK_ENABLE
 extern int ecm_classifier_mark_init(struct dentry *dentry);
@@ -90,6 +95,15 @@ extern void ecm_state_exit(void);
 #ifdef ECM_CLASSIFIER_PCC_ENABLE
 extern int ecm_classifier_pcc_init(struct dentry *dentry);
 extern void ecm_classifier_pcc_exit(void);
+#endif
+
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+extern int ecm_classifier_emesh_init(struct dentry *dentry);
+extern void ecm_classifier_emesh_exit(void);
+#endif
+#ifdef ECM_CLASSIFIER_MSCS_ENABLE
+extern int ecm_classifier_mscs_init(struct dentry *dentry);
+extern void ecm_classifier_mscs_exit(void);
 #endif
 
 /*
@@ -151,6 +165,27 @@ static int __init ecm_init(void)
 	}
 #endif
 
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	ret = ecm_classifier_ovs_init(ecm_dentry);
+	if (0 != ret) {
+		goto err_cls_ovs;
+	}
+#endif
+
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+	ret = ecm_classifier_emesh_init(ecm_dentry);
+	if (0 != ret) {
+		goto err_cls_emesh;
+	}
+#endif
+
+#ifdef ECM_CLASSIFIER_MSCS_ENABLE
+	ret = ecm_classifier_mscs_init(ecm_dentry);
+	if (0 != ret) {
+		goto err_cls_mscs;
+	}
+#endif
+
 	ret = ecm_interface_init();
 	if (0 != ret) {
 		goto err_iface;
@@ -187,6 +222,8 @@ static int __init ecm_init(void)
 	}
 #endif
 
+	ecm_front_end_common_sysctl_register();
+
 	printk(KERN_INFO "ECM init complete\n");
 	return 0;
 
@@ -207,6 +244,14 @@ err_bond:
 #endif
 	ecm_interface_exit();
 err_iface:
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+	ecm_classifier_emesh_exit();
+err_cls_emesh:
+#endif
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	ecm_classifier_ovs_exit();
+err_cls_ovs:
+#endif
 #ifdef ECM_CLASSIFIER_MARK_ENABLE
 	ecm_classifier_mark_exit();
 err_cls_mark:
@@ -226,6 +271,10 @@ err_cls_hyfi:
 #ifdef ECM_CLASSIFIER_NL_ENABLE
 	ecm_classifier_nl_rules_exit();
 err_cls_nl:
+#endif
+#ifdef ECM_CLASSIFIER_MSCS_ENABLE
+	ecm_classifier_mscs_exit();
+err_cls_mscs:
 #endif
 	ecm_classifier_default_exit();
 err_cls_default:
@@ -300,6 +349,18 @@ static void __exit ecm_exit(void)
 	DEBUG_INFO("exit mark classifier\n");
 	ecm_classifier_mark_exit();
 #endif
+#ifdef ECM_CLASSIFIER_OVS_ENABLE
+	DEBUG_INFO("exit ovs classifier\n");
+	ecm_classifier_ovs_exit();
+#endif
+#ifdef ECM_CLASSIFIER_EMESH_ENABLE
+	DEBUG_INFO("exit emesh classifier\n");
+	ecm_classifier_emesh_exit();
+#endif
+#ifdef ECM_CLASSIFIER_MSCS_ENABLE
+	DEBUG_INFO("exit mscs classifier\n");
+	ecm_classifier_mscs_exit();
+#endif
 	DEBUG_INFO("exit default classifier\n");
 	ecm_classifier_default_exit();
 	DEBUG_INFO("exit db\n");
@@ -309,6 +370,8 @@ static void __exit ecm_exit(void)
 		DEBUG_INFO("remove ecm debugfs\n");
 		debugfs_remove_recursive(ecm_dentry);
 	}
+
+	ecm_front_end_common_sysctl_unregister();
 
 	printk(KERN_INFO "ECM exit complete\n");
 }

@@ -224,7 +224,7 @@ hostapd_set_bss_options() {
 	json_get_values airtime_sta_weight_list airtime_sta_weight
 
 	set_default isolate 0
-	set_default maxassoc 64
+	set_default maxassoc 128
 	set_default max_inactivity 0
 	set_default short_preamble 1
 	set_default disassoc_low_ack 0
@@ -268,8 +268,9 @@ hostapd_set_bss_options() {
 			# with WPS enabled, we got to be in unconfigured state.
 			wps_not_configured=1
 		;;
-		psk)
+		psk|sae*)
 			json_get_vars key wpa_psk_file
+			json_get_var ieee80211w ieee80211w
 			if [ ${#key} -lt 8 ]; then
 				wireless_setup_vif_failed INVALID_WPA_PSK
 				return 1
@@ -283,7 +284,13 @@ hostapd_set_bss_options() {
 				append bss_conf "wpa_psk_file=$wpa_psk_file" "$N"
 			}
 			wps_possible=1
-			append wpa_key_mgmt "WPA-PSK"
+			if [ $ieee80211w -eq 2 ]; then
+				append wpa_key_mgmt "WPA-PSK-SHA256"
+			elif [ $ieee80211w -eq 1 ]; then
+				append wpa_key_mgmt "WPA-PSK WPA-PSK-SHA256"
+			else
+				append wpa_key_mgmt "WPA-PSK"
+			fi
 		;;
 		eap)
 			json_get_vars \
@@ -295,6 +302,7 @@ hostapd_set_bss_options() {
 				vlan_naming vlan_tagged_interface \
 				vlan_bridge
 
+			json_get_var ieee80211w ieee80211w
 			# legacy compatibility
 			[ -n "$auth_server" ] || json_get_var auth_server server
 			[ -n "$auth_port" ] || json_get_var auth_port port
@@ -327,7 +335,13 @@ hostapd_set_bss_options() {
 			[ -n "$ownip" ] && append bss_conf "own_ip_addr=$ownip" "$N"
 			append bss_conf "eapol_key_index_workaround=1" "$N"
 			append bss_conf "ieee8021x=1" "$N"
-			append wpa_key_mgmt "WPA-EAP"
+			if [ $ieee80211w -eq 2 ]; then
+				append wpa_key_mgmt "WPA-EAP-SHA256"
+			elif [ $ieee80211w -eq 1 ]; then
+				append wpa_key_mgmt "WPA-EAP WPA-EAP-SHA256"
+			else
+				append wpa_key_mgmt "WPA-EAP"
+			fi
 
 			[ -n "$dynamic_vlan" ] && {
 				append bss_conf "dynamic_vlan=$dynamic_vlan" "$N"
@@ -344,6 +358,18 @@ hostapd_set_bss_options() {
 			hostapd_append_wep_key bss_conf
 			append bss_conf "wep_default_key=$wep_keyidx" "$N"
 			[ -n "$wep_rekey" ] && append bss_conf "wep_rekey_period=$wep_rekey" "$N"
+		;;
+	esac
+
+	case "$auth_type" in
+		sae)
+			append bss_conf "ieee80211w=2" "$N"
+			 wpa_key_mgmt="SAE"
+		;;
+		sae-mixed)
+			append bss_conf "ieee80211w=1" "$N"
+			append bss_conf "sae_require_mfp=1" "$N"
+			append wpa_key_mgmt "SAE"
 		;;
 	esac
 
@@ -443,7 +469,6 @@ hostapd_set_bss_options() {
 		fi
 
 		append bss_conf "okc=$auth_cache" "$N"
-		[ "$auth_cache" = 0 ] && append bss_conf "disable_pmksa_caching=1" "$N"
 
 		# RSN -> allow management frame protection
 		json_get_var ieee80211w ieee80211w

@@ -82,6 +82,7 @@ enum ieee80211_band {
 	IEEE80211_BAND_2GHZ = NL80211_BAND_2GHZ,
 	IEEE80211_BAND_5GHZ = NL80211_BAND_5GHZ,
 	IEEE80211_BAND_60GHZ = NL80211_BAND_60GHZ,
+	IEEE80211_BAND_6GHZ = NL80211_BAND_6GHZ,
 
 	/* keep last */
 	IEEE80211_NUM_BANDS
@@ -304,6 +305,95 @@ struct ieee80211_sta_vht_cap {
 	struct ieee80211_vht_mcs_info vht_mcs;
 };
 
+#define IEEE80211_HE_PPE_THRES_MAX_LEN		25
+
+/**
+ * struct ieee80211_sta_he_cap - STA's HE capabilities
+ *
+ * This structure describes most essential parameters needed
+ * to describe 802.11ax HE capabilities for a STA.
+ *
+ * @has_he: true iff HE data is valid.
+ * @he_cap_elem: Fixed portion of the HE capabilities element.
+ * @he_mcs_nss_supp: The supported NSS/MCS combinations.
+ * @ppe_thres: Holds the PPE Thresholds data.
+ */
+struct ieee80211_sta_he_cap {
+	bool has_he;
+	struct ieee80211_he_cap_elem he_cap_elem;
+	struct ieee80211_he_mcs_nss_supp he_mcs_nss_supp;
+	u8 ppe_thres[IEEE80211_HE_PPE_THRES_MAX_LEN];
+};
+
+/**
+ * struct ieee80211_sband_iftype_data
+ *
+ * This structure encapsulates sband data that is relevant for the
+ * interface types defined in @types_mask.  Each type in the
+ * @types_mask must be unique across all instances of iftype_data.
+ *
+ * @types_mask: interface types mask
+ * @he_cap: holds the HE capabilities
+ */
+struct ieee80211_sband_iftype_data {
+	u16 types_mask;
+	struct ieee80211_sta_he_cap he_cap;
+};
+
+/**
+ * enum ieee80211_edmg_bw_config - allowed channel bandwidth configurations
+ *
+ * @IEEE80211_EDMG_BW_CONFIG_4: 2.16GHz
+ * @IEEE80211_EDMG_BW_CONFIG_5: 2.16GHz and 4.32GHz
+ * @IEEE80211_EDMG_BW_CONFIG_6: 2.16GHz, 4.32GHz and 6.48GHz
+ * @IEEE80211_EDMG_BW_CONFIG_7: 2.16GHz, 4.32GHz, 6.48GHz and 8.64GHz
+ * @IEEE80211_EDMG_BW_CONFIG_8: 2.16GHz and 2.16GHz + 2.16GHz
+ * @IEEE80211_EDMG_BW_CONFIG_9: 2.16GHz, 4.32GHz and 2.16GHz + 2.16GHz
+ * @IEEE80211_EDMG_BW_CONFIG_10: 2.16GHz, 4.32GHz, 6.48GHz and 2.16GHz+2.16GHz
+ * @IEEE80211_EDMG_BW_CONFIG_11: 2.16GHz, 4.32GHz, 6.48GHz, 8.64GHz and
+ *	2.16GHz+2.16GHz
+ * @IEEE80211_EDMG_BW_CONFIG_12: 2.16GHz, 2.16GHz + 2.16GHz and
+ *	4.32GHz + 4.32GHz
+ * @IEEE80211_EDMG_BW_CONFIG_13: 2.16GHz, 4.32GHz, 2.16GHz + 2.16GHz and
+ *	4.32GHz + 4.32GHz
+ * @IEEE80211_EDMG_BW_CONFIG_14: 2.16GHz, 4.32GHz, 6.48GHz, 2.16GHz + 2.16GHz
+ *	and 4.32GHz + 4.32GHz
+ * @IEEE80211_EDMG_BW_CONFIG_15: 2.16GHz, 4.32GHz, 6.48GHz, 8.64GHz,
+ *	2.16GHz + 2.16GHz and 4.32GHz + 4.32GHz
+ */
+enum ieee80211_edmg_bw_config {
+	IEEE80211_EDMG_BW_CONFIG_4	= 4,
+	IEEE80211_EDMG_BW_CONFIG_5	= 5,
+	IEEE80211_EDMG_BW_CONFIG_6	= 6,
+	IEEE80211_EDMG_BW_CONFIG_7	= 7,
+	IEEE80211_EDMG_BW_CONFIG_8	= 8,
+	IEEE80211_EDMG_BW_CONFIG_9	= 9,
+	IEEE80211_EDMG_BW_CONFIG_10	= 10,
+	IEEE80211_EDMG_BW_CONFIG_11	= 11,
+	IEEE80211_EDMG_BW_CONFIG_12	= 12,
+	IEEE80211_EDMG_BW_CONFIG_13	= 13,
+	IEEE80211_EDMG_BW_CONFIG_14	= 14,
+	IEEE80211_EDMG_BW_CONFIG_15	= 15,
+};
+
+/**
+ * struct ieee80211_edmg - EDMG configuration
+ *
+ * This structure describes most essential parameters needed
+ * to describe 802.11ay EDMG configuration
+ *
+ * @channels: bitmap that indicates the 2.16 GHz channel(s)
+ *	that are allowed to be used for transmissions.
+ *	Bit 0 indicates channel 1, bit 1 indicates channel 2, etc.
+ *	Set to 0 indicate EDMG not supported.
+ * @bw_config: Channel BW Configuration subfield encodes
+ *	the allowed channel bandwidth configurations
+ */
+struct ieee80211_edmg {
+	u8 channels;
+	enum ieee80211_edmg_bw_config bw_config;
+};
+
 /**
  * struct ieee80211_supported_band - frequency band definition
  *
@@ -320,6 +410,12 @@ struct ieee80211_sta_vht_cap {
  * @n_bitrates: Number of bitrates in @bitrates
  * @ht_cap: HT capabilities in this band
  * @vht_cap: VHT capabilities in this band
+ * @edmg_cap: EDMG capabilities in this band
+ * @n_iftype_data: number of iftype data entries
+ * @iftype_data: interface type data entries.  Note that the bits in
+ *	@types_mask inside this structure cannot overlap (i.e. only
+ *	one occurrence of each type is allowed across all instances of
+ *	iftype_data).
  */
 struct ieee80211_supported_band {
 	struct ieee80211_channel *channels;
@@ -329,7 +425,55 @@ struct ieee80211_supported_band {
 	int n_bitrates;
 	struct ieee80211_sta_ht_cap ht_cap;
 	struct ieee80211_sta_vht_cap vht_cap;
+	struct ieee80211_edmg edmg_cap;
+	u16 n_iftype_data;
+	const struct ieee80211_sband_iftype_data *iftype_data;
 };
+
+/**
+ * ieee80211_get_sband_iftype_data - return sband data for a given iftype
+ * @sband: the sband to search for the STA on
+ * @iftype: enum nl80211_iftype
+ *
+ * Return: pointer to struct ieee80211_sband_iftype_data, or NULL is none found
+ */
+static inline const struct ieee80211_sband_iftype_data *
+ieee80211_get_sband_iftype_data(const struct ieee80211_supported_band *sband,
+				u8 iftype)
+{
+	int i;
+
+	if (WARN_ON(iftype >= NL80211_IFTYPE_MAX))
+		return NULL;
+
+	for (i = 0; i < sband->n_iftype_data; i++)  {
+		const struct ieee80211_sband_iftype_data *data =
+			&sband->iftype_data[i];
+
+		if (data->types_mask & BIT(iftype))
+			return data;
+	}
+
+	return NULL;
+}
+
+/**
+ * ieee80211_get_he_sta_cap - return HE capabilities for an sband's STA
+ * @sband: the sband to search for the STA on
+ *
+ * Return: pointer to the struct ieee80211_sta_he_cap, or NULL is none found
+ */
+static inline const struct ieee80211_sta_he_cap *
+ieee80211_get_he_sta_cap(const struct ieee80211_supported_band *sband)
+{
+	const struct ieee80211_sband_iftype_data *data =
+		ieee80211_get_sband_iftype_data(sband, NL80211_IFTYPE_STATION);
+
+	if (data && data->he_cap.has_he)
+		return &data->he_cap;
+
+	return NULL;
+}
 
 /*
  * Wireless hardware/device configuration structures and methods
@@ -377,12 +521,14 @@ struct vif_params {
  *	with the get_key() callback, must be in little endian,
  *	length given by @seq_len.
  * @seq_len: length of @seq.
+ * @vlan_id: vlan_id for VLAN group key (if nonzero)
  */
 struct key_params {
 	const u8 *key;
 	const u8 *seq;
 	int key_len;
 	int seq_len;
+	u16 vlan_id;
 	u32 cipher;
 };
 
@@ -393,12 +539,17 @@ struct key_params {
  * @center_freq1: center frequency of first segment
  * @center_freq2: center frequency of second segment
  *	(only with 80+80 MHz)
+ * @edmg: define the EDMG channels configuration.
+ *	If edmg is requested (i.e. the .channels member is non-zero),
+ *	chan will define the primary channel and all other
+ *	parameters are ignored.
  */
 struct cfg80211_chan_def {
 	struct ieee80211_channel *chan;
 	enum nl80211_chan_width width;
 	u32 center_freq1;
 	u32 center_freq2;
+	struct ieee80211_edmg edmg;
 };
 
 /**
@@ -470,6 +621,19 @@ cfg80211_chandef_identical(const struct cfg80211_chan_def *chandef1,
 		chandef1->width == chandef2->width &&
 		chandef1->center_freq1 == chandef2->center_freq1 &&
 		chandef1->center_freq2 == chandef2->center_freq2);
+}
+
+/**
+ * cfg80211_chandef_is_edmg - check if chandef represents an EDMG channel
+ *
+ * @chandef: the channel definition
+ *
+ * Return: %true if EDMG defined, %false otherwise.
+ */
+static inline bool
+cfg80211_chandef_is_edmg(const struct cfg80211_chan_def *chandef)
+{
+	return chandef->edmg.channels || chandef->edmg.bw_config;
 }
 
 /**
@@ -640,6 +804,10 @@ struct survey_info {
  *	allowed through even on unauthorized ports
  * @control_port_no_encrypt: TRUE to prevent encryption of control port
  *	protocol frames.
+ * @sae_pwe: value indicates the SAE mechanism used for PWE derivation
+ *     0 = hunting-and-pecking loop only
+ *     1 = hash-to-element only
+ *     2 = both hunting-and-pecking loop and hash-to-element enabled
  */
 struct cfg80211_crypto_settings {
 	u32 wpa_versions;
@@ -651,6 +819,7 @@ struct cfg80211_crypto_settings {
 	bool control_port;
 	__be16 control_port_ethertype;
 	bool control_port_no_encrypt;
+	u16 sae_pwe;
 };
 
 /**
@@ -730,6 +899,11 @@ struct cfg80211_acl_data {
  *	MAC address based access control
  * @pbss: If set, start as a PCP instead of AP. Relevant for DMG
  *	networks.
+ * @ht_cap: HT capabilities (or %NULL if HT isn't enabled)
+ * @vht_cap: VHT capabilities (or %NULL if VHT isn't enabled)
+ * @he_cap: HE capabilities (or %NULL if HE isn't enabled)
+ * @ht_required: stations must support HT
+ * @vht_required: stations must support VHT
  */
 struct cfg80211_ap_settings {
 	struct cfg80211_chan_def chandef;
@@ -749,6 +923,11 @@ struct cfg80211_ap_settings {
 	bool p2p_opp_ps;
 	const struct cfg80211_acl_data *acl;
 	bool pbss;
+
+	const struct ieee80211_ht_cap *ht_cap;
+	const struct ieee80211_vht_cap *vht_cap;
+	const struct ieee80211_he_cap_elem *he_cap;
+	bool ht_required, vht_required;
 };
 
 /**
@@ -810,6 +989,7 @@ enum station_parameters_apply_mask {
  *	(bitmask of BIT(NL80211_STA_FLAG_...))
  * @listen_interval: listen interval or -1 for no change
  * @aid: AID or zero for no change
+ * @vlan_id: VLAN ID for station (if nonzero)
  * @plink_action: plink action to take
  * @plink_state: set the peer link state for a station
  * @ht_capa: HT capabilities of station
@@ -832,6 +1012,8 @@ enum station_parameters_apply_mask {
  * @supported_oper_classes_len: number of supported operating classes
  * @opmode_notif: operating mode field from Operating Mode Notification
  * @opmode_notif_used: information if operating mode field is used
+ * @he_capa: HE capabilities of station
+ * @he_capa_len: the length of the HE capabilities
  */
 struct station_parameters {
 	const u8 *supported_rates;
@@ -840,6 +1022,7 @@ struct station_parameters {
 	u32 sta_modify_mask;
 	int listen_interval;
 	u16 aid;
+	u16 vlan_id;
 	u8 supported_rates_len;
 	u8 plink_action;
 	u8 plink_state;
@@ -857,6 +1040,8 @@ struct station_parameters {
 	u8 supported_oper_classes_len;
 	u8 opmode_notif;
 	bool opmode_notif_used;
+	const struct ieee80211_he_cap_elem *he_capa;
+	u8 he_capa_len;
 };
 
 /**
@@ -930,13 +1115,17 @@ int cfg80211_check_station_change(struct wiphy *wiphy,
  * @RATE_INFO_FLAGS_MCS: mcs field filled with HT MCS
  * @RATE_INFO_FLAGS_VHT_MCS: mcs field filled with VHT MCS
  * @RATE_INFO_FLAGS_SHORT_GI: 400ns guard interval
- * @RATE_INFO_FLAGS_60G: 60GHz MCS
+ * @RATE_INFO_FLAGS_DMG: 60GHz MCS
+ * @RATE_INFO_FLAGS_EDMG: 60GHz MCS in EDMG mode
+ * @RATE_INFO_FLAGS_HE_MCS: HE MCS information
  */
 enum rate_info_flags {
 	RATE_INFO_FLAGS_MCS			= BIT(0),
 	RATE_INFO_FLAGS_VHT_MCS			= BIT(1),
 	RATE_INFO_FLAGS_SHORT_GI		= BIT(2),
-	RATE_INFO_FLAGS_60G			= BIT(3),
+	RATE_INFO_FLAGS_DMG			= BIT(3),
+	RATE_INFO_FLAGS_EDMG			= BIT(5),
+	RATE_INFO_FLAGS_HE_MCS			= BIT(4),
 };
 
 /**
@@ -950,6 +1139,7 @@ enum rate_info_flags {
  * @RATE_INFO_BW_40: 40 MHz bandwidth
  * @RATE_INFO_BW_80: 80 MHz bandwidth
  * @RATE_INFO_BW_160: 160 MHz bandwidth
+ * @RATE_INFO_BW_HE_RU: bandwidth determined by HE RU allocation
  */
 enum rate_info_bw {
 	RATE_INFO_BW_5,
@@ -958,6 +1148,7 @@ enum rate_info_bw {
 	RATE_INFO_BW_40,
 	RATE_INFO_BW_80,
 	RATE_INFO_BW_160,
+	RATE_INFO_BW_HE_RU,
 };
 
 /**
@@ -966,10 +1157,15 @@ enum rate_info_bw {
  * Information about a receiving or transmitting bitrate
  *
  * @flags: bitflag of flags from &enum rate_info_flags
- * @mcs: mcs index if struct describes a 802.11n bitrate
+ * @mcs: mcs index if struct describes an HT/VHT/HE rate
  * @legacy: bitrate in 100kbit/s for 802.11abg
- * @nss: number of streams (VHT only)
+ * @nss: number of streams (VHT & HE only)
  * @bw: bandwidth (from &enum rate_info_bw)
+ * @n_bonded_ch: In case of EDMG the number of bonded channels (1-4)
+ * @he_gi: HE guard interval (from &enum nl80211_he_gi)
+ * @he_dcm: HE DCM value
+ * @he_ru_alloc: HE RU allocation (from &enum nl80211_he_ru_alloc,
+ *	only valid if bw is %RATE_INFO_BW_HE_RU)
  */
 struct rate_info {
 	u8 flags;
@@ -977,6 +1173,10 @@ struct rate_info {
 	u16 legacy;
 	u8 nss;
 	u8 bw;
+	u8 n_bonded_ch;
+	u8 he_gi;
+	u8 he_dcm;
+	u8 he_ru_alloc;
 };
 
 /**
@@ -1914,6 +2114,9 @@ struct cfg80211_ibss_params {
  * @vht_capa_mask: The bits of vht_capa which are to be used.
  * @pbss: if set, connect to a PCP instead of AP. Valid for DMG
  *	networks.
+ * @edmg: define the EDMG channels.
+ *	This may specify multiple channels and bonding options for the driver
+ *	to choose from, based on BSS configuration.
  */
 struct cfg80211_connect_params {
 	struct ieee80211_channel *channel;
@@ -1937,6 +2140,7 @@ struct cfg80211_connect_params {
 	struct ieee80211_vht_cap vht_capa;
 	struct ieee80211_vht_cap vht_capa_mask;
 	bool pbss;
+	struct ieee80211_edmg edmg;
 };
 
 /**
@@ -2322,6 +2526,8 @@ struct cfg80211_external_auth_params {
  * @set_default_key: set the default key on an interface
  *
  * @set_default_mgmt_key: set the default management frame key on an interface
+
+ * @set_default_beacon_key: set default Beacon frame key on an interface
  *
  * @set_rekey_data: give the data necessary for GTK rekeying to the driver
  *
@@ -2587,6 +2793,9 @@ struct cfg80211_ops {
 	int	(*set_default_mgmt_key)(struct wiphy *wiphy,
 					struct net_device *netdev,
 					u8 key_index);
+	int	(*set_default_beacon_key)(struct wiphy *wiphy,
+					  struct net_device *netdev,
+					  u8 key_index);
 
 	int	(*start_ap)(struct wiphy *wiphy, struct net_device *dev,
 			    struct cfg80211_ap_settings *settings);
@@ -3896,6 +4105,34 @@ unsigned int cfg80211_classify8021d(struct sk_buff *skb,
 				    struct cfg80211_qos_map *qos_map);
 
 /**
+ * cfg80211_find_ie_match - match information element and byte array in data
+ *
+ * @eid: element ID
+ * @ies: data consisting of IEs
+ * @len: length of data
+ * @match: byte array to match
+ * @match_len: number of bytes in the match array
+ * @match_offset: offset in the IE where the byte array should match.
+ *	If match_len is zero, this must also be set to zero.
+ *	Otherwise this must be set to 2 or more, because the first
+ *	byte is the element id, which is already compared to eid, and
+ *	the second byte is the IE length.
+ *
+ * Return: %NULL if the element ID could not be found or if
+ * the element is invalid (claims to be longer than the given
+ * data) or if the byte array doesn't match, or a pointer to the first
+ * byte of the requested element, that is the byte containing the
+ * element ID.
+ *
+ * Note: There are no checks on the element length other than
+ * having to fit into the given data and being large enough for the
+ * byte array to match.
+ */
+const u8 *cfg80211_find_ie_match(u8 eid, const u8 *ies, int len,
+				 const u8 *match, int match_len,
+				 int match_offset);
+
+/**
  * cfg80211_find_ie - find information element in data
  *
  * @eid: element ID
@@ -3910,7 +4147,31 @@ unsigned int cfg80211_classify8021d(struct sk_buff *skb,
  * Note: There are no checks on the element length other than
  * having to fit into the given data.
  */
-const u8 *cfg80211_find_ie(u8 eid, const u8 *ies, int len);
+static inline const u8 *cfg80211_find_ie(u8 eid, const u8 *ies, int len)
+{
+	return cfg80211_find_ie_match(eid, ies, len, NULL, 0, 0);
+}
+
+/**
+ * cfg80211_find_ext_ie - find information element with EID Extension in data
+ *
+ * @ext_eid: element ID Extension
+ * @ies: data consisting of IEs
+ * @len: length of data
+ *
+ * Return: %NULL if the extended element ID could not be found or if
+ * the element is invalid (claims to be longer than the given
+ * data), or a pointer to the first byte of the requested
+ * element, that is the byte containing the element ID.
+ *
+ * Note: There are no checks on the element length other than
+ * having to fit into the given data.
+ */
+static inline const u8 *cfg80211_find_ext_ie(u8 ext_eid, const u8 *ies, int len)
+{
+	return cfg80211_find_ie_match(WLAN_EID_EXTENSION, ies, len,
+				      &ext_eid, 1, 2);
+}
 
 /**
  * cfg80211_find_vendor_ie - find vendor specific information element in data

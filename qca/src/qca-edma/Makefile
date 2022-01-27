@@ -14,5 +14,5 @@ essedma-objs +=    edma_axi.o \
 ESSEDMA_INCLUDE = -I$(obj)
 
 ccflags-y += $(ESSEDMA_INCLUDE)
-
+ccflags-y += -Wall -Werror
 

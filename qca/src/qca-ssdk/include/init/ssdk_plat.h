@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014-2015, 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2014-2015, 2017-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -32,137 +32,141 @@
 #include <linux/phy.h>
 
 #ifndef BIT
-#define BIT(_n)			(1UL << (_n))
+#define BIT(_n)                                      (1UL << (_n))
 #endif
 
 
 #ifndef BITS
-#define BITS(_s, _n)	(((1UL << (_n)) - 1) << _s)
+#define BITS(_s, _n)                                 (((1UL << (_n)) - 1) << _s)
 #endif
 
 /* Atheros specific MII registers */
-#define QCA_MII_MMD_ADDR		0x0d
-#define QCA_MII_MMD_DATA		0x0e
-#define QCA_MII_DBG_ADDR		0x1d
-#define QCA_MII_DBG_DATA		0x1e
+#define QCA_MII_MMD_ADDR                             0x0d
+#define QCA_MII_MMD_DATA                             0x0e
+#define QCA_MII_DBG_ADDR                             0x1d
+#define QCA_MII_DBG_DATA                             0x1e
 /*qca808x_end*/
-#define AR8327_REG_CTRL			0x0000
-#define   AR8327_CTRL_REVISION		BITS(0, 8)
-#define   AR8327_CTRL_REVISION_S	0
-#define   AR8327_CTRL_VERSION		BITS(8, 8)
-#define   AR8327_CTRL_VERSION_S		8
-#define   AR8327_CTRL_RESET		    BIT(31)
+#define AR8327_REG_CTRL                              0x0000
+#define   AR8327_CTRL_REVISION                       BITS(0, 8)
+#define   AR8327_CTRL_REVISION_S                     0
+#define   AR8327_CTRL_VERSION                        BITS(8, 8)
+#define   AR8327_CTRL_VERSION_S                      8
+#define   AR8327_CTRL_RESET                          BIT(31)
 
-#define AR8327_REG_LED_CTRL_0	0x50
-#define AR8327_REG_LED_CTRL_1	0x54
-#define AR8327_REG_LED_CTRL_2	0x58
-#define AR8327_REG_LED_CTRL_3	0x5c
+#define AR8327_REG_LED_CTRL_0                        0x50
+#define AR8327_REG_LED_CTRL_1                        0x54
+#define AR8327_REG_LED_CTRL_2                        0x58
+#define AR8327_REG_LED_CTRL_3                        0x5c
 
-#define AR8327_REG_PORT_STATUS(_i)  (0x07c + (_i) * 4)
+#define AR8327_REG_PORT_STATUS(_i)                   (0x07c + (_i) * 4)
 
-#define   AR8327_PORT_STATUS_SPEED	    BITS(0,2)
-#define   AR8327_PORT_STATUS_SPEED_S	0
-#define   AR8327_PORT_STATUS_TXMAC	    BIT(2)
-#define   AR8327_PORT_STATUS_RXMAC	    BIT(3)
-#define   AR8327_PORT_STATUS_TXFLOW	    BIT(4)
-#define   AR8327_PORT_STATUS_RXFLOW	    BIT(5)
-#define   AR8327_PORT_STATUS_DUPLEX	    BIT(6)
-#define   AR8327_PORT_STATUS_LINK_UP	BIT(8)
-#define   AR8327_PORT_STATUS_LINK_AUTO	BIT(9)
-#define   AR8327_PORT_STATUS_LINK_PAUSE	BIT(10)
+#define   AR8327_PORT_STATUS_SPEED                   BITS(0,2)
+#define   AR8327_PORT_STATUS_SPEED_S                 0
+#define   AR8327_PORT_STATUS_TXMAC                   BIT(2)
+#define   AR8327_PORT_STATUS_RXMAC                   BIT(3)
+#define   AR8327_PORT_STATUS_TXFLOW                  BIT(4)
+#define   AR8327_PORT_STATUS_RXFLOW                  BIT(5)
+#define   AR8327_PORT_STATUS_DUPLEX                  BIT(6)
+#define   AR8327_PORT_STATUS_LINK_UP                 BIT(8)
+#define   AR8327_PORT_STATUS_LINK_AUTO               BIT(9)
+#define   AR8327_PORT_STATUS_LINK_PAUSE              BIT(10)
 
-#define AR8327_REG_PAD0_CTRL			0x4
-#define AR8327_REG_PAD5_CTRL			0x8
-#define AR8327_REG_PAD6_CTRL			0xc
-#define   AR8327_PAD_CTRL_MAC_MII_RXCLK_SEL		BIT(0)
-#define   AR8327_PAD_CTRL_MAC_MII_TXCLK_SEL		BIT(1)
-#define   AR8327_PAD_CTRL_MAC_MII_EN			BIT(2)
-#define   AR8327_PAD_CTRL_MAC_GMII_RXCLK_SEL	BIT(4)
-#define   AR8327_PAD_CTRL_MAC_GMII_TXCLK_SEL	BIT(5)
-#define   AR8327_PAD_CTRL_MAC_GMII_EN		    BIT(6)
-#define   AR8327_PAD_CTRL_SGMII_EN			    BIT(7)
-#define   AR8327_PAD_CTRL_PHY_MII_RXCLK_SEL		BIT(8)
-#define   AR8327_PAD_CTRL_PHY_MII_TXCLK_SEL		BIT(9)
-#define   AR8327_PAD_CTRL_PHY_MII_EN			BIT(10)
-#define   AR8327_PAD_CTRL_PHY_GMII_PIPE_RXCLK_SEL	BIT(11)
-#define   AR8327_PAD_CTRL_PHY_GMII_RXCLK_SEL	BIT(12)
-#define   AR8327_PAD_CTRL_PHY_GMII_TXCLK_SEL	BIT(13)
-#define   AR8327_PAD_CTRL_PHY_GMII_EN		    BIT(14)
-#define   AR8327_PAD_CTRL_PHYX_GMII_EN		    BIT(16)
-#define   AR8327_PAD_CTRL_PHYX_RGMII_EN		    BIT(17)
-#define   AR8327_PAD_CTRL_PHYX_MII_EN		    BIT(18)
-#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_SEL	BITS(20, 2)
-#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_SEL_S	20
-#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_SEL	BITS(22, 2)
-#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_SEL_S	22
-#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_EN	BIT(24)
-#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_EN	BIT(25)
-#define   AR8327_PAD_CTRL_RGMII_EN			    BIT(26)
+#define AR8327_REG_PAD0_CTRL                         0x4
+#define AR8327_REG_PAD5_CTRL                         0x8
+#define AR8327_REG_PAD6_CTRL                         0xc
+#define   AR8327_PAD_CTRL_MAC_MII_RXCLK_SEL          BIT(0)
+#define   AR8327_PAD_CTRL_MAC_MII_TXCLK_SEL          BIT(1)
+#define   AR8327_PAD_CTRL_MAC_MII_EN                 BIT(2)
+#define   AR8327_PAD_CTRL_MAC_GMII_RXCLK_SEL         BIT(4)
+#define   AR8327_PAD_CTRL_MAC_GMII_TXCLK_SEL         BIT(5)
+#define   AR8327_PAD_CTRL_MAC_GMII_EN                BIT(6)
+#define   AR8327_PAD_CTRL_SGMII_EN                   BIT(7)
+#define   AR8327_PAD_CTRL_PHY_MII_RXCLK_SEL          BIT(8)
+#define   AR8327_PAD_CTRL_PHY_MII_TXCLK_SEL          BIT(9)
+#define   AR8327_PAD_CTRL_PHY_MII_EN                 BIT(10)
+#define   AR8327_PAD_CTRL_PHY_GMII_PIPE_RXCLK_SEL    BIT(11)
+#define   AR8327_PAD_CTRL_PHY_GMII_RXCLK_SEL         BIT(12)
+#define   AR8327_PAD_CTRL_PHY_GMII_TXCLK_SEL         BIT(13)
+#define   AR8327_PAD_CTRL_PHY_GMII_EN                BIT(14)
+#define   AR8327_PAD_CTRL_PHYX_GMII_EN               BIT(16)
+#define   AR8327_PAD_CTRL_PHYX_RGMII_EN              BIT(17)
+#define   AR8327_PAD_CTRL_PHYX_MII_EN                BIT(18)
+#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_SEL      BITS(20, 2)
+#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_SEL_S    20
+#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_SEL      BITS(22, 2)
+#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_SEL_S    22
+#define   AR8327_PAD_CTRL_RGMII_RXCLK_DELAY_EN       BIT(24)
+#define   AR8327_PAD_CTRL_RGMII_TXCLK_DELAY_EN       BIT(25)
+#define   AR8327_PAD_CTRL_RGMII_EN                   BIT(26)
 
-#define AR8327_PORT5_PHY_ADDR    4
+#define AR8327_PORT5_PHY_ADDR                        4
 /*AR8327 inner phy debug register for RGMII mode*/
-#define AR8327_PHY_REG_MODE_SEL  0x12
-#define AR8327_PHY_RGMII_MODE    BIT(3)
-#define AR8327_PHY_REG_TEST_CTRL  0x0
-#define AR8327_PHY_RGMII_RX_DELAY    BIT(15)
-#define AR8327_PHY_REG_SYS_CTRL  0x5
-#define AR8327_PHY_RGMII_TX_DELAY    BIT(8)
+#define AR8327_PHY_REG_MODE_SEL                      0x12
+#define AR8327_PHY_RGMII_MODE                        BIT(3)
+#define AR8327_PHY_REG_TEST_CTRL                     0x0
+#define AR8327_PHY_RGMII_RX_DELAY                    BIT(15)
+#define AR8327_PHY_REG_SYS_CTRL                      0x5
+#define AR8327_PHY_RGMII_TX_DELAY                    BIT(8)
 
 
-#define AR8327_REG_POS		0x10
-#define AR8327_REG_POS_HW_INIT 0x261320
-#define   AR8327_POS_POWER_ON_SEL	BIT(31)
-#define   AR8327_POS_LED_OPEN_EN	BIT(24)
-#define   AR8327_POS_SERDES_AEN	    BIT(7)
+#define AR8327_REG_POS                               0x10
+#define AR8327_REG_POS_HW_INIT                       0x261320
+#define   AR8327_POS_POWER_ON_SEL                    BIT(31)
+#define   AR8327_POS_LED_OPEN_EN                     BIT(24)
+#define   AR8327_POS_SERDES_AEN                      BIT(7)
 
-#define AR8327_REG_MODULE_EN  0x30
-#define   AR8327_REG_MODULE_EN_QM_ERR	BIT(8)
-#define   AR8327_REG_MODULE_EN_LOOKUP_ERR      BIT(9)
+#define AR8327_REG_MODULE_EN                         0x30
+#define   AR8327_REG_MODULE_EN_QM_ERR                BIT(8)
+#define   AR8327_REG_MODULE_EN_LOOKUP_ERR            BIT(9)
 
-#define AR8327_REG_MAC_SFT_RST		0x68
+#define AR8327_REG_MAC_SFT_RST                       0x68
 
-#define AR8327_REG_PAD_SGMII_CTRL			0xe0
-#define AR8327_REG_PAD_SGMII_CTRL_HW_INIT   0xc70164c0
-#define   AR8327_PAD_SGMII_CTRL_MODE_CTRL	BITS(22, 2)
-#define   AR8327_PAD_SGMII_CTRL_MODE_CTRL_S		22
-#define   AR8327_PAD_SGMII_CTRL_EN_SD		BIT(4)
-#define   AR8327_PAD_SGMII_CTRL_EN_TX		BIT(3)
-#define   AR8327_PAD_SGMII_CTRL_EN_RX		BIT(2)
-#define   AR8327_PAD_SGMII_CTRL_EN_PLL		BIT(1)
-#define   AR8327_PAD_SGMII_CTRL_EN_LCKDT	BIT(0)
+#define AR8327_REG_PAD_SGMII_CTRL                    0xe0
+#define AR8327_REG_PAD_SGMII_CTRL_HW_INIT            0xc70164c0
+#define   AR8327_PAD_SGMII_CTRL_MODE_CTRL            BITS(22, 2)
+#define   AR8327_PAD_SGMII_CTRL_MODE_CTRL_S          22
+#define   AR8327_PAD_SGMII_CTRL_EN_SD                BIT(4)
+#define   AR8327_PAD_SGMII_CTRL_EN_TX                BIT(3)
+#define   AR8327_PAD_SGMII_CTRL_EN_RX                BIT(2)
+#define   AR8327_PAD_SGMII_CTRL_EN_PLL               BIT(1)
+#define   AR8327_PAD_SGMII_CTRL_EN_LCKDT             BIT(0)
 
-#define AR8327_REG_PAD_MAC_PWR_SEL			0x0e4
-#define   AR8327_PAD_MAC_PWR_RGMII0_1_8V		BIT(18)
-#define   AR8327_PAD_MAC_PWR_RGMII1_1_8V		BIT(19)
+#define AR8327_REG_PAD_MAC_PWR_SEL                   0x0e4
+#define   AR8327_PAD_MAC_PWR_RGMII0_1_8V             BIT(18)
+#define   AR8327_PAD_MAC_PWR_RGMII1_1_8V             BIT(19)
 
-#define AR8327_REG_PORT_LOOKUP(_i) (0x660 + (_i) * 0xc)
-#define AR8327_REG_PORT_VLAN0(_i) (0x420 + (_i) * 0x8)
+#define AR8327_REG_PORT_LOOKUP(_i)                   (0x660 + (_i) * 0xc)
+#define AR8327_REG_PORT_VLAN0(_i)                    (0x420 + (_i) * 0x8)
 
-#define DESS_PSGMII_MODE_CONTROL	0x1b4
-#define   DESS_PSGMII_ATHR_CSCO_MODE_25M	BIT(0)
+#define DESS_PSGMII_MODE_CONTROL                     0x1b4
+#define   DESS_PSGMII_ATHR_CSCO_MODE_25M             BIT(0)
 
-#define DESS_PSGMIIPHY_TX_CONTROL	 0x288
+#define DESS_PSGMIIPHY_TX_CONTROL                    0x288
 
-#define DESS_PSGMII_PLL_VCO_RELATED_CONTROL_1	0x78c
-#define   DESS_PSGMII_MII_REG_UPHY_PLL_LCKDT_EN	BIT(0)
+#define DESS_PSGMII_PLL_VCO_RELATED_CONTROL_1        0x78c
+#define   DESS_PSGMII_MII_REG_UPHY_PLL_LCKDT_EN      BIT(0)
 
-#define DESS_PSGMII_VCO_CALIBRATION_CONTROL_1  0x9c
+#define DESS_PSGMII_VCO_CALIBRATION_CONTROL_1        0x9c
 
-#define SSDK_PSGMII_ID 5
+#define SSDK_PSGMII_ID                               5
 /*qca808x_start*/
-#define SSDK_PHY_BCAST_ID 0x1f
-#define SSDK_PHY_MIN_ID 0x0
-#define SSDK_PORT_CPU	0
+#define SSDK_PHY_BCAST_ID                            0x1f
+#define SSDK_PHY_MIN_ID                              0x0
+#define SSDK_PORT_CPU                                0
 /*qca808x_end*/
-#define SSDK_PORT0_FC_THRESH_ON_DFLT	0x60
-#define SSDK_PORT0_FC_THRESH_OFF_DFLT	0x90
+#define SSDK_PORT0_FC_THRESH_ON_DFLT                 0x60
+#define SSDK_PORT0_FC_THRESH_OFF_DFLT                0x90
 
-#define AR8327_NUM_PHYS		5
-#define AR8327_PORT_CPU     0
-#define AR8327_NUM_PORTS	7
-#define AR8327_MAX_VLANS  128
+#define AR8327_NUM_PHYS                              5
+#define AR8327_PORT_CPU                              0
+#define AR8327_NUM_PORTS                             7
+#define AR8327_MAX_VLANS                             128
 
-#define MII_PHYADDR_C45	(1<<30)
+#define MII_PHYADDR_C45                              (1<<30)
+
+#define SSDK_GPIO_RESET                              0
+#define SSDK_GPIO_RELEASE                            1
+#define SSDK_INVALID_GPIO                            0
 
 enum {
     AR8327_PORT_SPEED_10M = 0,
@@ -179,12 +183,14 @@ enum {
 	QCA_VER_AR8327 = 0x12,
 	QCA_VER_AR8337 = 0x13,
 	QCA_VER_DESS = 0x14,
-	QCA_VER_HPPE = 0x15
+	QCA_VER_HPPE = 0x15,
+	QCA_VER_SCOMPHY = 0xEE
 };
 /*qca808x_end*/
 /*poll mib per 120secs*/
 #define QCA_PHY_MIB_WORK_DELAY	120000
-#define QCA_MIB_ITEM_NUMBER	41
+#define QCA_MIB_ITEM_NUMBER \
+	(sizeof(fal_mib_counter_t)/sizeof(a_uint64_t))
 
 #define SSDK_MAX_UNIPHY_INSTANCE        3
 #define SSDK_UNIPHY_INSTANCE0           0
@@ -192,6 +198,8 @@ enum {
 #define SSDK_UNIPHY_INSTANCE2           2
 #define SSDK_UNIPHY_CHANNEL0            0
 #define SSDK_UNIPHY_CHANNEL1            1
+#define SSDK_UNIPHY_CHANNEL2            2
+#define SSDK_UNIPHY_CHANNEL3            3
 #define SSDK_UNIPHY_CHANNEL4            4
 
 /*qca808x_start*/
@@ -232,8 +240,8 @@ extern a_uint32_t ssdk_log_level;
 #define __SSDK_LOG_FUN(lev, fmt, ...) \
 	do { \
 		if (SSDK_LOG_LEVEL_##lev <= ssdk_log_level) { \
-			printk("%s[%u]:"#lev":", __FUNCTION__, __LINE__); \
-			printk(fmt, ##__VA_ARGS__); \
+			printk("%s[%u]:"#lev":"fmt, \
+				 __FUNCTION__, __LINE__, ##__VA_ARGS__); \
 		} \
 	} while(0)
 #define SSDK_DUMP_BUF(lev, buf, len) \
@@ -241,9 +249,9 @@ extern a_uint32_t ssdk_log_level;
 		if (SSDK_LOG_LEVEL_##lev <= ssdk_log_level) {\
 			a_uint32_t i_buf = 0;\
 			for(i_buf=0; i_buf<(len); i_buf++) {\
-				printk("%08lx ", *((buf)+i_buf));\
+				printk(KERN_CONT "%08lx ", *((buf)+i_buf));\
 			}\
-			printk("\n");\
+			printk(KERN_CONT "\n");\
 		}\
 	} while(0)
 

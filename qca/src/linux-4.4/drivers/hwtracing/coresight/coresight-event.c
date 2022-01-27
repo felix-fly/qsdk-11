@@ -62,7 +62,7 @@ static void event_abort_unhandled_abort(void *ignore,
 
 static void event_abort_kernel_panic(void *ignore, long state)
 {
-	coresight_abort();
+	return;
 }
 
 static int event_abort_register(void)

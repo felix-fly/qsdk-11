@@ -1,2 +1,2 @@
 ::sysinit:/etc/init.d/rcS
-::respawn:/bin/cttyhack /bin/sh
+::askfirst:/bin/sh

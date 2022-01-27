@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018,2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -56,6 +56,8 @@ QDF_STATUS hif_initialize_usb_ops(struct hif_bus_ops *bus_ops)
 	bus_ops->hif_irq_enable = &hif_usb_irq_enable;
 	bus_ops->hif_dump_registers = &hif_dummy_dump_registers;
 	bus_ops->hif_dump_target_memory = &hif_dummy_dump_target_memory;
+	bus_ops->hif_reg_read32 = &hif_dummy_bus_reg_read32;
+	bus_ops->hif_reg_write32 = &hif_dummy_bus_reg_write32;
 	bus_ops->hif_ipa_get_ce_resource = &hif_dummy_ipa_get_ce_resource;
 	bus_ops->hif_mask_interrupt_call = &hif_dummy_mask_interrupt_call;
 	bus_ops->hif_enable_power_management =
@@ -67,6 +69,7 @@ QDF_STATUS hif_initialize_usb_ops(struct hif_bus_ops *bus_ops)
 	bus_ops->hif_bus_reset_resume = &hif_usb_bus_reset_resume;
 	bus_ops->hif_map_ce_to_irq = &hif_dummy_map_ce_to_irq;
 	bus_ops->hif_needs_bmi = &hif_usb_needs_bmi;
+	bus_ops->hif_log_bus_info = &hif_dummy_log_bus_info;
 
 	return QDF_STATUS_SUCCESS;
 }

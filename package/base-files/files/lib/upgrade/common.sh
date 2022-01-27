@@ -125,7 +125,7 @@ kill_remaining() { # [ <signal> ]
 		else 
 			case "$name" in
 				# Skip essential services
-				*upgraded*|*procd*|*ash*|*init*|*watchdog*|*ssh*|*dropbear*|*telnet*|*login*|*hostapd*|*wpa_supplicant*|*nas*) : ;;
+				*upgraded*|*procd*|*ash*|*init*|*watchdog*|*ssh*|*dropbear*|*telnet*|*login*|*hostapd*|*wpa_supplicant*|*nas*|*ubus*|sh) : ;;
 
 				# Killable process
 				*)

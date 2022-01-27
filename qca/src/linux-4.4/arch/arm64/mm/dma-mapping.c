@@ -860,6 +860,8 @@ static bool do_iommu_attach(struct device *dev, const struct iommu_ops *ops,
 		/* Detach the one to arm-smmu and attach to fast-smmu */
 		iommu_detach_device(domain, dev);
 		mapping = kzalloc(sizeof(struct dma_iommu_mapping), GFP_KERNEL);
+		if (!mapping)
+			goto out_put_domain;
 		kref_init(&mapping->kref);
 		mapping->base = dma_base;
 		mapping->bits = BITS_PER_BYTE * bitmap_size;

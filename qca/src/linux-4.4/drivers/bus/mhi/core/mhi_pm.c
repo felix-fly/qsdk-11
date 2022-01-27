@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved. */
+/* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved. */
 
 #include <linux/debugfs.h>
 #include <linux/delay.h>
@@ -150,6 +150,7 @@ void mhi_set_mhi_state(struct mhi_controller *mhi_cntrl,
 			MHICTRL_MHISTATE_MASK, MHICTRL_MHISTATE_SHIFT, state);
 	}
 }
+EXPORT_SYMBOL(mhi_set_mhi_state);
 
 /* set device wake */
 void mhi_assert_dev_wake(struct mhi_controller *mhi_cntrl, bool force)
@@ -187,7 +188,10 @@ void mhi_deassert_dev_wake(struct mhi_controller *mhi_cntrl, bool override)
 {
 	unsigned long flags;
 
-	MHI_ASSERT(atomic_read(&mhi_cntrl->dev_wake) == 0, "dev_wake == 0");
+	//MHI_ASSERT(atomic_read(&mhi_cntrl->dev_wake) == 0, "dev_wake == 0");
+
+	if (atomic_read(&mhi_cntrl->dev_wake) == 0)
+		printk("%s dev_wake already 0, assert !!!\n", __func__);
 
 	/* resources not dropping to 0, decrement and exit */
 	if (likely(atomic_add_unless(&mhi_cntrl->dev_wake, -1, 1)))
@@ -205,33 +209,35 @@ void mhi_deassert_dev_wake(struct mhi_controller *mhi_cntrl, bool override)
 
 int mhi_ready_state_transition(struct mhi_controller *mhi_cntrl)
 {
-	void __iomem *base = mhi_cntrl->regs;
-	u32 reset = 1, ready = 0;
 	struct mhi_event *mhi_event;
 	enum MHI_PM_STATE cur_state;
+	u32 interval_us = 25000; /* poll register field every 25 milliseconds */
 	int ret, i;
 
 	MHI_LOG("Waiting to enter READY state\n");
 
-	/* wait for RESET to be cleared and READY bit to be set */
-	wait_event_timeout(mhi_cntrl->state_event,
-			   MHI_PM_IN_FATAL_STATE(mhi_cntrl->pm_state) ||
-			   mhi_read_reg_field(mhi_cntrl, base, MHICTRL,
-					      MHICTRL_RESET_MASK,
-					      MHICTRL_RESET_SHIFT, &reset) ||
-			   mhi_read_reg_field(mhi_cntrl, base, MHISTATUS,
-					      MHISTATUS_READY_MASK,
-					      MHISTATUS_READY_SHIFT, &ready) ||
-			   (!reset && ready),
-			   msecs_to_jiffies(mhi_cntrl->timeout_ms));
-
 	/* device enter into error state */
-	if (MHI_PM_IN_FATAL_STATE(mhi_cntrl->pm_state))
+	if (MHI_PM_IN_FATAL_STATE(mhi_cntrl->pm_state)) {
+		MHI_ERR("Device link is not accessible\n");
 		return -EIO;
+	}
 
-	/* device did not transition to ready state */
-	if (reset || !ready)
-		return -ETIMEDOUT;
+	/* Wait for RESET to be cleared and READY bit to be set by the device */
+	ret = mhi_poll_reg_field(mhi_cntrl, mhi_cntrl->regs, MHICTRL,
+				 MHICTRL_RESET_MASK, MHICTRL_RESET_SHIFT, 0,
+				 interval_us);
+	if (ret) {
+		MHI_ERR("Device failed to clear MHI Reset\n");
+		return ret;
+	}
+
+	ret = mhi_poll_reg_field(mhi_cntrl, mhi_cntrl->regs, MHISTATUS,
+				 MHISTATUS_READY_MASK, MHISTATUS_READY_SHIFT, 1,
+				 interval_us);
+	if (ret) {
+		MHI_ERR("Device failed to enter MHI Ready\n");
+		return ret;
+	}
 
 	MHI_LOG("Device in READY State\n");
 	write_lock_irq(&mhi_cntrl->pm_lock);
@@ -264,7 +270,7 @@ int mhi_ready_state_transition(struct mhi_controller *mhi_cntrl)
 			continue;
 
 		ring->wp = ring->base + ring->len - ring->el_size;
-		*ring->ctxt_wp = ring->iommu_base + ring->len - ring->el_size;
+		*ring->ctxt_wp = cpu_to_le64(ring->iommu_base + ring->len - ring->el_size);
 		/* needs to update to all cores */
 		smp_wmb();
 
@@ -380,8 +386,7 @@ void mhi_pm_m1_transition(struct mhi_controller *mhi_cntrl)
 			mhi_cntrl->wake_put(mhi_cntrl, false);
 			read_unlock_bh(&mhi_cntrl->pm_lock);
 		} else {
-			mhi_cntrl->status_cb(mhi_cntrl, mhi_cntrl->priv_data,
-					     MHI_CB_IDLE);
+			mhi_cntrl->status_cb(mhi_cntrl, MHI_CB_IDLE);
 		}
 	} else {
 		write_unlock_irq(&mhi_cntrl->pm_lock);
@@ -448,7 +453,7 @@ static int mhi_pm_mission_mode_transition(struct mhi_controller *mhi_cntrl)
 			continue;
 
 		ring->wp = ring->base + ring->len - ring->el_size;
-		*ring->ctxt_wp = ring->iommu_base + ring->len - ring->el_size;
+		*ring->ctxt_wp = cpu_to_le64(ring->iommu_base + ring->len - ring->el_size);
 		/* all ring updates must get updated immediately */
 		smp_wmb();
 
@@ -492,6 +497,7 @@ static void mhi_pm_disable_transition(struct mhi_controller *mhi_cntrl,
 	struct mhi_cmd *mhi_cmd;
 	struct mhi_event_ctxt *er_ctxt;
 	int ret, i;
+	u32 interval_us = 25000; /* poll register field every 25 milliseconds */
 
 	MHI_LOG("Enter with from pm_state:%s MHI_STATE:%s to pm_state:%s\n",
 		to_mhi_pm_state_str(mhi_cntrl->pm_state),
@@ -500,8 +506,7 @@ static void mhi_pm_disable_transition(struct mhi_controller *mhi_cntrl,
 
 	/* We must notify MHI control driver so it can clean up first */
 	if (transition_state == MHI_PM_SYS_ERR_PROCESS)
-		mhi_cntrl->status_cb(mhi_cntrl, mhi_cntrl->priv_data,
-				     MHI_CB_SYS_ERROR);
+		mhi_cntrl->status_cb(mhi_cntrl, MHI_CB_SYS_ERROR);
 
 	mutex_lock(&mhi_cntrl->pm_mutex);
 	write_lock_irq(&mhi_cntrl->pm_lock);
@@ -526,21 +531,20 @@ static void mhi_pm_disable_transition(struct mhi_controller *mhi_cntrl,
 
 	/* trigger MHI RESET so device will not access host ddr */
 	if (MHI_REG_ACCESS_VALID(prev_state)) {
-		u32 in_reset = -1;
-		unsigned long timeout = msecs_to_jiffies(mhi_cntrl->timeout_ms);
 
 		MHI_LOG("Trigger device into MHI_RESET\n");
+
 		mhi_set_mhi_state(mhi_cntrl, MHI_STATE_RESET);
 
 		/* wait for reset to be cleared */
-		ret = wait_event_timeout(mhi_cntrl->state_event,
-					 mhi_read_reg_field(mhi_cntrl,
-						mhi_cntrl->regs, MHICTRL,
-						MHICTRL_RESET_MASK,
-						MHICTRL_RESET_SHIFT, &in_reset)
-					 || !in_reset, timeout);
-		if ((!ret || in_reset) && cur_state == MHI_PM_SYS_ERR_PROCESS) {
-			MHI_CRITICAL("Device failed to exit RESET state\n");
+		ret = mhi_poll_reg_field(mhi_cntrl, mhi_cntrl->regs, MHICTRL,
+					 MHICTRL_RESET_MASK,
+					 MHICTRL_RESET_SHIFT, 0,
+					 interval_us);
+
+		if (ret && cur_state == MHI_PM_SYS_ERR_PROCESS) {
+			MHI_CRITICAL("Device failed to exit RESET ret:%d\n",
+					ret);
 			mutex_unlock(&mhi_cntrl->pm_mutex);
 			return;
 		}
@@ -637,8 +641,8 @@ int mhi_debugfs_trigger_reset(void *data, u64 val)
 	MHI_LOG("Trigger MHI Reset\n");
 
 	/* exit lpm first */
-	mhi_cntrl->runtime_get(mhi_cntrl, mhi_cntrl->priv_data);
-	mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+	mhi_cntrl->runtime_get(mhi_cntrl);
+	mhi_cntrl->runtime_put(mhi_cntrl);
 
 	ret = wait_event_timeout(mhi_cntrl->state_event,
 				 mhi_cntrl->dev_state == MHI_STATE_M0 ||
@@ -746,6 +750,7 @@ int mhi_async_power_up(struct mhi_controller *mhi_cntrl)
 	u32 val;
 	enum mhi_ee current_ee;
 	enum MHI_ST_TRANSITION next_state;
+	bool mhi_ssr_ramdump_negotiate;
 
 	MHI_LOG("Requested to power on\n");
 
@@ -805,16 +810,24 @@ int mhi_async_power_up(struct mhi_controller *mhi_cntrl)
 	current_ee = mhi_get_exec_env(mhi_cntrl);
 	write_unlock_irq(&mhi_cntrl->pm_lock);
 
-	/* confirm device is in valid exec env */
-	if (!MHI_IN_PBL(current_ee) && current_ee != MHI_EE_AMSS) {
-		MHI_ERR("Not a valid ee for power on\n");
-		ret = -EIO;
-		goto error_bhi_offset;
-	}
+	mhi_ssr_ramdump_negotiate = of_property_read_bool(mhi_cntrl->of_node,
+		"mhi,ssr-negotiate");
 
-	/* transition to next state */
-	next_state = MHI_IN_PBL(current_ee) ?
-		MHI_ST_TRANSITION_PBL : MHI_ST_TRANSITION_READY;
+	if (mhi_ssr_ramdump_negotiate) {
+		next_state = MHI_ST_TRANSITION_READY;
+	} else {
+
+		/* confirm device is in valid exec env */
+		if (!MHI_IN_PBL(current_ee) && current_ee != MHI_EE_AMSS) {
+			MHI_ERR("Not a valid ee for power on %d\n", current_ee);
+			ret = -EIO;
+			goto error_bhi_offset;
+		} else {
+			/* transition to next state */
+			next_state = MHI_IN_PBL(current_ee) ?
+				MHI_ST_TRANSITION_PBL : MHI_ST_TRANSITION_READY;
+		}
+	}
 
 	if (next_state == MHI_ST_TRANSITION_PBL)
 		schedule_work(&mhi_cntrl->fw_worker);
@@ -889,7 +902,7 @@ int mhi_sync_power_up(struct mhi_controller *mhi_cntrl)
 			   MHI_PM_IN_ERROR_STATE(mhi_cntrl->pm_state),
 			   msecs_to_jiffies(mhi_cntrl->timeout_ms));
 
-	return (MHI_IN_MISSION_MODE(mhi_cntrl->ee)) ? 0 : -EIO;
+	return (MHI_IN_MISSION_MODE(mhi_cntrl->ee)) ? 0 : -ETIMEDOUT;
 }
 EXPORT_SYMBOL(mhi_sync_power_up);
 
@@ -1064,8 +1077,8 @@ int __mhi_device_get_sync(struct mhi_controller *mhi_cntrl)
 	read_lock_bh(&mhi_cntrl->pm_lock);
 	mhi_cntrl->wake_get(mhi_cntrl, true);
 	if (MHI_PM_IN_SUSPEND_STATE(mhi_cntrl->pm_state)) {
-		mhi_cntrl->runtime_get(mhi_cntrl, mhi_cntrl->priv_data);
-		mhi_cntrl->runtime_put(mhi_cntrl, mhi_cntrl->priv_data);
+		mhi_cntrl->runtime_get(mhi_cntrl);
+		mhi_cntrl->runtime_put(mhi_cntrl);
 	}
 	read_unlock_bh(&mhi_cntrl->pm_lock);
 

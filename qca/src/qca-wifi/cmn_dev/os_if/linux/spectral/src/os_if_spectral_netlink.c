@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2017-2021 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -566,8 +566,6 @@ os_if_spectral_free_skb(struct wlan_objmgr_pdev *pdev,
 	ps->skb[smsg_type] = NULL;
 }
 
-qdf_export_symbol(os_if_spectral_free_skb);
-
 void
 os_if_spectral_netlink_init(struct wlan_objmgr_pdev *pdev)
 {
@@ -576,6 +574,11 @@ os_if_spectral_netlink_init(struct wlan_objmgr_pdev *pdev)
 
 	if (!pdev) {
 		osif_err("PDEV is NULL!");
+		return;
+	}
+
+	if (wlan_spectral_is_feature_disabled_pdev(pdev)) {
+		osif_err("Spectral feature is disabled");
 		return;
 	}
 
@@ -606,6 +609,11 @@ void os_if_spectral_netlink_deinit(struct wlan_objmgr_pdev *pdev)
 
 	if (!pdev) {
 		osif_err("PDEV is NULL!");
+		return;
+	}
+
+	if (wlan_spectral_is_feature_disabled_pdev(pdev)) {
+		osif_err("Spectral feature is disabled");
 		return;
 	}
 

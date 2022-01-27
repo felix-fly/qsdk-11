@@ -14,6 +14,24 @@ from parser_util import register_parser, RamParser
 
 @register_parser('--print-ftrace', 'Print the trace of fucntion', shortopt='-m')
 class Ftrace(RamParser):
+    def __init__(self, ramdump):
+        self.ramdump = ramdump
+
+        self.index_offset = 0
+        self.r_offset = 0
+        self.r_pa_offset = 0
+        self.ncpu_offset = 0
+        self.cpu_offset = 0
+
+        #struct srd_record
+        self.ip_offset = 0
+        self.srd_percpu_size = 0
+
+        #struct srd_percpu
+        self.srd_percpu_index_offset = 0
+        self.srd_percpu_size = 0
+
+        self.srd_ncpu = 0
 
     def getsrd(self):
         #struct silent_reboot_debug

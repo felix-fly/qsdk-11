@@ -17,13 +17,10 @@
 #include <linux/kernel.h>
 #include <linux/kref.h>
 #include <linux/mutex.h>
-#include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
-#include <linux/qcom_scm.h>
 #include <soc/qcom/secure_buffer.h>
 
-static void *qcom_secure_mem;
 DEFINE_MUTEX(secure_buffer_mutex);
 
 static int secure_buffer_change_chunk(u32 chunks, u32 nchunks,
@@ -36,6 +33,7 @@ static int secure_buffer_change_chunk(u32 chunks, u32 nchunks,
 	kmap_flush_unused();
 	kmap_atomic_flush_unused();
 
+	request.chunks.chunk_list = chunks;
 	request.chunks.chunk_list_size = nchunks;
 	request.chunks.chunk_size = chunk_size;
 	/* Usage is now always 0 */
@@ -170,38 +168,54 @@ populate_dest_info(int *dest_vmids, int nelements, int *dest_perms,
 }
 
 /* Must hold secure_buffer_mutex while allocated buffer is in use */
-static struct mem_prot_info *get_info_list_from_table(struct sg_table *table,
-						      size_t *size_in_bytes)
+unsigned int get_batches_from_sgl(struct mem_prot_info *sg_table_copy,
+				  struct scatterlist *sgl,
+				  struct scatterlist **next_sgl)
 {
-	int i;
-	struct scatterlist *sg;
-	struct mem_prot_info *info;
-	size_t size;
+	u64 batch_size = 0;
+	unsigned int i = 0;
+	struct scatterlist *curr_sgl = sgl;
 
-	size = table->nents * sizeof(*info);
+	/* Ensure no zero size batches */
+	do {
+		sg_table_copy[i].addr = page_to_phys(sg_page(curr_sgl));
+		sg_table_copy[i].size = curr_sgl->length;
+		batch_size += sg_table_copy[i].size;
+		curr_sgl = sg_next(curr_sgl);
+		i++;
+	} while (curr_sgl && i < BATCH_MAX_SECTIONS &&
+		 curr_sgl->length + batch_size < BATCH_MAX_SIZE);
 
-	if (size >= QCOM_SECURE_MEM_SIZE) {
-		pr_err("%s: Not enough memory allocated. Required size %zd\n",
-				__func__, size);
-		return NULL;
-	}
+	*next_sgl = curr_sgl;
+	return i;
+}
+EXPORT_SYMBOL(get_batches_from_sgl);
 
-	if (!qcom_secure_mem) {
-		pr_err("%s is not functional as qcom_secure_mem is not allocated.\n",
-				__func__);
-		return NULL;
-	}
+static int batched_hyp_assign(struct sg_table *table, u32 *source_vm_copy,
+			      size_t source_vm_copy_size,
+			      struct dest_vm_and_perm_info *dest_vm_copy,
+			      size_t dest_vm_copy_size,
+			      u32 *resp, size_t resp_size)
+{
+	int ret = 0;
+	struct mem_prot_info *sg_table_copy = kcalloc(BATCH_MAX_SECTIONS,
+						      sizeof(*sg_table_copy),
+						      GFP_KERNEL);
 
-	/* "Allocate" it */
-	info = qcom_secure_mem;
+	if (!sg_table_copy)
+		return -ENOMEM;
 
-	for_each_sg(table->sgl, sg, table->nents, i) {
-		info[i].addr = page_to_phys(sg_page(sg));
-		info[i].size = sg->length;
-	}
+	ret = qcom_scm_mem_prot_assign(table, source_vm_copy,
+				       source_vm_copy_size,
+				       dest_vm_copy, dest_vm_copy_size,
+				       sg_table_copy, resp, sizeof(resp));
 
-	*size_in_bytes = size;
-	return info;
+	if (ret)
+		pr_info("%s: Failed to assign memory protection, ret = %d\n",
+			__func__, ret);
+
+	kfree(sg_table_copy);
+	return ret;
 }
 
 int hyp_assign_table(struct sg_table *table,
@@ -214,9 +228,11 @@ int hyp_assign_table(struct sg_table *table,
 	size_t source_vm_copy_size;
 	struct dest_vm_and_perm_info *dest_vm_copy;
 	size_t dest_vm_copy_size;
-	struct mem_prot_info *sg_table_copy;
-	size_t sg_table_copy_size;
 	u32 resp;
+
+	if (!table || !table->sgl || !source_vm_list || !source_nelems ||
+	    !dest_vmids || !dest_perms || !dest_nelems)
+		return -EINVAL;
 
 	/*
 	 * We can only pass cache-aligned sizes to hypervisor, so we need
@@ -234,28 +250,20 @@ int hyp_assign_table(struct sg_table *table,
 					  &dest_vm_copy_size);
 	if (!dest_vm_copy) {
 		ret = -ENOMEM;
-		goto out_free;
+		goto out_free_source;
 	}
 
 	mutex_lock(&secure_buffer_mutex);
 
-	sg_table_copy = get_info_list_from_table(table, &sg_table_copy_size);
-	if (!sg_table_copy) {
-		ret = -ENOMEM;
-		goto out_unlock;
-	}
+	ret = batched_hyp_assign(table, source_vm_copy,
+				 source_vm_copy_size,
+				 dest_vm_copy, dest_vm_copy_size,
+				 &resp, sizeof(resp));
 
-	ret = qcom_scm_mem_prot_assign(table, source_vm_copy,
-				       source_vm_copy_size,
-				       dest_vm_copy, dest_vm_copy_size,
-				       sg_table_copy, sg_table_copy_size,
-				       &resp, sizeof(resp));
-
-out_unlock:
 	mutex_unlock(&secure_buffer_mutex);
 	kfree(dest_vm_copy);
 
-out_free:
+out_free_source:
 	kfree(source_vm_copy);
 	return ret;
 }
@@ -335,23 +343,3 @@ bool msm_secure_v2_is_supported(void)
 	 */
 	return (ret == 0) && (version >= MAKE_CP_VERSION(1, 1, 0));
 }
-
-static int __init alloc_secure_shared_memory(void)
-{
-	int ret = 0;
-	dma_addr_t dma_handle;
-
-	qcom_secure_mem = kzalloc(QCOM_SECURE_MEM_SIZE, GFP_KERNEL);
-	if (!qcom_secure_mem) {
-		/* Fallback to CMA-DMA memory */
-		qcom_secure_mem = dma_alloc_coherent(NULL, QCOM_SECURE_MEM_SIZE,
-						&dma_handle, GFP_KERNEL);
-		if (!qcom_secure_mem) {
-			pr_err("Couldn't allocate memory for secure use-cases. hyp_assign_table will not work\n");
-			return -ENOMEM;
-		}
-	}
-
-	return ret;
-}
-pure_initcall(alloc_secure_shared_memory);

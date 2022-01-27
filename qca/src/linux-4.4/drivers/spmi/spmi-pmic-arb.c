@@ -981,7 +981,18 @@ static struct platform_driver spmi_pmic_arb_driver = {
 		.of_match_table = spmi_pmic_arb_match_table,
 	},
 };
-module_platform_driver(spmi_pmic_arb_driver);
+
+static int __init spmi_pmic_arb_driver_init(void)
+{
+	return platform_driver_register(&spmi_pmic_arb_driver);
+}
+arch_initcall(spmi_pmic_arb_driver_init);
+
+static void __exit spmi_pmic_arb_driver_exit(void)
+{
+	 platform_driver_unregister(&spmi_pmic_arb_driver);
+}
+module_exit(spmi_pmic_arb_driver_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:spmi_pmic_arb");

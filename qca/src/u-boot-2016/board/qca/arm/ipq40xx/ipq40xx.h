@@ -54,18 +54,6 @@ typedef struct {
 } ipq40xx_edma_board_cfg_t;
 
 typedef struct {
-	int gpio;
-	unsigned int func;
-	unsigned int out;
-	unsigned int pull;
-	unsigned int drvstr;
-	unsigned int oe;
-	unsigned int gpio_vm;
-	unsigned int gpio_od_en;
-	unsigned int gpio_pu_res;
-} gpio_func_data_t;
-
-typedef struct {
 	unsigned int uart_dm_base;
 	gpio_func_data_t *dbg_uart_gpio;
 } uart_cfg_t;
@@ -81,6 +69,8 @@ void board_pci_init(int id);
 __weak void board_pcie_clock_init(int id) {}
 __weak void aquantia_phy_reset_init_done(void) {}
 __weak void aquantia_phy_reset_init(void) {}
+__weak void qgic_init(void) {}
+__weak void handle_noc_err(void) {}
 __weak int ipq_get_tz_version(char *version_name, int buf_size)
 {
 	return 1;

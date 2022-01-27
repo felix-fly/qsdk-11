@@ -315,6 +315,19 @@ config USB_G_PRINTER
 	  For more information, see Documentation/usb/gadget_printer.txt
 	  which includes sample code for accessing the device file.
 
+config USB_G_DIAG
+	tristate "Diag Gadget"
+	select USB_LIBCOMPOSITE
+	select USB_F_DIAG
+	help
+	  The Diag Gadget channels data between the USB host and a
+	  userspace program using the diag device. The user space
+	  program reads and writes the device file /dev/diag to
+	  receive or send diag data.
+
+	  Say "y" to link the driver statically, or "m" to build a
+	  dynamically linked module called "g_diag".
+
 if TTY
 
 config USB_CDC_COMPOSITE

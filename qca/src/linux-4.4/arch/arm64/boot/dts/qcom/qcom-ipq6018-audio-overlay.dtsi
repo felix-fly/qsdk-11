@@ -15,6 +15,25 @@
 #include <dt-bindings/sound/audio-codec-port-types.h>
 #include "qcom-ipq6018-audio.dtsi"
 
+/ {
+	aliases {
+		swr0 = &swr0;
+	};
+};
+
+&gecko_core_platform {
+	bolero: bolero-cdc {
+		compatible = "qcom,bolero-codec";
+		tx_macro: tx-macro@A460000 {
+		};
+
+		wsa_macro: wsa-macro@A480000 {
+			swr0: wsa_swr_master {
+			};
+		};
+	};
+};
+
 &bolero {
 	qcom,num-macros = <3>;
 	qcom,va-without-decimation;

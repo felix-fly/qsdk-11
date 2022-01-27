@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -316,7 +316,7 @@ struct nss_crypto_buf *nss_cryptoapi_sha_hmac_transform(struct ahash_request *re
 
 	nss_cfi_assert(ctx);
 
-	nss_cfi_dbg("src_vaddr: 0x%p, dst_vaddr: 0x%p\n",
+	nss_cfi_dbg("src_vaddr: 0x%px, dst_vaddr: 0x%px\n",
 			sg_virt(req->src), req->result);
 
 	/*

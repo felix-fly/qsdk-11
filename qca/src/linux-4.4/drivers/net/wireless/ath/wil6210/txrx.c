@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012-2017 Qualcomm Atheros, Inc.
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/etherdevice.h>
@@ -836,7 +836,9 @@ void wil_netif_rx(struct sk_buff *skb, struct net_device *ndev, int cid,
 			dev_kfree_skb(skb);
 			goto stats;
 		}
-	} else if (wdev->iftype == NL80211_IFTYPE_AP && !vif->ap_isolate) {
+	} else if (wdev->iftype == NL80211_IFTYPE_AP && !vif->ap_isolate &&
+		   /* pass EAPOL packets to local net stack only */
+		   (wil_skb_get_protocol(skb) != htons(ETH_P_PAE))) {
 		if (mcast) {
 			/* send multicast frames both to higher layers in
 			 * local net stack and back to the wireless medium
@@ -916,6 +918,7 @@ void wil_netif_rx_any(struct sk_buff *skb, struct net_device *ndev)
 {
 	int cid, security;
 	struct wil6210_priv *wil = ndev_to_wil(ndev);
+	struct wil6210_vif *vif = ndev_to_vif(ndev);
 	struct wil_net_stats *stats;
 
 	wil->txrx_ops.get_netif_rx_params(skb, &cid, &security);
@@ -923,6 +926,18 @@ void wil_netif_rx_any(struct sk_buff *skb, struct net_device *ndev)
 	stats = &wil->sta[cid].stats;
 
 	skb_orphan(skb);
+
+	/* pass only EAPOL packets as plaintext */
+	if (vif->privacy && !security &&
+	    wil_skb_get_protocol(skb) != htons(ETH_P_PAE)) {
+		wil_dbg_txrx(wil,
+			     "Rx drop plaintext frame with %d bytes in secure network\n",
+			     skb->len);
+		dev_kfree_skb(skb);
+		ndev->stats.rx_dropped++;
+		stats->rx_dropped++;
+		return;
+	}
 
 	if (security && (wil->txrx_ops.rx_crypto_check(wil, skb) != 0)) {
 		dev_kfree_skb(skb);
@@ -1060,7 +1075,8 @@ static int wil_tx_desc_map(union wil_tx_desc *desc, dma_addr_t pa,
 	return 0;
 }
 
-void wil_tx_data_init(struct wil_ring_tx_data *txdata)
+void wil_tx_data_init(const struct wil6210_priv *wil,
+		      struct wil_ring_tx_data *txdata)
 {
 	spin_lock_bh(&txdata->lock);
 	txdata->dot1x_open = 0;
@@ -1073,6 +1089,9 @@ void wil_tx_data_init(struct wil_ring_tx_data *txdata)
 	txdata->agg_amsdu = 0;
 	txdata->addba_in_progress = false;
 	txdata->mid = U8_MAX;
+	txdata->tx_reserved_count = wil->tx_reserved_entries;
+	txdata->tx_reserved_count_used = 0;
+	txdata->tx_reserved_count_not_avail = 0;
 	spin_unlock_bh(&txdata->lock);
 }
 
@@ -1128,7 +1147,7 @@ static int wil_vring_init_tx(struct wil6210_vif *vif, int id, int size,
 		goto out;
 	}
 
-	wil_tx_data_init(txdata);
+	wil_tx_data_init(wil, txdata);
 	vring->is_rx = false;
 	vring->size = size;
 	rc = wil_vring_alloc(wil, vring);
@@ -1297,7 +1316,7 @@ int wil_vring_init_bcast(struct wil6210_vif *vif, int id, int size)
 		goto out;
 	}
 
-	wil_tx_data_init(txdata);
+	wil_tx_data_init(wil, txdata);
 	vring->is_rx = false;
 	vring->size = size;
 	rc = wil_vring_alloc(wil, vring);
@@ -1946,6 +1965,20 @@ err_exit:
 	return rc;
 }
 
+static inline bool is_special_packet(const struct sk_buff *skb)
+{
+	if (skb->protocol == cpu_to_be16(ETH_P_ARP) ||
+	    skb->protocol == cpu_to_be16(ETH_P_RARP) ||
+	    (skb->protocol == cpu_to_be16(ETH_P_IP) &&
+	     ip_hdr(skb)->protocol == IPPROTO_ICMP) ||
+	    (skb->protocol == cpu_to_be16(ETH_P_IPV6) &&
+	     ipv6_hdr(skb)->nexthdr == IPPROTO_ICMPV6) ||
+	    skb->protocol == cpu_to_be16(ETH_P_PAE))
+		return true;
+
+	return false;
+}
+
 static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 			 struct wil_ring *ring, struct sk_buff *skb)
 {
@@ -1953,7 +1986,6 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 	struct vring_tx_desc dd, *d = &dd;
 	volatile struct vring_tx_desc *_d;
 	u32 swhead = ring->swhead;
-	int avail = wil_ring_avail_tx(ring);
 	int nr_frags = skb_shinfo(skb)->nr_frags;
 	uint f = 0;
 	int ring_index = ring - wil->ring_tx;
@@ -1963,6 +1995,11 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 	int used;
 	bool mcast = (ring_index == vif->bcast_ring);
 	uint len = skb_headlen(skb);
+	bool special_packet = (wil->tx_reserved_entries != 0 &&
+			       is_special_packet(skb));
+	int avail = wil_ring_avail_tx(ring) -
+		(special_packet ? 0 : txdata->tx_reserved_count);
+	u8 ctx_flags = special_packet ? WIL_CTX_FLAG_RESERVED_USED : 0;
 
 	wil_dbg_txrx(wil, "tx_ring: %d bytes to ring %d, nr_frags %d\n",
 		     skb->len, ring_index, nr_frags);
@@ -1971,9 +2008,17 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 		return -EINVAL;
 
 	if (unlikely(avail < 1 + nr_frags)) {
-		wil_err_ratelimited(wil,
-				    "Tx ring[%2d] full. No space for %d fragments\n",
-				    ring_index, 1 + nr_frags);
+		if (special_packet) {
+			txdata->tx_reserved_count_not_avail++;
+			wil_err_ratelimited(wil,
+					    "TX ring[%2d] full. No space for %d fragments for special packet. Tx-reserved-count is %d\n",
+					    ring_index, 1 + nr_frags,
+					    txdata->tx_reserved_count);
+		} else {
+			wil_err_ratelimited(wil,
+					    "Tx ring[%2d] full. No space for %d fragments\n",
+					    ring_index, 1 + nr_frags);
+		}
 		return -ENOMEM;
 	}
 	_d = &ring->va[i].tx.legacy;
@@ -1988,6 +2033,7 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 	if (unlikely(dma_mapping_error(dev, pa)))
 		return -EINVAL;
 	ring->ctx[i].mapped_as = wil_mapped_as_single;
+	ring->ctx[i].flags = ctx_flags;
 	/* 1-st segment */
 	wil->txrx_ops.tx_desc_map((union wil_tx_desc *)d, pa, len,
 				   ring_index);
@@ -2026,6 +2072,8 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 			goto dma_error;
 		}
 		ring->ctx[i].mapped_as = wil_mapped_as_page;
+		ring->ctx[i].flags = ctx_flags;
+
 		wil->txrx_ops.tx_desc_map((union wil_tx_desc *)d,
 					   pa, len, ring_index);
 		/* no need to check return code -
@@ -2056,6 +2104,14 @@ static int __wil_tx_ring(struct wil6210_priv *wil, struct wil6210_vif *vif,
 		txdata->idle += get_cycles() - txdata->last_idle;
 		wil_dbg_txrx(wil,  "Ring[%2d] not idle %d -> %d\n",
 			     ring_index, used, used + nr_frags + 1);
+	}
+
+	if (special_packet) {
+		txdata->tx_reserved_count -= (f + 1);
+		txdata->tx_reserved_count_used += (f + 1);
+		wil_dbg_txrx(wil,
+			     "Ring[%2d] tx_reserved_count: %d, reduced by %d\n",
+			     ring_index, txdata->tx_reserved_count, f + 1);
 	}
 
 	/* Make sure to advance the head only after descriptor update is done.

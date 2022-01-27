@@ -134,3 +134,7 @@ __WEAK int  target_get_key_status(uint32_t gpio)
 {
 	return 1;
 }
+
+__WEAK void crashdump_init(void)
+{
+}

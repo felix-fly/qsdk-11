@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -19,21 +19,52 @@
 
 #ifndef _WLAN_SPECTRAL_UTILS_API_H_
 #define _WLAN_SPECTRAL_UTILS_API_H_
-
+#ifdef WLAN_CONV_SPECTRAL_ENABLE
 #include <wlan_objmgr_cmn.h>
 #include <wlan_lmac_if_def.h>
 
 /* Forward declaration */
 struct direct_buf_rx_data;
-struct wmi_spectral_cmd_ops;
+struct spectral_wmi_ops;
+struct spectral_tgt_ops;
 
 /**
- * wlan_spectral_is_feature_disabled() - Check if spectral feature is disabled
- * @psoc - the physical device object.
+ * wlan_spectral_is_feature_disabled_pdev() - Check if spectral feature
+ * is disabled for a given pdev
+ * @pdev - pointer to pdev
  *
  * Return : true if spectral is disabled, else false.
  */
-bool wlan_spectral_is_feature_disabled(struct wlan_objmgr_psoc *psoc);
+bool wlan_spectral_is_feature_disabled_pdev(struct wlan_objmgr_pdev *pdev);
+
+/**
+ * wlan_spectral_is_feature_disabled_ini() - Check if spectral feature
+ * is disabled in INI
+ * @psoc - pointer to psoc
+ *
+ * Return : true if spectral is disabled, else false.
+ */
+bool wlan_spectral_is_feature_disabled_ini(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_is_feature_disabled_psoc() - Check if spectral feature
+ * is disabled for a given psoc
+ * @psoc - pointer to psoc
+ *
+ * Return : true if spectral is disabled, else false.
+ */
+bool wlan_spectral_is_feature_disabled_psoc(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_is_mode_disabled_pdev() - Check if a given spectral mode
+ * is disabled for a given pdev
+ * @pdev - pointer to pdev
+ * @smode - spectral scan mode
+ *
+ * Return : true if spectral mode is disabled, else false.
+ */
+bool wlan_spectral_is_mode_disabled_pdev(struct wlan_objmgr_pdev *pdev,
+					 enum spectral_scan_mode smode);
 
 /**
  * wlan_spectral_init() - API to init spectral component
@@ -71,28 +102,43 @@ void
 wlan_lmac_if_sptrl_register_rx_ops(struct wlan_lmac_if_rx_ops *rx_ops);
 
 /**
-* wlan_register_wmi_spectral_cmd_ops() - Register operations related to wmi
-* commands on spectral parameters
-* @pdev    - the physical device object
-* @cmd_ops - pointer to the structure holding the operations
-*	     related to wmi commands on spectral parameters
-*
-* API to register operations related to wmi commands on spectral parameters
-*
-* Return: None
+ * wlan_register_spectral_wmi_ops() - Register Spectral WMI operations
+ * @psoc - Pointer to psoc object
+ * @wmi_ops - pointer to the structure holding the Spectral WMI
+ *            operations
+ *
+ * API to register Spectral WMI operations
+ *
+ * Return: QDF_STATUS
 */
-void
-wlan_register_wmi_spectral_cmd_ops(struct wlan_objmgr_pdev *pdev,
-				   struct wmi_spectral_cmd_ops *cmd_ops);
+QDF_STATUS
+wlan_register_spectral_wmi_ops(struct wlan_objmgr_psoc *psoc,
+			       struct spectral_wmi_ops *wmi_ops);
+
+/**
+ * wlan_register_spectral_tgt_ops() - Register Spectral target operations
+ * @psoc - Pointer to psoc object
+ * @tgt_ops - pointer to the structure holding the Spectral target
+ *            operations
+ *
+ * API to register Spectral target operations
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_register_spectral_tgt_ops(struct wlan_objmgr_psoc *psoc,
+			       struct spectral_tgt_ops *tgt_ops);
 
 /**
  * struct spectral_legacy_cbacks - Spectral legacy callbacks
  * @vdev_get_chan_freq:          Get channel frequency
+ * @vdev_get_chan_freq_seg2:     Get secondary 80 center frequency
  * @vdev_get_ch_width:           Get channel width
  * @vdev_get_sec20chan_freq_mhz: Get seconadry 20 frequency
  */
 struct spectral_legacy_cbacks {
 	int16_t (*vdev_get_chan_freq)(struct wlan_objmgr_vdev *vdev);
+	int16_t (*vdev_get_chan_freq_seg2)(struct wlan_objmgr_vdev *vdev);
 	enum phy_ch_width (*vdev_get_ch_width)(struct wlan_objmgr_vdev *vdev);
 	int (*vdev_get_sec20chan_freq_mhz)(struct wlan_objmgr_vdev *vdev,
 					   uint16_t *sec20chan_freq);
@@ -105,6 +151,14 @@ struct spectral_legacy_cbacks {
  * Return: vdev operating frequency
  */
 int16_t spectral_vdev_get_chan_freq(struct wlan_objmgr_vdev *vdev);
+
+/**
+ * spectral_vdev_get_chan_freq_seg2 - Get vdev's secondary 80 center frequency
+ * @vdev: vdev object
+ *
+ * Return: vdev secondary 80 center frequency
+ */
+int16_t spectral_vdev_get_chan_freq_seg2(struct wlan_objmgr_vdev *vdev);
 
 /**
  * spectral_vdev_get_sec20chan_freq_mhz - Get vdev secondary channel frequency
@@ -155,6 +209,50 @@ spectral_vdev_get_ch_width(struct wlan_objmgr_vdev *vdev);
 QDF_STATUS spectral_pdev_open(struct wlan_objmgr_pdev *pdev);
 
 /**
+ * wlan_spectral_psoc_open() - Spectral psoc open handler
+ * @psoc:  pointer to psoc object
+ *
+ * API to execute operations on psoc open
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful registration,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_psoc_open(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_psoc_close() - Spectral psoc close handler
+ * @psoc:  pointer to psoc object
+ *
+ * API to execute operations on psoc close
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful registration,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_psoc_close(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_psoc_enable() - Spectral psoc enable handler
+ * @psoc:  pointer to psoc object
+ *
+ * API to execute operations on psoc enable
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful registration,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_psoc_enable(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_psoc_disable() - Spectral psoc disable handler
+ * @psoc:  pointer to psoc object
+ *
+ * API to execute operations on psoc disable
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful registration,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_psoc_disable(struct wlan_objmgr_psoc *psoc);
+
+/**
  * spectral_register_dbr() - register Spectral event handler with DDMA
  * @pdev:  pointer to pdev object
  *
@@ -177,6 +275,43 @@ QDF_STATUS spectral_register_dbr(struct wlan_objmgr_pdev *pdev);
  */
 QDF_STATUS spectral_unregister_dbr(struct wlan_objmgr_pdev *pdev);
 
+/**
+ * wlan_spectral_init_pdev_feature_caps() - API to initialize
+ * spectral pdev feature caps
+ * @pdev:  pointer to pdev object
+ *
+ * API to initialize Spectral feature caps for a given pdev.
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful initialization,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_init_pdev_feature_caps(struct wlan_objmgr_pdev *pdev);
+
+/**
+ * wlan_spectral_init_psoc_feature_cap() - API to initialize
+ * spectral psoc feature caps
+ * @psoc:  pointer to psoc object
+ *
+ * API to initialize Spectral feature caps for a given psoc.
+ *
+ * Return: QDF_STATUS_SUCCESS upon successful initialization,
+ *         QDF_STATUS_E_FAILURE upon failure
+ */
+QDF_STATUS wlan_spectral_init_psoc_feature_cap(struct wlan_objmgr_psoc *psoc);
+
+/**
+ * wlan_spectral_pdev_get_lmac_if_txops() - API to get pointer
+ * to Spectral txops structure
+ * @pdev:  pointer to pdev object
+ *
+ * API to get pointer to Spectral txops structure
+ *
+ * Return: Pointer to Spectral txops structure, NULL in case of
+ *         error.
+ */
+struct wlan_lmac_if_sptrl_tx_ops *
+wlan_spectral_pdev_get_lmac_if_txops(struct wlan_objmgr_pdev *pdev);
+
 #ifdef DIRECT_BUF_RX_ENABLE
 /**
  * spectral_dbr_event_handler() - Spectral dbr event handler
@@ -190,4 +325,5 @@ QDF_STATUS spectral_unregister_dbr(struct wlan_objmgr_pdev *pdev);
 bool spectral_dbr_event_handler(struct wlan_objmgr_pdev *pdev,
 				struct direct_buf_rx_data *payload);
 #endif
+#endif /* WLAN_CONV_SPECTRAL_ENABLE */
 #endif /* _WLAN_SPECTRAL_UTILS_API_H_*/

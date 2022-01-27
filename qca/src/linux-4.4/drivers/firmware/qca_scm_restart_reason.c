@@ -14,6 +14,7 @@
  *
  */
 
+#include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -81,6 +82,9 @@ static void scm_restart_reason_rpm_cold_restart (enum reboot_mode reboot_mode,
 	ret = msm_rpm_wait_for_ack(msg_id);
 	if (ret)
 		pr_err("%s wait for rpm ack failed %d\n", __func__, ret);
+
+	/* Give a grace period for failure to restart of 1s */
+	mdelay(1000);
 }
 
 static void scm_restart_dload_mode_disable(void)

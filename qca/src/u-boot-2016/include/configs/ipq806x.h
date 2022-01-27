@@ -143,6 +143,9 @@
 #define QCA_BOOT_PARAMS_ADDR		(QCA_KERNEL_START_ADDR + 0x100)
 #define CONFIG_QCA_SMEM_BASE		CONFIG_SYS_SDRAM_BASE + 0x1000000
 
+#define CONFIG_QCA_UBOOT_OFFSET		0x1D00000
+#define CONFIG_UBOOT_END_ADDR		0x42100000
+
 #define CONFIG_OF_COMBINE		1
 
 #define CONFIG_CMD_BOOTZ
@@ -344,7 +347,6 @@ typedef struct {
  * Cache flush and invalidation based on L1 cache, so the cache line
  * size is configured to 64 */
 #define CONFIG_SYS_CACHELINE_SIZE  64
-#define CONFIG_CMD_CACHE
 /*#define CONFIG_SYS_DCACHE_OFF*/
 
 /* Enabling this flag will report any L2 errors.

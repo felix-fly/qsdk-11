@@ -16,6 +16,7 @@
 #define __MSM_SECURE_BUFFER_H__
 
 #include <linux/scatterlist.h>
+#include <linux/qcom_scm.h>
 
 /*
  * if you add a secure VMID here make sure you update
@@ -57,6 +58,9 @@ int hyp_assign_table(struct sg_table *table,
 extern int hyp_assign_phys(phys_addr_t addr, u64 size,
 			u32 *source_vmlist, int source_nelems,
 			int *dest_vmids, int *dest_perms, int dest_nelems);
+extern unsigned int get_batches_from_sgl(struct mem_prot_info *sg_table_copy,
+					 struct scatterlist *sgl,
+					 struct scatterlist **next_sgl);
 bool msm_secure_v2_is_supported(void);
 const char *msm_secure_vmid_to_string(int secure_vmid);
 #else
@@ -78,6 +82,13 @@ static inline int hyp_assign_table(struct sg_table *table,
 static inline int hyp_assign_phys(phys_addr_t addr, u64 size,
 			u32 *source_vmlist, int source_nelems,
 			int *dest_vmids, int *dest_perms, int dest_nelems)
+{
+	return -ENOSYS;
+}
+
+static inline unsigned int get_batches_from_sgl(struct mem_prot_info *sg_table_copy,
+						struct scatterlist *sgl,
+						struct scatterlist **next_sgl)
 {
 	return -ENOSYS;
 }

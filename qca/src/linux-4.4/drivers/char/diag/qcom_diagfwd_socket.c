@@ -59,6 +59,9 @@
 struct qmi_handle *cntl_qmi;
 static uint64_t bootup_req[NUM_SOCKET_SUBSYSTEMS];
 
+static unsigned long peripheral_mask = BIT(PERIPHERAL_WCNSS);
+module_param(peripheral_mask, ulong, S_IRUGO | S_IWUSR | S_IWGRP);
+
 struct diag_socket_info socket_data[NUM_PERIPHERALS] = {
 	{
 		.peripheral = PERIPHERAL_MODEM,
@@ -371,11 +374,13 @@ static void socket_open_client(struct diag_socket_info *info)
 	if (!info || info->port_type != PORT_TYPE_CLIENT)
 		return;
 
-	ret = sock_create(AF_QIPCRTR, SOCK_DGRAM, PF_QIPCRTR, &info->hdl);
-	if (ret < 0 || !info->hdl) {
-		pr_err("diag: In %s, socket not initialized for %s\n", __func__,
-		       info->name);
-		return;
+	if (!info->hdl) {
+		ret = sock_create(AF_QIPCRTR, SOCK_DGRAM, PF_QIPCRTR, &info->hdl);
+		if (ret < 0 || !info->hdl) {
+			pr_err("diag: In %s, socket not initialized for %s\n",
+							__func__, info->name);
+			return;
+		}
 	}
 
 	write_lock_bh(&info->hdl->sk->sk_callback_lock);
@@ -467,10 +472,14 @@ static void __socket_close_channel(struct diag_socket_info *info)
 	info->hdl->sk->sk_data_ready = NULL;
 	info->hdl->sk->sk_error_report = NULL;
 	write_unlock_bh(&info->hdl->sk->sk_callback_lock);
-	sock_release(info->hdl);
-	info->hdl = NULL;
 
-	cancel_work_sync(&info->read_work);
+	/*
+	 * Do not release socket. Release it whenever go for rmmod
+	 * sock_release(info->hdl);
+	 * info->hdl = NULL;
+	 *
+	 * cancel_work_sync(&info->read_work);
+	 */
 	wake_up_interruptible(&info->read_wait_q);
 
 	spin_lock_irqsave(&info->lock, flags);
@@ -898,6 +907,8 @@ static struct diag_socket_info *diag_get_svc_sock_info(struct qmi_service *svc)
 
 	inst = svc->version | (svc->instance << 8);
 	for (i = 0; i < NUM_PERIPHERALS; i++) {
+		if (!test_bit(i, &peripheral_mask))
+			continue;
 		if ((svc->service == socket_cmd[i].svc_id) &&
 		    (inst == socket_cmd[i].ins_id)) {
 			info = &socket_cmd[i];
@@ -950,6 +961,8 @@ static struct qmi_ops diag_qmi_cntl_ops = {
 	.del_server = diag_del_server,
 };
 
+static void *diag_subsys_handle =  NULL;
+
 int diag_socket_init(void)
 {
 	struct diag_socket_info *info = NULL;
@@ -960,6 +973,10 @@ int diag_socket_init(void)
 	int i;
 
 	for (peripheral = 0; peripheral < NUM_PERIPHERALS; peripheral++) {
+		pr_err("TRACK: P[%d]\tPMask[%lu]\n", peripheral, peripheral_mask);
+		if (!test_bit(peripheral, &peripheral_mask))
+			continue;
+
 		info = &socket_cntl[peripheral];
 		__diag_socket_init(&socket_cntl[peripheral]);
 
@@ -973,8 +990,12 @@ int diag_socket_init(void)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(restart_notifiers); i++) {
+		if (!test_bit(i, &peripheral_mask))
+			continue;
+
 		nb = &restart_notifiers[i];
 		handle = subsys_notif_register_notifier(nb->name, &nb->nb);
+		diag_subsys_handle = handle;
 		DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
 			 "%s: registering notifier for '%s', handle=%p\n",
 			 __func__, nb->name, handle);
@@ -990,10 +1011,12 @@ int diag_socket_init(void)
 		goto fail;
 
 	for (peripheral = 0; peripheral < NUM_PERIPHERALS; peripheral++) {
+		if (!test_bit(peripheral, &peripheral_mask))
+			continue;
 		info = &socket_cmd[peripheral];
 		pr_info("nik %d info->svc_id\n", info->svc_id);
 		qmi_add_lookup(cntl_qmi, info->svc_id,
-			       info->ins_id & 0xFF, info->ins_id >> 8);
+				info->ins_id & 0xFF, info->ins_id >> 8);
 
 		info = &socket_dci_cmd[peripheral];
 		qmi_add_lookup(cntl_qmi, info->svc_id,
@@ -1004,9 +1027,22 @@ int diag_socket_init(void)
 
 		info = &socket_data[peripheral];
 		socket_init_work_fn(&info->init_work);
+		/* Read function should always be there after server init,
+		 * otherwise there could be loss of packets and eventually
+		 * memory leak in kernel*/
+		diagfwd_register(TRANSPORT_SOCKET, info->peripheral,
+				info->type, (void *)info, &socket_ops,
+				&info->fwd_ctxt);
+		diagfwd_open(peripheral, TYPE_DATA);
+		queue_work(info->wq, &(info->read_work));
 
 		info = &socket_dci[peripheral];
 		socket_init_work_fn(&info->init_work);
+		diagfwd_register(TRANSPORT_SOCKET, info->peripheral,
+				info->type, (void *)info, &socket_ops,
+				&info->fwd_ctxt);
+		diagfwd_open(peripheral, TYPE_DCI);
+		queue_work(info->wq, &(info->read_work));
 	}
 	DIAG_LOG(DIAG_DEBUG_PERIPHERALS, "%s: init done\n", __func__);
 
@@ -1043,6 +1079,7 @@ static void __diag_socket_exit(struct diag_socket_info *info)
 	if (info->hdl)
 		sock_release(info->hdl);
 	info->hdl = NULL;
+	wake_up_interruptible(&info->read_wait_q);
 	if (info->wq)
 		destroy_workqueue(info->wq);
 }
@@ -1050,12 +1087,28 @@ static void __diag_socket_exit(struct diag_socket_info *info)
 void diag_socket_exit(void)
 {
 	int i;
+	struct restart_notifier_block *nb;
 
 	if (cntl_qmi) {
 		qmi_handle_release(cntl_qmi);
 		kfree(cntl_qmi);
 	}
+
+	for (i = 0; i < ARRAY_SIZE(restart_notifiers); i++) {
+		if (!test_bit(i, &peripheral_mask))
+			continue;
+
+		nb = &restart_notifiers[i];
+		if (diag_subsys_handle)
+			subsys_notif_unregister_notifier(diag_subsys_handle, &nb->nb);
+	}
+
+	diag_subsys_handle = NULL;
+
 	for (i = 0; i < NUM_PERIPHERALS; i++) {
+		if (!test_bit(i, &peripheral_mask))
+			continue;
+
 		__diag_socket_exit(&socket_cntl[i]);
 		__diag_socket_exit(&socket_data[i]);
 		__diag_socket_exit(&socket_cmd[i]);

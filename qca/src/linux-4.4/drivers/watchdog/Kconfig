@@ -539,7 +539,7 @@ config QCOM_WDT
 
 config QCA_MINIDUMP
 	bool "QCA minidump feature"
-	depends on QCOM_WDT
+	depends on QCOM_WDT && KALLSYMS
 	help
 	  Say Y here to include QCA minidump feature.
 	  This feature enables dumping desired regions

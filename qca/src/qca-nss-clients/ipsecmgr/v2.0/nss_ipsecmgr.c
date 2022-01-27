@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -67,6 +67,15 @@ struct nss_ipsecmgr_drv *ipsecmgr_drv;
 static const struct net_device_ops nss_ipsecmgr_dummy_ndev_ops;
 
 /*
+ * nss_ipsecmgr_dummy_free()
+ *	Setup function for dummy netdevice.
+ */
+static void nss_ipsecmgr_dummy_free(struct net_device *dev)
+{
+	free_netdev(dev);
+}
+
+/*
  * nss_ipsecmgr_dummy_setup()
  *	Setup function for dummy netdevice.
  */
@@ -77,6 +86,11 @@ static void nss_ipsecmgr_dummy_setup(struct net_device *dev)
 	 * transform.
 	 */
 	dev->mtu = ETH_DATA_LEN;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 11, 8))
+	dev->destructor = nss_ipsecmgr_dummy_free;
+#else
+	dev->priv_destructor = nss_ipsecmgr_dummy_free;
+#endif
 }
 
 /*
@@ -86,7 +100,7 @@ static void nss_ipsecmgr_dummy_setup(struct net_device *dev)
 static void nss_ipsecmgr_rx_notify(void *app_data, struct nss_cmn_msg *ncm)
 {
 	struct net_device *dev = app_data;
-	nss_ipsecmgr_warn("%p: Notification received on base node", netdev_priv(dev));
+	nss_ipsecmgr_warn("%px: Notification received on base node", netdev_priv(dev));
 }
 
 /*
@@ -96,12 +110,9 @@ static void nss_ipsecmgr_rx_notify(void *app_data, struct nss_cmn_msg *ncm)
 static void nss_ipsecmgr_configure(struct work_struct *work)
 {
 	enum nss_ipsec_cmn_msg_type type = NSS_IPSEC_CMN_MSG_TYPE_NODE_CONFIG;
-	struct nss_ipsecmgr_tunnel *tun = netdev_priv(ipsecmgr_drv->dev);
 	uint32_t ifnum = ipsecmgr_drv->ifnum;
 	struct nss_ipsec_cmn_msg nicm = {0};
-	struct nss_ipsecmgr_ctx *redir;
 	nss_tx_status_t status;
-	uint32_t vsi_num = 0;
 
 	/*
 	 * By making sure that cryptoapi is registered,
@@ -126,7 +137,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 	 */
 	status = nss_ipsec_cmn_tx_msg_sync(ipsecmgr_drv->nss_ctx, ifnum, type, sizeof(nicm.msg.node), &nicm);
 	if (status != NSS_TX_SUCCESS) {
-		nss_ipsecmgr_trace("%p: failed to configure IPsec in NSS(%u)", ipsecmgr_drv, status);
+		nss_ipsecmgr_trace("%px: failed to configure IPsec in NSS(%u)", ipsecmgr_drv, status);
 		/*
 		 * TODO: We need unwind in case of failure
 		 */
@@ -139,6 +150,10 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 	if (ipsecmgr_drv->ipsec_inline) {
 
 #ifdef NSS_IPSECMGR_PPE_SUPPORT
+		struct nss_ipsecmgr_tunnel *tun = netdev_priv(ipsecmgr_drv->dev);
+		struct nss_ipsecmgr_ctx *redir;
+		uint32_t vsi_num = 0;
+
 		redir = nss_ipsecmgr_ctx_alloc(tun,
 						NSS_IPSEC_CMN_CTX_TYPE_REDIR,
 						NSS_DYNAMIC_INTERFACE_TYPE_IPSEC_CMN_REDIRECT,
@@ -146,7 +161,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 						nss_ipsecmgr_ctx_rx_stats,
 						0);
 		if (!redir) {
-			nss_ipsecmgr_warn("%p: failed to allocate redirect context; disabling inline", tun);
+			nss_ipsecmgr_warn("%px: failed to allocate redirect context; disabling inline", tun);
 			ipsecmgr_drv->ipsec_inline = false;
 			return;
 		}
@@ -154,7 +169,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 		nss_ipsecmgr_ctx_set_except(redir, redir->ifnum);
 
 		if (!nss_ipsecmgr_ctx_config(redir)) {
-			nss_ipsecmgr_warn("%p: failed to configure redirect context; disabling inline", tun);
+			nss_ipsecmgr_warn("%px: failed to configure redirect context; disabling inline", tun);
 			ipsecmgr_drv->ipsec_inline = false;
 			nss_ipsecmgr_ctx_free(redir);
 			return;
@@ -164,7 +179,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 		 * Get port's default VSI.
 		 */
 		if (ppe_port_vsi_get(0, NSS_PPE_PORT_IPSEC, &vsi_num)) {
-			nss_ipsecmgr_warn("%p: Failed to get port VSI", ipsecmgr_drv);
+			nss_ipsecmgr_warn("%px: Failed to get port VSI", ipsecmgr_drv);
 			nss_ipsecmgr_ctx_free(redir);
 			ipsecmgr_drv->ipsec_inline = false;
 			return;
@@ -175,7 +190,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 		 * exception packets from inline path
 		 */
 		if (!nss_ipsec_cmn_ppe_port_config(ipsecmgr_drv->nss_ctx, ipsecmgr_drv->dev, redir->ifnum, vsi_num)) {
-			nss_ipsecmgr_warn("%p: Failed to configure PPE inline mode", ipsecmgr_drv);
+			nss_ipsecmgr_warn("%px: Failed to configure PPE inline mode", ipsecmgr_drv);
 			nss_ipsecmgr_ctx_free(redir);
 			ipsecmgr_drv->ipsec_inline = false;
 			return;
@@ -187,7 +202,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 #endif
 	}
 
-	nss_ipsecmgr_trace("%p: Configure node msg successful", ipsecmgr_drv);
+	nss_ipsecmgr_trace("%px: Configure node msg successful", ipsecmgr_drv);
 	return;
 }
 
@@ -198,7 +213,7 @@ static void nss_ipsecmgr_configure(struct work_struct *work)
 static int __init nss_ipsecmgr_init(void)
 {
 	struct nss_ipsecmgr_tunnel *tun;
-	struct net_device *dev;
+	struct net_device *dev = NULL;
 	int status;
 
 	ipsecmgr_drv = vzalloc(sizeof(*ipsecmgr_drv));
@@ -209,7 +224,7 @@ static int __init nss_ipsecmgr_init(void)
 
 	ipsecmgr_drv->nss_ctx = nss_ipsec_cmn_get_context();
 	if (!ipsecmgr_drv->nss_ctx) {
-		nss_ipsecmgr_warn("%p: Failed to retrieve NSS context", ipsecmgr_drv);
+		nss_ipsecmgr_warn("%px: Failed to retrieve NSS context", ipsecmgr_drv);
 		goto free;
 	}
 
@@ -219,7 +234,7 @@ static int __init nss_ipsecmgr_init(void)
 
 	dev = alloc_netdev(sizeof(*tun), NSS_IPSECMGR_DEFAULT_TUN_NAME, NET_NAME_UNKNOWN, nss_ipsecmgr_dummy_setup);
 	if (!dev) {
-		nss_ipsecmgr_warn("%p: Failed to allocate dummy netdevice", ipsecmgr_drv);
+		nss_ipsecmgr_warn("%px: Failed to allocate dummy netdevice", ipsecmgr_drv);
 		goto free;
 	}
 
@@ -235,8 +250,8 @@ static int __init nss_ipsecmgr_init(void)
 
 	status = register_netdev(dev);
 	if (status) {
-		nss_ipsecmgr_info("%p: Failed to register dummy netdevice(%p)", ipsecmgr_drv, dev);
-		goto netdev_free;
+		nss_ipsecmgr_info("%px: Failed to register dummy netdevice(%px)", ipsecmgr_drv, dev);
+		goto free;
 	}
 
 	ipsecmgr_drv->dev = dev;
@@ -254,16 +269,9 @@ static int __init nss_ipsecmgr_init(void)
 	 * Initialize debugfs.
 	 */
 	ipsecmgr_drv->dentry = debugfs_create_dir("qca-nss-ipsecmgr", NULL);
-	if (!ipsecmgr_drv->dentry) {
-		nss_ipsecmgr_warn("%p: Failed to create root debugfs entry", ipsecmgr_drv);
-		nss_ipsec_cmn_notify_unregister(ipsecmgr_drv->nss_ctx, ipsecmgr_drv->ifnum);
-		goto unregister_dev;
+	if (ipsecmgr_drv->dentry) {
+		tun->dentry = debugfs_create_dir(dev->name, ipsecmgr_drv->dentry);
 	}
-
-	/*
-	 * Create debugfs entry for tunnel
-	 */
-	tun->dentry = debugfs_create_dir(dev->name, ipsecmgr_drv->dentry);
 
 	/*
 	 * Configure inline mode and the DMA rings.
@@ -279,16 +287,13 @@ static int __init nss_ipsecmgr_init(void)
 	nss_ipsecmgr_info("NSS IPsec manager loaded: %s\n", NSS_CLIENT_BUILD_ID);
 	return 0;
 
-unregister_dev:
-	unregister_netdev(ipsecmgr_drv->dev);
-
-netdev_free:
-	free_netdev(ipsecmgr_drv->dev);
-
 free:
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 11, 8))
+	if (dev)
+		dev->destructor(dev);
+#endif
 	vfree(ipsecmgr_drv);
 	ipsecmgr_drv = NULL;
-
 	return -1;
 }
 
@@ -306,7 +311,7 @@ static void __exit nss_ipsecmgr_exit(void)
 	}
 
 	if (!ipsecmgr_drv->nss_ctx) {
-		nss_ipsecmgr_warn("%p: NSS Context empty", ipsecmgr_drv);
+		nss_ipsecmgr_warn("%px: NSS Context empty", ipsecmgr_drv);
 		goto free;
 	}
 

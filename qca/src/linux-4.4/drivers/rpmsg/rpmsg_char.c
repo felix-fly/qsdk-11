@@ -298,7 +298,7 @@ static ssize_t name_show(struct device *dev, struct device_attribute *attr,
 {
 	struct rpmsg_eptdev *eptdev = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%s\n", eptdev->chinfo.name);
+	return snprintf(buf, PAGE_SIZE, "%s\n", eptdev->chinfo.name);
 }
 static DEVICE_ATTR_RO(name);
 
@@ -307,7 +307,7 @@ static ssize_t src_show(struct device *dev, struct device_attribute *attr,
 {
 	struct rpmsg_eptdev *eptdev = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", eptdev->chinfo.src);
+	return snprintf(buf, PAGE_SIZE, "%d\n", eptdev->chinfo.src);
 }
 static DEVICE_ATTR_RO(src);
 
@@ -316,7 +316,7 @@ static ssize_t dst_show(struct device *dev, struct device_attribute *attr,
 {
 	struct rpmsg_eptdev *eptdev = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", eptdev->chinfo.dst);
+	return snprintf(buf, PAGE_SIZE, "%d\n", eptdev->chinfo.dst);
 }
 static DEVICE_ATTR_RO(dst);
 

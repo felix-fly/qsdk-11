@@ -21,6 +21,7 @@
 #define RMNET_DATA_NEEDED_HEADROOM      16
 #define RMNET_DATA_TX_QUEUE_LEN         1000
 #define RMNET_ETHERNET_HEADER_LENGTH    14
+#define RMNET_QMAP_HEADER_LENGTH        4
 
 extern unsigned int rmnet_data_log_level;
 extern unsigned int rmnet_data_log_module_mask;

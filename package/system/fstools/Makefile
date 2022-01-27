@@ -31,8 +31,10 @@ include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
 
 TARGET_CFLAGS += -fpie
+TARGET_CFLAGS += $(if $(CONFIG_LOWMEM_FLASH),-DLOWMEM_FLASH)
 TARGET_LDFLAGS += $(if $(CONFIG_USE_GLIBC),-lrt) -pie
 CMAKE_OPTIONS += $(if $(CONFIG_FSTOOLS_UBIFS_EXTROOT),-DCMAKE_UBIFS_EXTROOT=y)
+CMAKE_OPTIONS += $(if $(CONFIG_LOWMEM_FLASH),-DCMAKE_LOWMEM_FLASH=y)
 
 define Package/fstools
   SECTION:=base
@@ -59,13 +61,27 @@ define Package/block-mount
   DEPENDS:=+ubox +libubox +libuci
 endef
 
+define Package/snapshot_tool
+  SECTION:=base
+  CATEGORY:=Base system
+  TITLE:=Base system snapshot_tool
+  DEPENDS:=+fstools
+endef
+
 define Package/fstools/install
 	$(INSTALL_DIR) $(1)/sbin $(1)/lib
 
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/{mount_root,jffs2reset,snapshot_tool} $(1)/sbin/
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/mount_root $(1)/sbin/
 	$(INSTALL_DATA) $(PKG_INSTALL_DIR)/usr/lib/libfstools.so $(1)/lib/
-	$(INSTALL_BIN) ./files/snapshot $(1)/sbin/
+ifeq ($(CONFIG_LOWMEM_FLASH),)
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/jffs2reset $(1)/sbin/
 	$(LN) jffs2reset $(1)/sbin/jffs2mark
+endif
+endef
+
+define Package/snapshot_tool/install
+	$(INSTALL_DIR) $(1)/sbin
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/snapshot_tool $(1)/sbin/
 endef
 
 define Package/block-mount/install
@@ -91,3 +107,4 @@ endef
 
 $(eval $(call BuildPackage,fstools))
 $(eval $(call BuildPackage,block-mount))
+$(eval $(call BuildPackage,snapshot_tool))

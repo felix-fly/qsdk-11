@@ -998,12 +998,12 @@ static int test_aead(struct aead_testvec *template, unsigned int tcount,
 	ret = __test_aead(template, tcount, enc, false, 0, driver, type, mask);
 	if (ret)
 		return ret;
-#ifdef CONFIG_CRYPTO_ALL_CASES
+
 	/* test 'dst != src' case */
 	ret = __test_aead(template, tcount, enc, true, 0, driver, type, mask);
 	if (ret)
 		return ret;
-
+#ifdef CONFIG_CRYPTO_ALL_CASES
 	/* test unaligned buffers, check with one byte offset */
 	ret = __test_aead(template, tcount, enc, true, 1, driver, type, mask);
 	if (ret)
@@ -1437,12 +1437,12 @@ static int test_skcipher(struct cipher_testvec *template, unsigned int tcount,
 	ret = __test_skcipher(template, tcount, enc, false, 0, driver, type, mask);
 	if (ret)
 		return ret;
-#ifdef CONFIG_CRYPTO_ALL_CASES
+
 	/* test 'dst != src' case */
 	ret = __test_skcipher(template, tcount, enc, true, 0, driver, type, mask);
 	if (ret)
 		return ret;
-
+#ifdef CONFIG_CRYPTO_ALL_CASES
 	/* test unaligned buffers, check with one byte offset */
 	ret = __test_skcipher(template, tcount, enc, true, 1, driver, type, mask);
 	if (ret)

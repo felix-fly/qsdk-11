@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2018, 2020 The Linux Foundation. All rights reserved.
 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -62,7 +62,9 @@ enum {
 	QCA_WDT_LOG_DUMP_TYPE_LEVEL1_PT,
 	/* Module structures are in highmem zone*/
 	QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD,
+	QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_DEBUGFS,
 	QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_INFO,
+	QCA_WDT_LOG_DUMP_TYPE_WLAN_MMU_INFO,
 	QCA_WDT_LOG_DUMP_TYPE_EMPTY,
 };
 /* This will be used for parsing the TLV data */
@@ -95,6 +97,8 @@ struct crashdump_flash_nand_cxt {
        int cur_page_data_len;
        int write_size;
        unsigned char temp_data[MAX_NAND_PAGE_SIZE];
+       uint32_t part_start;
+       uint32_t part_size;
 };
 
 #ifdef CONFIG_QCA_SPI
@@ -116,8 +120,9 @@ struct crashdump_flash_emmc_cxt {
 };
 #endif
 
-
+#ifdef CONFIG_MTD_DEVICE
 static struct crashdump_flash_nand_cxt crashdump_nand_cnxt;
+#endif
 #ifdef CONFIG_QCA_SPI
 static struct spi_flash *crashdump_spi_flash;
 static struct crashdump_flash_spi_cxt crashdump_flash_spi_cnxt;
@@ -273,13 +278,18 @@ static int qca_wdt_extract_crashdump_data(
 	while (static_enum_count < 3) {
 		ret_val = qca_wdt_scm_extract_tlv_info(scm_tlv_msg,
 			&cur_type, &cur_size);
-		if (!ret_val && cur_type == QCA_WDT_LOG_DUMP_TYPE_UNAME ){
+		if (ret_val)
+			return ret_val;
+
+		switch (cur_type) {
+		case QCA_WDT_LOG_DUMP_TYPE_UNAME:
 			crashdump_data->uname_length = cur_size;
 			ret_val = qca_wdt_scm_extract_tlv_data(scm_tlv_msg,
 					crashdump_data->uname, cur_size);
 			crashdump_tlv_count++;
 			static_enum_count++;
-		}else if (!ret_val && cur_type == QCA_WDT_LOG_DUMP_TYPE_DMESG){
+			break;
+		case QCA_WDT_LOG_DUMP_TYPE_DMESG:
 			ret_val = qca_wdt_scm_extract_tlv_data(scm_tlv_msg,
 				(unsigned char *)&tlv_info,
 				cur_size);
@@ -289,7 +299,8 @@ static int qca_wdt_extract_crashdump_data(
 		         }
 			crashdump_tlv_count++;
 			static_enum_count++;
-		}else if (!ret_val && cur_type == QCA_WDT_LOG_DUMP_TYPE_LEVEL1_PT){
+			break;
+		case QCA_WDT_LOG_DUMP_TYPE_LEVEL1_PT:
 			ret_val = qca_wdt_scm_extract_tlv_data(scm_tlv_msg,(unsigned char *)&tlv_info,cur_size);
 			if (!ret_val) {
 				crashdump_data->pt_start =(unsigned char *)(uintptr_t)tlv_info.start;
@@ -297,12 +308,18 @@ static int qca_wdt_extract_crashdump_data(
 			}
 			crashdump_tlv_count++;
 			static_enum_count++;
-		}
-		else if(!ret_val && cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD) {
+			break;
+		case QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD:
 			tlv_size = (cur_size + QCA_WDT_SCM_TLV_TYPE_LEN_SIZE);
 			scm_tlv_msg->cur_msg_buffer_pos += tlv_size;
+			break;
+		default:
+			printf("%s: invalid dump type\n", __func__);
+			ret_val = -EINVAL;
+			goto err;
 		}
 	}
+err:
 	return ret_val;
 }
 
@@ -356,29 +373,47 @@ static int dump_wlan_segments(struct dumpinfo_t *dumpinfo, int indx)
 		ret_val = qca_wdt_scm_extract_tlv_info(scm_tlv_msg,
 			&cur_type, &cur_size);
 
-		/* Each Dump segment is represented by a TLV tuple comprising of
-		three TLVs representing the type,size and physical addresses of
-		the data segments and corresponding PMD and PTE entries.
-		QCA_WDT_LOG_DUMP_TYPE_EMPTY type indicates that the TLV tuple has
+		/* Each Dump segment is represented by a TLV representing
+		the type,size and physical addresses of	the dump segments.
+		QCA_WDT_LOG_DUMP_TYPE_EMPTY type indicates that the TLV has
 		been invalidated. When type QCA_WDT_LOG_DUMP_TYPE_EMPTY is encountered,
-		we skip over the TLV touple by moving the current massage buffer pointer
-		ahead by three TLVs */
+		we skip over the TLV by moving the current message buffer pointer
+		ahead by one TLV */
 
 		if(cur_type == QCA_WDT_LOG_DUMP_TYPE_EMPTY) {
 			tlv_size = (cur_size + QCA_WDT_SCM_TLV_TYPE_LEN_SIZE);
-			scm_tlv_msg->cur_msg_buffer_pos += (3 * tlv_size);
+			scm_tlv_msg->cur_msg_buffer_pos += tlv_size;
 		}
 
+		/* While iterating over the crashdump buffer, if MetaData file
+		* TLV types are found (QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_INFO or
+		* QCA_WDT_LOG_DUMP_TYPE_WLAN_MMU_INFO), we dump the segment with
+		* name "MOD_INFO.txt"/"MMU_INFO.txt". If DEBUFGS TLV type is found
+		* we prefix the Dump binary with “DEBUGFS_” which is useful in
+		* post processing step. If we encounter a QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD
+		* TLV type, we dump the binary with name equal to the physical address
+		* of the binary.
+		*/
 		if (!ret_val && ( cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD ||
-						cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_INFO )) {
+						cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_INFO ||
+						cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MMU_INFO ||
+						cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_DEBUGFS )) {
 			ret_val = qca_wdt_scm_extract_tlv_data(scm_tlv_msg,
 				(unsigned char *)&tlv_info,cur_size);
 			memaddr = tlv_info.start;
 
 			if (cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_INFO) {
 				snprintf(wlan_segment_name,	sizeof(wlan_segment_name),
-							 "MODULE_INFO.txt");
+							 "MOD_INFO.txt");
 				wlan_tlv_size = *(uint32_t *)(uintptr_t)tlv_info.size;
+			} else if (cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MMU_INFO) {
+				snprintf(wlan_segment_name, sizeof(wlan_segment_name),
+							"MMU_INFO.txt");
+				wlan_tlv_size = *(uint32_t *)(uintptr_t)tlv_info.size;
+			} else if (cur_type == QCA_WDT_LOG_DUMP_TYPE_WLAN_MOD_DEBUGFS) {
+				snprintf(wlan_segment_name, sizeof(wlan_segment_name),
+					"DEBUGFS_%lx.BIN",(long unsigned int)memaddr);
+				wlan_tlv_size = tlv_info.size;
 			} else {
 				snprintf(wlan_segment_name,
 						 sizeof(wlan_segment_name), "%lx.BIN",(long unsigned int)memaddr);
@@ -404,7 +439,7 @@ static int dump_wlan_segments(struct dumpinfo_t *dumpinfo, int indx)
 
 static int do_dumpqca_data(unsigned int dump_level)
 {
-	uint32_t memaddr;
+	uint32_t memaddr, comp_addr = 0x0;
 	uint32_t remaining;
 	int indx;
 	int ebi_indx = 0;
@@ -412,9 +447,9 @@ static int do_dumpqca_data(unsigned int dump_level)
 	char buf = 1;
 	struct dumpinfo_t *dumpinfo = dumpinfo_n;
 	int dump_entries = dump_entries_n;
-	char wlan_segment_name[32];
-	char *usb_dump = NULL;
-	ulong is_usb_dump = 0;
+	char wlan_segment_name[32], runcmd[128], *s;
+	char *usb_dump = NULL, *compress = NULL;
+	ulong is_usb_dump = 0, is_compress = 0;
 
 	usb_dump = getenv("dump_to_usb");
 	if (usb_dump) {
@@ -507,7 +542,6 @@ static int do_dumpqca_data(unsigned int dump_level)
 	for (indx = 0; indx < dump_entries; indx++) {
 		if (dump_level != dumpinfo[indx].dump_level)
 			continue;
-		printf("\nProcessing %s:", dumpinfo[indx].name);
 
 		if (dumpinfo[indx].is_redirected) {
 			memaddr = *((uint32_t *)(dumpinfo[indx].start));
@@ -525,17 +559,64 @@ static int do_dumpqca_data(unsigned int dump_level)
 
 		if (!strncmp(dumpinfo[indx].name, "EBICS", strlen("EBICS")))
 		{
-			if (!strncmp(dumpinfo[indx].name,
-				     "EBICS0", strlen("EBICS0")))
-				dumpinfo[indx].size = gd->ram_size;
+			compress = getenv("dump_compressed");
+			if (compress) {
+				ret = str2long(compress, &is_compress);
+				if (!ret) {
+					is_compress = 0;
+				}
+			}
 
-			if (!strncmp(dumpinfo[indx].name,
-				     "EBICS_S1", strlen("EBICS_S1")))
-				dumpinfo[indx].size = gd->ram_size
-						      - dumpinfo[indx - 1].size
-						      - CONFIG_TZ_SIZE;
+			if (is_compress == 1) {
+				if (!strncmp(dumpinfo[indx].name, "EBICS2", strlen("EBICS2"))) {
+					memaddr = CONFIG_SYS_SDRAM_BASE + (gd->ram_size / 2);
+					dumpinfo[indx].size = gd->ram_size / 2;
+					comp_addr = memaddr;
+				}
+				if (!strncmp(dumpinfo[indx].name, "EBICS_S2", strlen("EBICS_S2"))) {
+					dumpinfo[indx].size = gd->ram_size - (dumpinfo[indx].start - CONFIG_SYS_SDRAM_BASE);
+					comp_addr = memaddr;
+				}
+				if (!strncmp(dumpinfo[indx].name, "EBICS1", strlen("EBICS1"))) {
+					dumpinfo[indx].size = (gd->ram_size / 2)
+								- (dumpinfo[indx + 1].size + 0x400000);
+				}
+			}
+			else {
+				if (!strncmp(dumpinfo[indx].name,
+					     "EBICS0", strlen("EBICS0")))
+					dumpinfo[indx].size = gd->ram_size;
 
-			if (is_usb_dump == 1) {
+				if (!strncmp(dumpinfo[indx].name,
+					     "EBICS_S1", strlen("EBICS_S1")))
+					dumpinfo[indx].size = gd->ram_size
+							      - dumpinfo[indx - 1].size
+							      - CONFIG_TZ_SIZE;
+			}
+
+			if (is_compress == 1 && (dumpinfo[indx].to_compress == 1)) {
+
+				snprintf(runcmd, sizeof(runcmd), "zip 0x%x 0x%x 0x%x", memaddr, dumpinfo[indx].size, comp_addr);
+				if (run_command(runcmd, 0) != CMD_RET_SUCCESS)
+					printf("gzip compression of %s failed\n", dumpinfo[indx].name);
+				else {
+					s = getenv("filesize");
+					dumpinfo[indx].size = (int)simple_strtol(s, NULL, 16); //compressed_file_size
+					memaddr = comp_addr;
+					snprintf(dumpinfo[indx].name, sizeof(dumpinfo[indx].name), "%s.gz", dumpinfo[indx].name);
+				}
+			}
+
+#ifdef CONFIG_IPQ40XX
+			if (buf != 1)
+#endif
+				if ((is_compress == 1 && (dumpinfo[indx].to_compress != 1)) ||
+				    (is_compress != 1 && (dumpinfo[indx].to_compress == 1))) {
+					continue;
+				}
+
+			if (is_usb_dump == 1 || is_compress == 1) {
+				printf("\nProcessing %s:\n", dumpinfo[indx].name);
 				ret = dump_to_dst (dumpinfo[indx].is_aligned_access, memaddr, dumpinfo[indx].size, dumpinfo[indx].name);
 				if (ret == CMD_RET_FAILURE) {
 					goto stop_dump;
@@ -552,6 +633,8 @@ static int do_dumpqca_data(unsigned int dump_level)
 					else {
 						dumpinfo[indx].size = remaining;
 					}
+
+					printf("\nProcessing %s:\n", dumpinfo[indx].name);
 					ret = dump_to_dst (dumpinfo[indx].is_aligned_access, memaddr, dumpinfo[indx].size, dumpinfo[indx].name);
 					if (ret == CMD_RET_FAILURE)
 						goto stop_dump;
@@ -564,6 +647,7 @@ static int do_dumpqca_data(unsigned int dump_level)
 		}
 		else
 		{
+			printf("\nProcessing %s:\n", dumpinfo[indx].name);
 			if (dumpinfo[indx].dump_level == MINIMAL_DUMP )
 				memaddr = dump_minimal(dumpinfo, indx);
 			if (dumpinfo[indx].size && memaddr) {
@@ -589,8 +673,10 @@ static int do_dumpqca_data(unsigned int dump_level)
 
 stop_dump:
 #if defined(CONFIG_USB_STORAGE) && defined(CONFIG_FS_FAT)
-	if (is_usb_dump == 1)
+	if (is_usb_dump == 1) {
 		run_command("usb stop", 0);
+		mdelay(1000);
+	}
 #endif
 	return ret;
 }
@@ -643,8 +729,16 @@ void dump_func(unsigned int dump_level)
 		printf("\nHit any key within 10s to stop dump activity...");
 		while (!tstc()) {       /* while no incoming data */
 			if (get_timer_masked() >= etime) {
-				if (do_dumpqca_data(dump_level) == CMD_RET_FAILURE)
-					printf("Crashdump saving failed!\n");
+				if (getenv("dump_minimal_and_full")) { 
+					/* dump minidump and full dump*/
+					if (do_dumpqca_data(MINIMAL_DUMP) == CMD_RET_FAILURE)
+						printf("Minidump saving failed!\n");
+					if (do_dumpqca_data(FULL_DUMP) == CMD_RET_FAILURE)
+						printf("Crashdump saving failed!\n");
+				} else {
+					if (do_dumpqca_data(dump_level) == CMD_RET_FAILURE)
+						printf("Crashdump saving failed!\n");
+				}
 				break;
 			}
 		}
@@ -655,6 +749,98 @@ void dump_func(unsigned int dump_level)
 reset:
 	reset_board();
 }
+#ifdef CONFIG_MTD_DEVICE
+
+/*
+* NAND flash check and write. Before writing into the nand flash
+* this function checks if the block is non-bad, and skips if bad. While
+* skipping, there is also possiblity of crossing the partition and corrupting
+* next partition with crashdump data. So this function also checks whether
+* offset is within the partition, where the configured offset belongs.
+*
+* Returns 0 on succes and 1 otherwise
+*/
+static int check_and_write_crashdump_nand_flash(
+			struct crashdump_flash_nand_cxt *nand_cnxt,
+			nand_info_t *nand, unsigned char *data,
+			unsigned int req_size)
+{
+	nand_erase_options_t nand_erase_options;
+	uint32_t part_start = nand_cnxt->part_start;
+	uint32_t part_end = nand_cnxt->part_start + nand_cnxt->part_size;
+	unsigned int remaining_len = req_size;
+	unsigned int write_length, data_offset = 0;
+	loff_t skipoff, skipoff_cmp, *offset;
+	int ret = 0;
+	static int first_erase = 1;
+
+	offset = &nand_cnxt->cur_crashdump_offset;
+
+	memset(&nand_erase_options, 0, sizeof(nand_erase_options));
+	nand_erase_options.length = nand->erasesize;
+
+	while (remaining_len)
+	{
+
+		skipoff = *offset - (*offset & (nand->erasesize - 1));
+		skipoff_cmp = skipoff;
+
+		for (; skipoff < part_end; skipoff += nand->erasesize) {
+			if (nand_block_isbad(nand, skipoff)) {
+				printf("Skipping bad block at 0x%llx\n", skipoff);
+				continue;
+			}
+			else
+				break;
+		}
+		if (skipoff_cmp != skipoff)
+			*offset = skipoff;
+
+		if(part_start > *offset || ((*offset + remaining_len) >= part_end)) {
+			printf("Failure: Attempt to write in next partition\n");
+			return 1;
+		}
+
+		if((*offset & (nand->erasesize - 1)) == 0 || first_erase){
+			nand_erase_options.offset = *offset;
+
+			ret = nand_erase_opts(&nand_info[0],
+					&nand_erase_options);
+			if (ret)
+				return ret;
+			first_erase = 0;
+		}
+
+		if( remaining_len > nand->erasesize) {
+
+			skipoff = (*offset & (nand->erasesize - 1));
+
+			write_length = (skipoff != 0) ? (nand->erasesize - skipoff)
+							: (nand->erasesize);
+
+			ret = nand_write(nand, *offset, &write_length,
+				data + data_offset);
+
+			if (ret)
+				return ret;
+
+			remaining_len -= write_length;
+			*offset += write_length;
+			data_offset += write_length;
+		}
+		else {
+
+			ret = nand_write(nand, *offset, &remaining_len,
+				data + data_offset);
+
+			*offset += remaining_len;
+			remaining_len = 0;
+		}
+	}
+
+	return ret;
+
+}
 
 /*
 * Init function for NAND flash writing. It intializes its own context
@@ -663,9 +849,13 @@ reset:
 int init_crashdump_nand_flash_write(void *cnxt, loff_t offset,
 					unsigned int total_size)
 {
-	nand_erase_options_t nand_erase_options;
 	struct crashdump_flash_nand_cxt *nand_cnxt = cnxt;
 	int ret;
+
+	ret = smem_getpart_from_offset(offset, &nand_cnxt->part_start,
+						&nand_cnxt->part_size);
+	if (ret)
+		return ret;
 
 	nand_cnxt->start_crashdump_offset = offset;
 	nand_cnxt->cur_crashdump_offset = offset;
@@ -676,16 +866,6 @@ int init_crashdump_nand_flash_write(void *cnxt, loff_t offset,
 		printf("nand page write size is more than configured size\n");
 		return -ENOMEM;
 	}
-
-	memset(&nand_erase_options, 0, sizeof(nand_erase_options));
-
-	nand_erase_options.length = total_size;
-	nand_erase_options.offset = offset;
-
-	ret = nand_erase_opts(&nand_info[0],
-			&nand_erase_options);
-	if (ret)
-		return ret;
 
 	return 0;
 }
@@ -711,9 +891,11 @@ int deinit_crashdump_nand_flash_write(void *cnxt)
 			0xFF, remaining_bytes);
 
 		cur_nand_write_len = nand_cnxt->write_size;
-		ret_val = nand_write(&nand_info[0],
-				nand_cnxt->cur_crashdump_offset,
-				&cur_nand_write_len, nand_cnxt->temp_data);
+
+		ret_val = check_and_write_crashdump_nand_flash(nand_cnxt,
+					&nand_info[0], nand_cnxt->temp_data,
+					cur_nand_write_len);
+
 	}
 
 	return ret_val;
@@ -761,15 +943,14 @@ int crashdump_nand_flash_write_data(void *cnxt,
 	memcpy(nand_cnxt->temp_data + nand_cnxt->cur_page_data_len, data,
 			remaining_len_cur_page);
 
-	ret_val = nand_write(&nand_info[0], nand_cnxt->cur_crashdump_offset,
-				&cur_nand_write_len,
-				nand_cnxt->temp_data);
+	ret_val = check_and_write_crashdump_nand_flash(nand_cnxt,
+					&nand_info[0], nand_cnxt->temp_data,
+					cur_nand_write_len);
 
 	if (ret_val)
 		return ret_val;
 
 	cur_data_pos += remaining_len_cur_page;
-	nand_cnxt->cur_crashdump_offset += cur_nand_write_len;
 
 	/*
 	* Calculate the write length in multiple of page length and do the nand
@@ -779,17 +960,16 @@ int crashdump_nand_flash_write_data(void *cnxt,
 				nand_cnxt->write_size) * nand_cnxt->write_size;
 
 	if (cur_nand_write_len > 0) {
-		ret_val = nand_write(&nand_info[0],
-				nand_cnxt->cur_crashdump_offset,
-				&cur_nand_write_len,
-				cur_data_pos);
+		ret_val = check_and_write_crashdump_nand_flash(nand_cnxt,
+						&nand_info[0], cur_data_pos,
+						cur_nand_write_len);
 
 		if (ret_val)
 			return ret_val;
+
 	}
 
 	cur_data_pos += cur_nand_write_len;
-	nand_cnxt->cur_crashdump_offset += cur_nand_write_len;
 
 	/* Store the remaining data in temp data */
 	remaining_bytes = data + size - cur_data_pos;
@@ -800,7 +980,7 @@ int crashdump_nand_flash_write_data(void *cnxt,
 
 	return 0;
 }
-
+#endif
 #ifdef CONFIG_QCA_SPI
 /* Init function for SPI NOR flash writing. It erases the required sectors */
 int init_crashdump_spi_flash_write(void *cnxt,
@@ -1040,12 +1220,15 @@ static int qca_wdt_write_crashdump_data(
 	* Determine the flash type and initialize function pointer for flash
 	* operations and its context which needs to be passed to these functions
 	*/
-	if (flash_type == SMEM_BOOT_NAND_FLASH) {
+	if (((flash_type == SMEM_BOOT_NAND_FLASH) ||
+		(flash_type == SMEM_BOOT_QSPI_NAND_FLASH))) {
+#ifdef CONFIG_MTD_DEVICE
 		crashdump_cnxt = (void *)&crashdump_nand_cnxt;
 		crashdump_flash_write_init = init_crashdump_nand_flash_write;
 		crashdump_flash_write = crashdump_nand_flash_write_data;
 		crashdump_flash_write_deinit =
 			deinit_crashdump_nand_flash_write;
+#endif
 #ifdef CONFIG_QCA_SPI
 	} else if (flash_type == SMEM_BOOT_SPI_FLASH) {
 		if (!crashdump_spi_flash) {
@@ -1131,6 +1314,8 @@ int do_dumpqca_minimal_data(const char *offset)
 
 	if (sfi->flash_type == SMEM_BOOT_NAND_FLASH) {
 		flash_type = SMEM_BOOT_NAND_FLASH;
+	} else if (sfi->flash_type == SMEM_BOOT_QSPI_NAND_FLASH) {
+		flash_type = SMEM_BOOT_QSPI_NAND_FLASH;
 	} else if (sfi->flash_type == SMEM_BOOT_SPI_FLASH) {
 		flash_type = SMEM_BOOT_SPI_FLASH;
 #ifdef CONFIG_QCA_MMC
@@ -1153,22 +1338,24 @@ int do_dumpqca_minimal_data(const char *offset)
 	tlv_msg.len = CONFIG_TLV_DUMP_SIZE;
 
 	ret_val = qca_wdt_extract_crashdump_data(&tlv_msg, &g_crashdump_data);
-
-	if (!ret_val) {
-		if (getenv("dump_to_flash")) {
-			ret_val = qca_wdt_write_crashdump_data(&g_crashdump_data,
-					flash_type, crashdump_offset);
-		} else {
-			dump_func(MINIMAL_DUMP);
-		}
-	}
-
 	if (ret_val) {
-		printf("crashdump data writing in flash failure\n");
-		return -EPERM;
+		printf("%s: crashdump extraction failed\n", __func__);
+		return ret_val;
 	}
 
-	printf("crashdump data writing in flash successful\n");
+	if (getenv("dump_to_flash")) {
+		ret_val = qca_wdt_write_crashdump_data(&g_crashdump_data,
+						       flash_type,
+						       crashdump_offset);
+		if (ret_val) {
+			printf("crashdump data writing in flash failure\n");
+			return -EPERM;
+		}
+
+		printf("crashdump data writing in flash successful\n");
+	} else {
+		dump_func(MINIMAL_DUMP);
+	}
 
 	return 0;
 }

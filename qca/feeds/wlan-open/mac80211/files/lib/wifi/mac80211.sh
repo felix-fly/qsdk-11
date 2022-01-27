@@ -83,13 +83,14 @@ check_mac80211_device() {
 
 detect_mac80211() {
 	devidx=0
+
 	config_load wireless
 
 	if [ ! -f "/etc/config/wireless" ] || ! grep -q "enable_smp_affinity" "/etc/config/wireless"; then
 		cat <<EOF
 config smp_affinity  mac80211
 	option enable_smp_affinity	1
-	option enable_nss		0
+	option enable_color		1
 
 EOF
 	fi
@@ -99,6 +100,21 @@ EOF
 		[ -n "$type" ] || break
 		devidx=$(($devidx + 1))
 	done
+
+	#add this delay for empty wifi script issue
+	count=0
+	while [ $count -le 10 ]
+	do
+		sleep  1
+		if ([ $(ls /sys/class/ieee80211 | wc -l  | grep -w "0") ])
+		then
+			count=$(( count+1 ))
+		else
+			sleep 1
+			break
+		fi
+	done
+
 	for _dev in /sys/class/ieee80211/*; do
 		[ -e "$_dev" ] || continue
 		dev="${_dev##*/}"
@@ -111,8 +127,10 @@ EOF
 		channel="36"
 		htmode=""
 		ht_capab=""
+		encryption="none"
+		security=""
 
-		iw phy "$dev" info | grep -q '5180 MHz' || { mode_band="g"; channel="11"; }
+		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5955 MHz' || { mode_band="g"; channel="11"; }
 		(iw phy "$dev" info | grep -q '5745 MHz' && (iw phy "$dev" info | grep -q -F '5180 MHz [36] (disabled)')) && { mode_band="a"; channel="149"; }
 		iw phy "$dev" info | grep -q '60480 MHz' && { mode_11n="a"; mode_band="d"; channel="2"; }
 
@@ -121,7 +139,20 @@ EOF
 
 		[ "$mode_band" = a ] && htmode="VHT80"
 
+		iw phy "$dev" info | grep -q '5180 MHz' || iw phy "$dev" info | grep -q '5745 MHz' || {
+			iw phy "$dev" info | grep -q '5955 MHz' && {
+				channel="49"; htmode="HE80"; encryption="sae";
+				append ht_capab "	option band	3" "$N"
+			}
+		}
+
 		[ -n $htmode ] && append ht_capab "	option htmode	$htmode" "$N"
+
+		append security "	option encryption  $encryption" "$N"
+		if [ $encryption == "sae" ]; then
+			append security "	option sae_pwe	1" "$N"
+			append security "	option key	0123456789" "$N"
+		fi
 
 		if [ -x /usr/bin/readlink -a -h /sys/class/ieee80211/${dev} ]; then
 			path="$(readlink -f /sys/class/ieee80211/${dev}/device)"
@@ -153,7 +184,7 @@ config wifi-iface
 	option network  lan
 	option mode     ap
 	option ssid     OpenWrt
-	option encryption none
+$security
 
 EOF
 	devidx=$(($devidx + 1))
@@ -200,9 +231,12 @@ post_mac80211() {
 	config_get enable_smp_affinity mac80211 enable_smp_affinity 0
 
 	if [ "$enable_smp_affinity" -eq 1 ]; then
+		[ -f "/lib/smp_affinity_settings.sh" ] && {
+                        . /lib/smp_affinity_settings.sh
+                        enable_smp_affinity_wifi
+                }
 		[ -f "/lib/update_smp_affinity.sh" ] && {
 			. /lib/update_smp_affinity.sh
-			enable_smp_affinity_wifi
 			enable_smp_affinity_wigig
 		}
 	fi

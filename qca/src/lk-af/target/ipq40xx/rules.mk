@@ -17,7 +17,7 @@ SCRATCH_ADDR     := 0x88000000
 
 
 MODULES += \
-	lib/zlib_inflate \
+	lib/zlib \
 	lib/ptable \
 	lib/libfdt
 

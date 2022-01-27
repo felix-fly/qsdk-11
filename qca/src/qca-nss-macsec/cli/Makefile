@@ -1,4 +1,4 @@
-# Copyright (c) 2014, 2019 The Linux Foundation. All rights reserved.
+# Copyright (c) 2014, 2019, 2021 The Linux Foundation. All rights reserved.
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +20,7 @@ endif
 
 
 EXTRA_CFLAGS += -I$(PRJ_PATH)/cli/include/ -I$(PRJ_PATH)/cli/include/dal $(QCA_NSS_MACSEC_INCLUDE)
-EXTRA_CFLAGS += -Werror
+EXTRA_CFLAGS += -Werror -Wall
 
 %.o:%.c
 	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c -o $@ $<

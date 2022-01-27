@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -28,13 +28,15 @@
 
 /**
  * qdf_self_recovery_callback() - callback for self recovery
+ * @psoc: pointer to the posc object
  * @reason: the reason for the recovery request
  * @func: the caller's function name
  * @line: the line number of the callsite
  *
  * Return: none
  */
-typedef void (*qdf_self_recovery_callback)(enum qdf_hang_reason reason,
+typedef void (*qdf_self_recovery_callback)(void *psoc,
+					   enum qdf_hang_reason reason,
 					   const char *func,
 					   const uint32_t line);
 
@@ -62,6 +64,86 @@ void qdf_register_fw_down_callback(qdf_is_fw_down_callback is_fw_down);
 bool qdf_is_fw_down(void);
 
 /**
+ * qdf_wmi_recv_qmi_cb() - callback to receive WMI over QMI
+ * @cb_ctx: WMI event recv callback context(wmi_handle)
+ * @buf: WMI buffer
+ * @len: WMI buffer len
+ *
+ * Return: 0 if success otherwise -EINVAL
+ */
+typedef int (*qdf_wmi_recv_qmi_cb)(void *cb_ctx, void *buf, int len);
+
+/**
+ * qdf_wmi_send_over_qmi_callback() - callback to send WMI over QMI
+ * @buf: WMI buffer
+ * @len: WMI buffer len
+ * @cb_ctx: WMI event recv callback context(wmi_handle)
+ * @wmi_rx_cb: WMI event receive call back
+ *
+ * Return: QDF_STATUS_SUCCESS if success otherwise QDF error code
+ */
+typedef QDF_STATUS (*qdf_wmi_send_over_qmi_callback)(void *buf, uint32_t len,
+						     void *cb_ctx,
+						     qdf_wmi_recv_qmi_cb
+						     wmi_rx_cb);
+
+/**
+ * qdf_register_wmi_send_recv_qmi_callback() - Register WMI over QMI callback
+ * @qdf_wmi_send_over_qmi_callback: callback to send recv WMI data over QMI
+ *
+ * Return: none
+ */
+void qdf_register_wmi_send_recv_qmi_callback(qdf_wmi_send_over_qmi_callback
+					     wmi_send_recv_qmi_cb);
+
+/**
+ * qdf_wmi_send_recv_qmi() - API to send receive WMI data over QMI
+ * @buf: WMI buffer
+ * @len: WMI buffer len
+ * @cb_ctx: WMI event recv callback context(wmi_handle)
+ * @wmi_rx_cb: WMI event receive call back
+ *
+ * Return: QDF STATUS of operation
+ */
+QDF_STATUS qdf_wmi_send_recv_qmi(void *buf, uint32_t len, void *cb_ctx,
+				 qdf_wmi_recv_qmi_cb wmi_rx_cb);
+
+/**
+ * qdf_is_driver_unloading_callback() - callback to get driver unloading in progress
+ * or not
+ *
+ * Return: true if driver is unloading else false
+ */
+typedef bool (*qdf_is_driver_unloading_callback)(void);
+
+/**
+ * qdf_register_is_driver_unloading_callback() - driver unloading callback
+ * @callback:  driver unloading callback
+ *
+ * Return: None
+ */
+void qdf_register_is_driver_unloading_callback(
+				qdf_is_driver_unloading_callback callback);
+
+/**
+ * qdf_is_driver_state_module_stop_callback() - callback to get driver state is
+ * module stop or not
+ *
+ * Return: true if driver state is module stop else false
+ */
+typedef bool (*qdf_is_driver_state_module_stop_callback)(void);
+
+/**
+ * qdf_register_is_driver_state_module_stop_callback() - driver state is
+ * module stop or not
+ * @callback:  driver state module stop callback
+ *
+ * Return: None
+ */
+void qdf_register_is_driver_state_module_stop_callback(
+			qdf_is_driver_state_module_stop_callback callback);
+
+/**
  * qdf_register_self_recovery_callback() - register self recovery callback
  * @callback:  self recovery callback
  *
@@ -71,6 +153,7 @@ void qdf_register_self_recovery_callback(qdf_self_recovery_callback callback);
 
 /**
  * qdf_trigger_self_recovery () - trigger self recovery
+ * @psoc: the psoc at which the recovery is being triggered
  * @reason: the reason for the recovery request
  *
  * Call API only in case of fatal error,
@@ -79,14 +162,14 @@ void qdf_register_self_recovery_callback(qdf_self_recovery_callback callback);
  *
  * Return: None
  */
-#define qdf_trigger_self_recovery(reason) \
-	__qdf_trigger_self_recovery(reason, __func__, __LINE__)
-void __qdf_trigger_self_recovery(enum qdf_hang_reason reason,
+#define qdf_trigger_self_recovery(psoc, reason) \
+	__qdf_trigger_self_recovery(psoc, reason, __func__, __LINE__)
+void __qdf_trigger_self_recovery(void *psoc, enum qdf_hang_reason reason,
 				 const char *func, const uint32_t line);
 
 /**
- * qdf_is_recovering_callback() - callback to get driver recovering in progress
- * or not
+ * qdf_is_recovering_callback() - callback to get driver recovering in
+ * progress or not
  *
  * Return: true if driver is doing recovering else false
  */
@@ -100,6 +183,21 @@ typedef bool (*qdf_is_recovering_callback)(void);
  */
 void qdf_register_recovering_state_query_callback(
 	qdf_is_recovering_callback is_recovering);
+
+/**
+ * qdf_is_driver_unloading() - get driver unloading in progress status
+ * or not
+ *
+ * Return: true if driver is unloading else false
+ */
+bool qdf_is_driver_unloading(void);
+
+/**
+ * qdf_is_driver_state_module_stop() - get driver state is module stop or not
+ *
+ * Return: true if driver state is module stop else false
+ */
+bool qdf_is_driver_state_module_stop(void);
 
 /**
  * qdf_is_recovering() - get driver recovering in progress status
@@ -174,5 +272,91 @@ bool qdf_is_drv_connected(void);
 void qdf_register_drv_connected_callback(qdf_is_drv_connected_callback
 					 is_drv_connected);
 
-#endif /*_QDF_PLATFORM_H*/
+/**
+ * qdf_check_state_before_panic() - API to check if FW is down
+ * or driver is in recovery before calling assert
+ * @func: Caller function pointer used for debug info
+ * @line: Caller function line number
+ *
+ * Return: none
+ */
+void qdf_check_state_before_panic(const char *func, const uint32_t line);
 
+/**
+ * qdf_is_drv_supported_callback() - callback to query if drv is supported
+ *
+ * Return: true if drv is supported else false
+ */
+typedef bool (*qdf_is_drv_supported_callback)(void);
+
+/**
+ * qdf_is_drv_supported_callback() - API to check if drv is supported or not
+ *
+ * DRV is dynamic request voting using which fw can do page fault and
+ * bring in page back without apps wake up
+ *
+ * Return: true: if drv is supported
+ *	   false: if drv is not supported
+ */
+bool qdf_is_drv_supported(void);
+
+/**
+ * qdf_register_drv_supported_callback() - API to register drv supported cb
+ * @is_drv_supported: callback to query if drv is supported or not
+ *
+ * Return: none
+ */
+void qdf_register_drv_supported_callback(qdf_is_drv_supported_callback
+					 is_drv_supported);
+
+typedef void (*qdf_recovery_reason_update_callback)(enum qdf_hang_reason
+						    reason);
+
+/**
+ * qdf_register_recovery_reason_update() - Register callback to update recovery
+ *                                         reason
+ * @qdf_recovery_reason_update_callback: callback to update recovery reason
+ *
+ * Return: none
+ */
+void qdf_register_recovery_reason_update(qdf_recovery_reason_update_callback
+					 callback);
+
+/**
+ * qdf_recovery_reason_update() - update recovery reason
+ * @reason: recovery reason
+ *
+ * Return: none
+ */
+void qdf_recovery_reason_update(enum qdf_hang_reason reason);
+
+/**
+ * qdf_bus_reg_dump() - callback for getting bus specific register dump
+ * @dev: Bus specific device
+ * @buf: Hang event buffer in which the data will be populated
+ * @len: length of data to be populated in the hang event buffer
+ *
+ * Return: none
+ */
+typedef void (*qdf_bus_reg_dump)(struct device *dev, uint8_t *buf,
+				 uint32_t len);
+
+/**
+ * qdf_register_get_bus_reg_dump() - Register callback to update bus register
+ *                                   dump
+ * @qdf_bus_reg_dump: callback to update bus register dump
+ *
+ * Return: none
+ */
+void qdf_register_get_bus_reg_dump(qdf_bus_reg_dump callback);
+
+/**
+ * qdf_get_bus_reg_dump() - Get the register dump for the bus
+ * @dev: device
+ * @buffer: buffer for hang data
+ * @len: len of hang data
+ *
+ * Return: none
+ */
+void qdf_get_bus_reg_dump(struct device *dev, uint8_t *buf, uint32_t len);
+#endif /*_QDF_PLATFORM_H*/

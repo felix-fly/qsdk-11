@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013,2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013,2015-2016,2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,7 +25,11 @@
 #include <linux/string.h>
 #include <linux/platform_device.h>
 #include <linux/of_device.h>
+#ifdef CONFIG_SND_SOC_IPQ_LPASS
+#include "ipq-lpass-tdm-pcm.h"
+#else
 #include "ipq-pcm-raw.h"
+#endif
 
 /*
  * This is an external loopback test module for PCM interface.
@@ -42,6 +46,7 @@
 static void pcm_start_test(void);
 static void ipq4019_pcm_fill_data(uint32_t *tx_buff, uint32_t size);
 static void ipq8074_pcm_fill_data(uint8_t *tx_buff, uint32_t size);
+static void ipq5018_pcm_fill_data(uint32_t *tx_buff, uint32_t size);
 
 /* the test configurations supported */
 #define PCM_LBTEST_8BIT_8KHZ_4CH_TX_TO_RX	1
@@ -56,7 +61,6 @@ static void ipq8074_pcm_fill_data(uint8_t *tx_buff, uint32_t size);
 #define PCM_LBTEST_16BIT_16KHZ_2CH_RX_TO_TX	501
 #define PCM_LBTEST_16BIT_16KHZ_4CH_TX_TO_RX	6
 #define PCM_LBTEST_16BIT_16KHZ_4CH_RX_TO_TX	601
-
 /* The max value for loopback test config is 601(3 digits + 1 null byte)
  * This macro needs to be updated when more configs are added.
  */
@@ -85,7 +89,12 @@ struct pcm_lb_test_ctx {
 
 static struct pcm_lb_test_ctx ctx;
 static unsigned long int start;
+#ifdef CONFIG_SND_SOC_IPQ_LPASS
+struct ipq_lpass_pcm_params cfg_params;
+#else
 struct ipq_pcm_params cfg_params;
+#define IPQ5018				2
+#endif
 uint8_t *prev_buf;
 static enum ipq_hw_type ipq_hw;
 
@@ -102,7 +111,6 @@ static ssize_t store_pcm_lb_value(struct device_driver *driver,
 		pr_err("%s: invalid lb value\n", __func__);
 		return -EINVAL;
 	}
-
 	pcm_start_test();
 	return count;
 }
@@ -127,13 +135,13 @@ uint32_t pcm_read_write(void)
 	uint32_t size;
 
 	size = ipq_pcm_data(&rx_buff, &tx_buff);
-
 	prev_buf = ctx.last_rx_buff;
 	ctx.last_rx_buff = rx_buff;
 
 	if (IS_PCM_LBTEST_RX_TO_TX(start)) {
 		/* Redirect Rx data to Tx */
-		memcpy(tx_buff, rx_buff, size);
+		if (ipq_hw != IPQ5018)
+			memcpy(tx_buff, rx_buff, size);
 	} else {
 		/* get current Tx buffer and write the pattern
 		* We will write 1, 2, 3, ..., 255, 1, 2, 3...
@@ -141,9 +149,13 @@ uint32_t pcm_read_write(void)
 		if (ipq_hw == IPQ4019)
 			ipq4019_pcm_fill_data((uint32_t *)tx_buff,
 						(size / sizeof(uint32_t)));
+		else if (ipq_hw == IPQ5018)
+			ipq5018_pcm_fill_data((uint32_t *)tx_buff,
+						(size / sizeof(uint32_t)));
 		else
 			ipq8074_pcm_fill_data(tx_buff, size);
 	}
+
 	ipq_pcm_done();
 	return size;
 }
@@ -177,9 +189,9 @@ uint32_t pcm_init(void)
 		cfg_params.slot_count = 16;
 		cfg_params.active_slot_count = 2;
 		cfg_params.tx_slots[0] = 0;
-		cfg_params.tx_slots[1] = 3;
+		cfg_params.tx_slots[1] = (ipq_hw == IPQ5018)? 1 : 3;
 		cfg_params.rx_slots[0] = 0;
-		cfg_params.rx_slots[1] = 3;
+		cfg_params.rx_slots[1] = (ipq_hw == IPQ5018)? 1 : 3;
 		ret = ipq_pcm_init(&cfg_params);
 		break;
 
@@ -270,12 +282,12 @@ void process_read(uint32_t size)
 	uint16_t *data_u16;
 	uint16_t val;
 	uint16_t expected_val, rec_val;
-
 	/* get out if test stopped */
 	if (start == 0)
 		return;
 
 	ctx.read_count++;
+
 	if (ctx.read_count <= LOOPBACK_SKIP_COUNT(ipq_hw)) {
 		/*
 		 * As soon as do pcm init, the DMA would start. So the initial
@@ -289,19 +301,20 @@ void process_read(uint32_t size)
 		 * our loopback should have settled, so start looking for the
 		 * sequence from here. we check only for the data, not for slot
 		 */
-		if (cfg_params.bit_width == 16 || ipq_hw == IPQ4019)
-			ctx.expected_rx_seq = ((uint32_t *)ctx.last_rx_buff)[0]
+			if (cfg_params.bit_width == 16 ||
+				ipq_hw == IPQ4019 || ipq_hw == IPQ5018)
+				ctx.expected_rx_seq = ((uint32_t *)ctx.last_rx_buff)[0]
 								& 0xFFFF;
-		else
-			ctx.expected_rx_seq = ((uint16_t *)ctx.last_rx_buff)[0]
+			else
+				ctx.expected_rx_seq = ((uint16_t *)ctx.last_rx_buff)[0]
 								& 0xFF;
-	}
+		}
 
 	data_u32 = (uint32_t *)ctx.last_rx_buff;
 	data_u16 = (uint16_t *)ctx.last_rx_buff;
 	val = ctx.expected_rx_seq;
 
-	if (cfg_params.bit_width == 16 || ipq_hw == IPQ4019)
+	if (cfg_params.bit_width == 16 || ipq_hw == IPQ4019 || ipq_hw == IPQ5018)
 		size = size / 4; /* as we are checking data as uint32 */
 	else
 		size = size / 2;
@@ -312,22 +325,29 @@ void process_read(uint32_t size)
 			rec_val = data_u32[index] & (0xFFFF);
 		} else {
 			expected_val = val % 256;
-			if (ipq_hw == IPQ4019)
+			if (ipq_hw == IPQ4019 || ipq_hw == IPQ5018)
 				rec_val = data_u32[index] & (0xFF);
 			else
 				rec_val = data_u16[index] & (0xFF);
 		}
-
 		if (expected_val != rec_val) {
-			pr_err("\nRx(%d) Failed at index %d: Expected : 0x%x"
-				" Received : 0x%x Data: 0x%x\n"
-				" buf_addr: %p prev_buf_addr: %p\n",
-				ctx.read_count, index, expected_val, rec_val,
-				((cfg_params.bit_width == 16 ||
-				ipq_hw == IPQ4019) ?
+			if (ipq_hw == IPQ5018)
+				pr_err("\n Rx(%d) Failed at index %d:"
+					" Expected : 0x%x Received : 0x%x"
+					" index: 0x%x\n", ctx.read_count,
+					index, expected_val, rec_val, index);
+			else
+				pr_err("\nRx(%d) Failed at index %d:"
+					" Expected : 0x%x Received : 0x%x "
+					" Data: 0x%x\n buf_addr: %p "
+					" prev_buf_addr: %p\n", ctx.read_count,
+					index, expected_val, rec_val,
+					((cfg_params.bit_width == 16 ||
+					ipq_hw == IPQ4019 ) ?
 					data_u32[index] : data_u16[index]),
-				(void *)ctx.last_rx_buff, (void *)prev_buf);
-			break;
+					(void *)ctx.last_rx_buff,
+					(void *)prev_buf);
+		break;
 		}
 		val++;
 	}
@@ -389,8 +409,11 @@ static void ipq8074_pcm_fill_data(uint8_t *tx_buff, uint32_t size)
 	if (ctx.running == 0)
 		return;
 
+#ifndef CONFIG_SND_SOC_IPQ_LPASS
 	size_act = size / IPQ8074_PCM_BYTES_PER_SAMPLE(cfg_params.bit_width);
-
+#else
+	size_act = size;
+#endif
 	for (i = 0; i < size_act; ) {
 		for (slot = 0; slot < cfg_params.active_slot_count; slot++) {
 			if (cfg_params.bit_width == 16) {
@@ -400,6 +423,31 @@ static void ipq8074_pcm_fill_data(uint8_t *tx_buff, uint32_t size)
 				buffer_16[i] = ctx.tx_data % 256;
 				buffer_16[i] |= cfg_params.tx_slots[slot] << 8;
 				buffer_16[i] |= 1 << 15; /* valid bit */
+			}
+			ctx.tx_data++;
+			i++;
+		}
+	}
+}
+
+static void ipq5018_pcm_fill_data(uint32_t *tx_buff, uint32_t size)
+{
+	uint32_t i, slot = 0;
+
+	/* get out if test stopped */
+	if (ctx.running == 0)
+		return;
+
+	slot = cfg_params.active_slot_count;
+	for (i = 0; i < size; ) {
+		for (slot = 0; slot < cfg_params.active_slot_count; slot++) {
+			if (cfg_params.bit_width == 16) {
+				tx_buff[i] = ctx.tx_data;
+				tx_buff[i] |= cfg_params.tx_slots[slot] << 16;
+			} else {
+				tx_buff[i] = ctx.tx_data % 256;
+				tx_buff[i] |= cfg_params.tx_slots[slot] << 8;
+				tx_buff[i] |= 1 << 15; /* valid bit */
 			}
 			ctx.tx_data++;
 			i++;
@@ -475,6 +523,7 @@ static void pcm_start_test(void)
 static const struct of_device_id qca_raw_lb_match_table[] = {
 	{ .compatible = "qca,ipq4019-pcm-lb", .data = (void *)IPQ4019 },
 	{ .compatible = "qca,ipq8074-pcm-lb", .data = (void *)IPQ8074 },
+	{ .compatible = "qca,ipq5018-pcm-lb", .data = (void *)IPQ5018 },
 	{},
 };
 

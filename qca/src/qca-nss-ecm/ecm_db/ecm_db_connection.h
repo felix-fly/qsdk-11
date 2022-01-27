@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -15,6 +15,9 @@
  */
 
 #include <net/netfilter/nf_conntrack.h>
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+#include <ovsmgr.h>
+#endif
 
 /*
  * Magic number
@@ -61,6 +64,7 @@ struct ecm_db_connection_instance {
 	int protocol;						/* RO: Protocol of the connection */
 	ecm_db_direction_t direction;				/* RO: 'Direction' of connection establishment. */
 	bool is_routed;						/* RO: True when connection is routed, false when not */
+	bool timer_no_touch;					/* RO: Do no update timer when this flag is set */
 	uint16_t l2_encap_proto;				/* L2 encap protocol of the flow of this connection */
 	uint32_t mark;						/* The result value of mark classifier on this connection */
 
@@ -226,6 +230,8 @@ struct ecm_front_end_connection_instance *ecm_db_connection_front_end_get_and_re
 int ecm_db_connection_elapsed_defunct_timer(struct ecm_db_connection_instance *ci);
 bool ecm_db_connection_defunct_timer_reset(struct ecm_db_connection_instance *ci, ecm_db_timer_group_t tg);
 bool ecm_db_connection_defunct_timer_touch(struct ecm_db_connection_instance *ci);
+void ecm_db_connection_defunct_timer_no_touch_set(struct ecm_db_connection_instance *ci);
+bool ecm_db_connection_defunct_timer_no_touch_get(struct ecm_db_connection_instance *ci);
 ecm_db_timer_group_t ecm_db_connection_timer_group_get(struct ecm_db_connection_instance *ci);
 void ecm_db_connection_defunct_timer_remove_and_set(struct ecm_db_connection_instance *ci, ecm_db_timer_group_t tg);
 void ecm_db_connection_make_defunct(struct ecm_db_connection_instance *ci);
@@ -277,6 +283,9 @@ struct ecm_db_connection_instance *ecm_db_connections_get_and_ref_first(void);
 struct ecm_db_connection_instance *ecm_db_connection_get_and_ref_next(struct ecm_db_connection_instance *ci);
 
 void ecm_db_connection_defunct_all(void);
+void ecm_db_connection_defunct_by_port(int port, ecm_db_obj_dir_t dir);
+void ecm_db_connection_defunct_by_protocol(int protocol);
+void ecm_db_connection_defunct_ip_version(int ip_version);
 
 struct ecm_db_connection_instance *ecm_db_connection_serial_find_and_ref(uint32_t serial);
 struct ecm_db_connection_instance *ecm_db_connection_find_and_ref(ip_addr_t host1_addr,
@@ -356,6 +365,9 @@ int ecm_db_protocol_get_first(void);
 
 struct ecm_db_connection_instance *ecm_db_connection_ipv4_from_ct_get_and_ref(struct nf_conn *ct);
 struct ecm_db_connection_instance *ecm_db_connection_ipv6_from_ct_get_and_ref(struct nf_conn *ct);
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+struct ecm_db_connection_instance *ecm_db_connection_from_ovs_flow_get_and_ref(struct ovsmgr_dp_flow *flow);
+#endif
 
 void ecm_db_front_end_instance_ref_and_set(struct ecm_db_connection_instance *ci,
 					   struct ecm_front_end_connection_instance *feci);
@@ -366,6 +378,9 @@ void ecm_db_connection_l2_encap_proto_set(struct ecm_db_connection_instance *ci,
 uint16_t ecm_db_connection_l2_encap_proto_get(struct ecm_db_connection_instance *ci);
 void ecm_db_connection_mark_set(struct ecm_db_connection_instance *ci, uint32_t mark);
 uint32_t ecm_db_connection_mark_get(struct ecm_db_connection_instance *ci);
+
+void ecm_db_connection_defunct_by_classifier(int ip_ver, ip_addr_t src_addr, uint16_t src_port, ip_addr_t dest_addr,
+						uint16_t dest_port, int proto, bool is_routed, ecm_classifier_type_t ca_type);
 
 bool ecm_db_connection_init(struct dentry *dentry);
 void ecm_db_connection_exit(void);

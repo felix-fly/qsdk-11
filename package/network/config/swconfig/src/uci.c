@@ -278,6 +278,20 @@ found:
 
 			swlib_map_settings(dev, SWLIB_ATTR_GROUP_VLAN, vlan_n, s);
 		} else if (!strcmp(s->type, "switch_ext")) {
+			char *devn = NULL;
+			uci_foreach_element(&s->options, os) {
+				o = uci_to_option(os);
+				if (o->type != UCI_TYPE_STRING)
+					continue;
+
+				if (!strcmp(os->name, "device")) {
+					devn = o->v.string;
+				}
+			}
+			if (devn && !swlib_match_name(dev, devn)) {
+				continue;
+			}
+
 			swlib_map_ext_attr_settings(dev, SWLIB_ATTR_GROUP_GLOBAL, 0, s);
 		}
 	}

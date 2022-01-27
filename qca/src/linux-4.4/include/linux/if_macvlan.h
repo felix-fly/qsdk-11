@@ -34,6 +34,11 @@ struct macvtap_queue;
 #define MACVLAN_MC_FILTER_BITS	8
 #define MACVLAN_MC_FILTER_SZ	(1 << MACVLAN_MC_FILTER_BITS)
 
+/*
+ * Callback for updating interface statistics for macvlan flows offloaded from host CPU.
+ */
+typedef void (*macvlan_offload_stats_update_cb_t)(struct net_device *dev, struct rtnl_link_stats64 *stats, bool update_mcast_rx_stats);
+
 struct macvlan_dev {
 	struct net_device	*dev;
 	struct list_head	list;
@@ -61,6 +66,7 @@ struct macvlan_dev {
 	struct netpoll		*netpoll;
 #endif
 	unsigned int		macaddr_count;
+	macvlan_offload_stats_update_cb_t	offload_stats_update;
 };
 
 static inline void macvlan_count_rx(const struct macvlan_dev *vlan,
@@ -96,6 +102,24 @@ extern void macvlan_dellink(struct net_device *dev, struct list_head *head);
 extern int macvlan_link_register(struct rtnl_link_ops *ops);
 
 #if IS_ENABLED(CONFIG_MACVLAN)
+static inline void
+macvlan_offload_stats_update(struct net_device *dev,
+			     struct rtnl_link_stats64 *stats,
+			     bool update_mcast_rx_stats)
+{
+	struct macvlan_dev *macvlan = netdev_priv(dev);
+
+	macvlan->offload_stats_update(dev, stats, update_mcast_rx_stats);
+}
+
+static inline enum macvlan_mode
+macvlan_get_mode(struct net_device *dev)
+{
+	struct macvlan_dev *macvlan = netdev_priv(dev);
+
+	return macvlan->mode;
+}
+
 static inline struct net_device *
 macvlan_dev_real_dev(const struct net_device *dev)
 {

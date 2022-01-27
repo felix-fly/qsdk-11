@@ -305,12 +305,17 @@ void inet_frag_destroy(struct inet_frag_queue *q, struct inet_frags *f)
 	/* Release all fragment data. */
 	fp = q->fragments;
 	nf = q->net;
-	while (fp) {
-		struct sk_buff *xp = fp->next;
 
-		sum_truesize += fp->truesize;
-		frag_kfree_skb(nf, f, fp);
-		fp = xp;
+	if (!fp) {
+		sum_truesize = skb_rbtree_purge(&q->rb_fragments);
+	} else {
+		do {
+			struct sk_buff *xp = fp->next;
+
+			sum_truesize += fp->truesize;
+			frag_kfree_skb(nf, f, fp);
+			fp = xp;
+		} while (fp);
 	}
 	sum = sum_truesize + f->qsize;
 

@@ -39,17 +39,31 @@
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/random.h>
 
+
+#define CLIENT_CMD_CRYPTO_AES_DECRYPT	8
+#define CLIENT_CMD_CRYPTO_AES_ENCRYPT	7
+#define CLIENT_CMD_CRYPTO_AES_64	6
+#define CLIENT_CMD_CRYPTO_RSA_64	5
 #define CLIENT_CMD_CRYPTO_RSA		3
 #define CLIENT_CMD_CRYPTO_AES		2
 #define CLIENT_CMD1_BASIC_DATA		1
 #define CLIENT_CMD8_RUN_CRYPTO_TEST	3
 #define CLIENT_CMD8_RUN_CRYPTO_ENCRYPT	8
+#define CLIENT_CMD40_RUN_AES_ENCRYPT	40
+#define CLIENT_CMD41_RUN_AES_DECRYPT	41
+#define CLIENT_CMD42_RUN_RSA_CRYPT	42
+#define CLIENT_CMD43_RUN_FUSE_BLOW	43
 #define CLIENT_CMD9_RUN_CRYPTO_DECRYPT	9
 #define CLIENT_CMD_AUTH			26
+#define CLIENT_CMD53_RUN_LOG_BITMASK_TEST	53
+#define CLIENT_CMD18_RUN_FUSE_TEST	18
+#define CLIENT_CMD13_RUN_MISC_TEST	13
 #define MAX_INPUT_SIZE			4096
 #define QSEE_64				64
 #define QSEE_32				32
+#define AES_BLOCK_SIZE			16
 
 #define MAX_ENCRYPTED_DATA_SIZE  (2072 * sizeof(uint8_t))
 #define MAX_PLAIN_DATA_SIZE	 (2048 * sizeof(uint8_t))
@@ -60,7 +74,7 @@
 
 #define KEY_BLOB_SIZE		(56 * sizeof(uint8_t))
 #define KEY_SIZE		(32 * sizeof(uint8_t))
-
+#define MAX_FUSE_WRITE_VALUE    0xffffffffffffffff
 #define RSA_KEY_SIZE_MAX	((528) * sizeof(uint8_t))
 #define RSA_IV_LENGTH		(16 * sizeof(uint8_t))
 #define RSA_HMAC_LENGTH		(32 * sizeof(uint8_t))
@@ -76,6 +90,23 @@
 static int app_state;
 static int app_libs_state;
 struct qseecom_props *props;
+
+enum tz_crypto_service_aes_cmd_t {
+	TZ_CRYPTO_SERVICE_AES_ENC_ID = 0x1,
+	TZ_CRYPTO_SERVICE_AES_DEC_ID = 0x2,
+};
+
+enum tz_crypto_service_aes_type_t {
+	TZ_CRYPTO_SERVICE_AES_TYPE_SHK = 1,
+	TZ_CRYPTO_SERVICE_AES_TYPE_PHK,
+	TZ_CRYPTO_SERVICE_AES_TYPE_MAX,
+};
+
+enum tz_crypto_service_aes_mode_t {
+	TZ_CRYPTO_SERVICE_AES_MODE_ECB = 0,
+	TZ_CRYPTO_SERVICE_AES_MODE_CBC,
+	TZ_CRYPTO_SERVICE_AES_MODE_MAX,
+};
 
 enum tz_storage_service_cmd_t {
 	TZ_STOR_SVC_GENERATE_KEY = 0x00000001,
@@ -98,16 +129,33 @@ enum tz_storage_service_digest_pad_algo_t {
 	TZ_STOR_SVC_RSA_DIGEST_PAD_PSS_SHA2_256     = 0x00000002,
 };
 
+struct tz_storage_service_key_blob_32bit_t {
+        uint8_t *key_material;
+        uint32_t key_material_len;
+};
+
 struct tz_storage_service_key_blob_t {
-	uint8_t *key_material;
-	size_t key_material_len;
+	uint64_t key_material;
+	uint32_t key_material_len;
+};
+
+struct tz_storage_service_import_key_cmd_32bit_t {
+        enum tz_storage_service_cmd_t cmd_id;
+        struct tz_storage_service_key_blob_32bit_t key_blob;
+        uint8_t *input_key;
+        uint32_t input_key_len;
 };
 
 struct tz_storage_service_import_key_cmd_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	struct tz_storage_service_key_blob_t key_blob;
-	uint8_t *input_key;
-	size_t input_key_len;
+	uint64_t input_key;
+	uint32_t input_key_len;
+};
+
+struct tz_storage_service_gen_key_cmd_32bit_t {
+        enum tz_storage_service_cmd_t cmd_id;
+        struct tz_storage_service_key_blob_32bit_t key_blob;
 };
 
 struct tz_storage_service_gen_key_cmd_t {
@@ -118,37 +166,77 @@ struct tz_storage_service_gen_key_cmd_t {
 struct tz_storage_service_gen_key_resp_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	int32_t status;
-	size_t key_blob_size;
+	uint32_t key_blob_size;
+};
+
+struct tz_storage_service_seal_data_cmd_32bit_t {
+        enum tz_storage_service_cmd_t cmd_id;
+        struct tz_storage_service_key_blob_32bit_t key_blob;
+        uint8_t *plain_data;
+        uint32_t plain_data_len;
+        uint8_t *output_buffer;
+        uint32_t output_len;
 };
 
 struct tz_storage_service_seal_data_cmd_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	struct tz_storage_service_key_blob_t key_blob;
-	uint8_t *plain_data;
-	size_t plain_data_len;
-	uint8_t *output_buffer;
-	size_t output_len;
+	uint64_t plain_data;
+	uint32_t plain_data_len;
+	uint64_t output_buffer;
+	uint32_t output_len;
 };
 
 struct tz_storage_service_seal_data_resp_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	int32_t status;
-	size_t sealed_data_len;
+	uint32_t sealed_data_len;
+};
+
+struct tz_storage_service_unseal_data_cmd_32bit_t {
+        enum tz_storage_service_cmd_t cmd_id;
+        struct tz_storage_service_key_blob_32bit_t key_blob;
+        uint8_t *sealed_data;
+        uint32_t sealed_dlen;
+        uint8_t *output_buffer;
+        uint32_t output_len;
 };
 
 struct tz_storage_service_unseal_data_cmd_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	struct tz_storage_service_key_blob_t key_blob;
-	uint8_t *sealed_data;
-	size_t sealed_dlen;
-	uint8_t *output_buffer;
-	size_t output_len;
+	uint64_t sealed_data;
+	uint32_t sealed_dlen;
+	uint64_t output_buffer;
+	uint32_t output_len;
 };
 
 struct tz_storage_service_unseal_data_resp_t {
 	enum tz_storage_service_cmd_t cmd_id;
 	int32_t status;
-	size_t unsealed_data_len;
+	uint32_t unsealed_data_len;
+};
+
+struct tz_crypto_service_encrypt_data_cmd_t {
+	uint64_t  type;
+	uint64_t mode;
+	uint64_t plain_data;
+	uint64_t plain_data_len;
+	uint64_t iv;
+	uint64_t iv_len;
+	uint64_t output_buffer;
+	uint64_t output_len;
+};
+
+struct tz_crypto_service_decrypt_data_cmd_t {
+	uint64_t  type;
+	uint64_t mode;
+	uint64_t encrypted_data;
+	uint64_t encrypted_dlen;
+	uint64_t iv;
+	uint64_t iv_len;
+	uint64_t output_buffer;
+	uint64_t output_len;
 };
 
 struct tz_storage_service_rsa_key_t {
@@ -156,18 +244,23 @@ struct tz_storage_service_rsa_key_t {
 	uint32_t version;
 	enum tz_storage_service_digest_pad_algo_t pad_algo;
 	uint8_t modulus[RSA_KEY_SIZE_MAX];
-	size_t modulus_len;
+	uint32_t modulus_len;
 	uint8_t public_exponent[RSA_KEY_SIZE_MAX];
-	size_t public_exponent_len;
+	uint32_t public_exponent_len;
 	uint8_t iv[RSA_IV_LENGTH];
 	uint8_t pvt_exponent[RSA_KEY_SIZE_MAX];
-	size_t pvt_exponent_len;
+	uint32_t pvt_exponent_len;
 	uint8_t hmac[RSA_HMAC_LENGTH];
 };
 
+struct tz_storage_service_rsa_key_blob_32bit_t {
+        struct tz_storage_service_rsa_key_t *key_material;
+        uint32_t key_material_len;
+};
+
 struct tz_storage_service_rsa_key_blob_t {
-	struct tz_storage_service_rsa_key_t *key_material;
-	size_t key_material_len;
+	uint64_t key_material;
+	uint32_t key_material_len;
 };
 
 #define RSA_KEY_BLOB_SIZE sizeof(struct tz_storage_service_rsa_key_t)
@@ -176,6 +269,12 @@ struct tz_storage_service_rsa_keygen_params_t {
 	uint32_t modulus_size;
 	uint64_t public_exponent;
 	enum tz_storage_service_digest_pad_algo_t pad_algo;
+};
+
+struct tz_storage_service_rsa_gen_key_cmd_32bit_t {
+        enum tz_storage_service_rsa_cmd_t cmd_id;
+        struct tz_storage_service_rsa_key_blob_32bit_t key_blob;
+        struct tz_storage_service_rsa_keygen_params_t rsa_params;
 };
 
 struct tz_storage_service_rsa_gen_key_cmd_t {
@@ -187,17 +286,29 @@ struct tz_storage_service_rsa_gen_key_cmd_t {
 struct tz_storage_service_rsa_gen_key_resp_t {
 	enum tz_storage_service_rsa_cmd_t cmd_id;
 	int32_t status;
-	size_t key_blob_size;
+	uint32_t key_blob_size;
+};
+
+struct tz_storage_service_rsa_import_key_cmd_32bit_t {
+        enum tz_storage_service_rsa_cmd_t cmd_id;
+        uint8_t modulus[RSA_KEY_SIZE_MAX];
+        uint32_t modulus_len;
+        uint8_t public_exponent[RSA_PUB_EXP_SIZE_MAX];
+        uint32_t public_exponent_len;
+        uint8_t pvt_exponent[RSA_KEY_SIZE_MAX];
+        uint32_t pvt_exponent_len;
+        uint32_t digest_pad_type;
+        struct tz_storage_service_rsa_key_blob_32bit_t key_blob;
 };
 
 struct tz_storage_service_rsa_import_key_cmd_t {
 	enum tz_storage_service_rsa_cmd_t cmd_id;
 	uint8_t modulus[RSA_KEY_SIZE_MAX];
-	size_t modulus_len;
+	uint32_t modulus_len;
 	uint8_t public_exponent[RSA_PUB_EXP_SIZE_MAX];
-	size_t public_exponent_len;
+	uint32_t public_exponent_len;
 	uint8_t pvt_exponent[RSA_KEY_SIZE_MAX];
-	size_t pvt_exponent_len;
+	uint32_t pvt_exponent_len;
 	uint32_t digest_pad_type;
 	struct tz_storage_service_rsa_key_blob_t key_blob;
 };
@@ -207,28 +318,46 @@ struct tz_storage_service_rsa_import_key_resp_t {
 	int32_t status;
 };
 
+struct tz_storage_service_rsa_sign_data_cmd_32bit_t {
+        enum tz_storage_service_rsa_cmd_t cmd_id;
+        struct tz_storage_service_rsa_key_blob_32bit_t key_blob;
+        uint8_t *plain_data;
+        uint32_t plain_data_len;
+        uint8_t *output_buffer;
+        uint32_t output_len;
+};
+
 struct tz_storage_service_rsa_sign_data_cmd_t {
 	enum tz_storage_service_rsa_cmd_t cmd_id;
 	struct tz_storage_service_rsa_key_blob_t key_blob;
-	uint8_t *plain_data;
-	size_t plain_data_len;
-	uint8_t *output_buffer;
-	size_t output_len;
+	uint64_t plain_data;
+	uint32_t plain_data_len;
+	uint64_t output_buffer;
+	uint32_t output_len;
 };
 
 struct tz_storage_service_rsa_sign_data_resp_t {
 	enum tz_storage_service_rsa_cmd_t cmd_id;
-	size_t sealed_data_len;
+	uint32_t sealed_data_len;
 	int32_t status;
+};
+
+struct tz_storage_service_rsa_verify_data_cmd_32bit_t {
+        enum tz_storage_service_rsa_cmd_t cmd_id;
+        struct tz_storage_service_rsa_key_blob_32bit_t key_blob;
+        uint8_t *data;
+        uint32_t data_len;
+        uint8_t *signed_data;
+        uint32_t signed_dlen;
 };
 
 struct tz_storage_service_rsa_verify_data_cmd_t {
 	enum tz_storage_service_rsa_cmd_t cmd_id;
 	struct tz_storage_service_rsa_key_blob_t key_blob;
-	uint8_t *data;
-	size_t data_len;
-	uint8_t *signed_data;
-	size_t signed_dlen;
+	uint64_t data;
+	uint32_t data_len;
+	uint64_t signed_data;
+	uint32_t signed_dlen;
 };
 
 struct tz_storage_service_rsa_verify_data_resp_t {
@@ -267,6 +396,60 @@ enum qseecom_qceos_cmd_status {
 	QSEOS_RESULT_FAILURE	= 0xFFFFFFFF
 };
 
+struct tz_storage_service_rsa_message_type {
+	uint64_t input;
+	uint64_t input_len;
+	uint64_t label;
+	uint64_t label_len;
+	uint64_t output;
+	uint64_t output_len;
+	uint64_t padding_type;
+	uint64_t hashidx;
+};
+
+struct tz_storage_service_rsa_key_type {
+	uint64_t nbits;   //Number of bits in modulus
+	uint64_t n;  // Modulus
+	uint64_t e;  // Public Exponent
+	uint64_t d;  // Private Exponent
+};
+
+struct tz_storage_service_rsa_message_req {
+	uint64_t key_req;
+	uint64_t msg_req;
+	uint64_t operation;
+};
+
+struct tz_storage_service_fuse_blow_req {
+	uint64_t addr;
+	uint64_t value;
+	uint64_t is_fec_enable;
+};
+
+enum tz_storage_service_rsa_operation_id {
+	TZ_APP_RSA_ENCRYPTION_ID = 0,
+	TZ_APP_RSA_DECRYPTION_ID
+};
+
+enum tz_storage_service_rsa_padding_type {
+	QSEE_RSA_PADDING_TYPE_PKCS = 0,
+	QSEE_RSA_PADDING_TYPE_OAEP,
+	QSEE_RSA_NO_PADDING,
+	QSEE_RSA_PADDING_TYPE_MAX
+};
+
+enum tz_storage_service_qsee_hash_id {
+	QSEE_HASH_IDX_NULL = 1,
+	QSEE_HASH_IDX_SHA1,
+	QSEE_HASH_IDX_SHA256,
+	QSEE_HASH_IDX_SHA224,
+	QSEE_HASH_IDX_SHA384,
+	QSEE_HASH_IDX_SHA512,
+	QSEE_HASH_IDX_SHA256_SHA1,
+	QSEE_HASH_IDX_MAX,
+	QSEE_HASH_IDX_INVALID = 0x7FFFFFFF,
+};
+
 static uint32_t qsee_app_id;
 static void *qsee_sbuffer;
 static unsigned long basic_output;
@@ -279,6 +462,33 @@ static int auth_size;
 static uint8_t *mdt_file;
 static uint8_t *seg_file;
 static uint8_t *auth_file;
+static uint8_t *aes_sealed_buf;
+static uint64_t aes_encrypted_len;
+static uint8_t *aes_unsealed_buf;
+static uint64_t aes_decrypted_len;
+static uint8_t *aes_ivdata;
+static uint64_t aes_ivdata_len;
+static uint64_t aes_type;
+static uint64_t aes_mode;
+static uint8_t *rsa_unsealed_buf;
+static uint8_t *rsa_sealed_buf;
+static uint64_t rsa_decrypted_len;
+static uint64_t rsa_encrypted_len;
+static uint8_t *rsa_label;
+static uint64_t rsa_label_len;
+static uint8_t *rsa_n_key;
+static uint64_t rsa_n_key_len;
+static uint8_t *rsa_e_key;
+static uint64_t rsa_e_key_len;
+static uint8_t *rsa_d_key;
+static uint64_t rsa_d_key_len;
+static uint64_t rsa_nbits_key;
+static uint64_t rsa_hashidx;
+static uint64_t rsa_padding_type;
+static uint64_t fuse_addr;
+static uint64_t fuse_value;
+static uint64_t is_fec_enable;
+
 
 static struct kobject *sec_kobj;
 static uint8_t *key;
@@ -289,6 +499,12 @@ static uint8_t *sealed_buf;
 static size_t seal_len;
 static uint8_t *unsealed_buf;
 static size_t unseal_len;
+static uint64_t encrypted_len;
+static uint64_t decrypted_len;
+static uint8_t *ivdata;
+static uint64_t type;
+static uint64_t mode;
+static uint64_t ivdata_len;
 
 static struct kobject *rsa_sec_kobj;
 static uint8_t *rsa_import_modulus;
@@ -305,6 +521,10 @@ static uint8_t *rsa_plain_data_buf;
 static size_t rsa_plain_data_len;
 
 struct kobject *tzapp_kobj;
+struct kobject *tzapp_aes_kobj;
+struct kobject *tzapp_rsa_kobj;
+struct kobject *tzapp_fuse_write_kobj;
+
 struct attribute_group tzapp_attr_grp;
 
 static struct tzdbg_log_t *g_qsee_log;
@@ -325,6 +545,28 @@ static struct device *qdev;
 #define AUTH_OTP	0x10
 #define AES_SEC_KEY	0x20
 #define RSA_SEC_KEY	0x40
+#define LOG_BITMASK	0x80
+#define FUSE		0x100
+#define MISC		0x200
+#define AES_TZAPP	0x400
+#define RSA_TZAPP	0x800
+#define FUSE_WRITE	0x1000
+
+#define RSA_KEY_ALIGN	8
+enum tz_app_cmd_ids {
+	TZ_APP_BASIC_DATA_TEST_ID = 1,
+	TZ_APP_ENC_TEST_ID,
+	TZ_APP_DEC_TEST_ID,
+	TZ_APP_CRYPTO_TEST_ID,
+	TZ_APP_AUTH_OTP_TEST_ID,
+	TZ_APP_LOG_BITMASK_TEST_ID,
+	TZ_APP_FUSE_TEST_ID,
+	TZ_APP_MISC_TEST_ID,
+	TZ_APP_AES_ENCRYPT_ID,
+	TZ_APP_AES_DECRYPT_ID,
+	TZ_APP_RSA_ENC_DEC_ID,
+	TZ_APP_FUSE_BLOW_ID
+};
 
 static ssize_t show_qsee_app_log_buf(struct device *dev,
 				    struct device_attribute *attr, char *buf);
@@ -355,6 +597,32 @@ static ssize_t store_sealed_data(struct device *dev,
 
 static ssize_t show_unsealed_data(struct device *dev,
 				 struct device_attribute *attr, char *buf);
+
+static ssize_t store_aes_type(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t store_aes_mode(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+
+static ssize_t store_iv_data(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t store_encrypted_data(struct device *dev,
+                                struct device_attribute *attr,
+                                const char *buf, size_t count);
+
+static ssize_t show_encrypted_data(struct device *dev,
+				struct device_attribute *attr, char *buf);
+
+static ssize_t store_decrypted_data(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t show_decrypted_data(struct device *dev,
+				struct device_attribute *attr, char *buf);
 
 static ssize_t generate_rsa_key_blob(struct device *dev,
 				    struct device_attribute *attr,
@@ -429,6 +697,95 @@ static ssize_t store_fuse_otp_input(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf, size_t count);
 
+static ssize_t store_log_bitmask_input(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count);
+
+static ssize_t store_fuse_input(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count);
+
+static ssize_t store_misc_input(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf, size_t count);
+
+static ssize_t show_qsee_app_id(struct device *dev,
+				   struct device_attribute *attr, char *buf);
+
+static ssize_t store_aes_type_tzapp(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t store_aes_mode_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+
+static ssize_t store_iv_data_tzapp(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t show_aes_encrypted_data_tzapp(struct device *dev,
+				struct device_attribute *attr, char *buf);
+
+static ssize_t store_aes_decrypted_data_tzapp(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+static ssize_t show_aes_decrypted_data_tzapp(struct device *dev,
+				struct device_attribute *attr, char *buf);
+
+static ssize_t store_aes_encrypted_data_tzapp(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count);
+
+
+static ssize_t store_decrypted_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t show_encrypted_rsa_data_tzapp(struct device *dev,
+				struct device_attribute *attr, char *buf);
+static ssize_t store_encrypted_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t show_decrypted_rsa_data_tzapp(struct device *dev,
+				struct device_attribute *attr, char *buf);
+
+static ssize_t store_label_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_n_key_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_e_key_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_d_key_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_nbits_key_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_hashidx_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_padding_type_rsa_data_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_addr_fuse_write_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_value_fuse_write_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_fec_enable_fuse_write_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+static ssize_t store_blow_fuse_write_tzapp(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count);
+
+/* Tz app device attrs starts here....*/
+
 static DEVICE_ATTR(log_buf, 0644, show_qsee_app_log_buf, NULL);
 static DEVICE_ATTR(load_start, S_IWUSR, NULL, store_load_start);
 static DEVICE_ATTR(basic_data, 0644, show_basic_output, store_basic_input);
@@ -436,12 +793,44 @@ static DEVICE_ATTR(encrypt, 0644, show_encrypt_output, store_encrypt_input);
 static DEVICE_ATTR(decrypt, 0644, show_decrypt_output, store_decrypt_input);
 static DEVICE_ATTR(crypto, 0644, NULL, store_crypto_input);
 static DEVICE_ATTR(fuse_otp, 0644, NULL, store_fuse_otp_input);
+static DEVICE_ATTR(log_bitmask, 0644, NULL, store_log_bitmask_input);
+static DEVICE_ATTR(fuse, 0644, NULL, store_fuse_input);
+static DEVICE_ATTR(misc, 0644, NULL, store_misc_input);
+static DEVICE_ATTR(qsee_app_id, 0644, show_qsee_app_id, NULL);
+
+static DEVICE_ATTR(encrypt_aes, 0644, show_aes_encrypted_data_tzapp, store_aes_decrypted_data_tzapp);
+static DEVICE_ATTR(decrypt_aes, 0644, show_aes_decrypted_data_tzapp, store_aes_encrypted_data_tzapp);
+static DEVICE_ATTR(ivdata_aes, 0644, NULL, store_iv_data_tzapp);
+static DEVICE_ATTR(type_aes, 0644, NULL, store_aes_type_tzapp);
+static DEVICE_ATTR(mode_aes, 0644, NULL, store_aes_mode_tzapp);
+
+static DEVICE_ATTR(encrypt_rsa, 0644, show_encrypted_rsa_data_tzapp, store_decrypted_rsa_data_tzapp);
+static DEVICE_ATTR(decrypt_rsa, 0644, show_decrypted_rsa_data_tzapp, store_encrypted_rsa_data_tzapp);
+static DEVICE_ATTR(label_rsa, 0644, NULL, store_label_rsa_data_tzapp);
+static DEVICE_ATTR(modulus_key, 0644, NULL, store_n_key_rsa_data_tzapp);
+static DEVICE_ATTR(public_exponent_key, 0644, NULL, store_e_key_rsa_data_tzapp);
+static DEVICE_ATTR(private_exponent_key, 0644, NULL, store_d_key_rsa_data_tzapp);
+static DEVICE_ATTR(nbits_key, 0644, NULL, store_nbits_key_rsa_data_tzapp);
+static DEVICE_ATTR(hashidx, 0644, NULL, store_hashidx_rsa_data_tzapp);
+static DEVICE_ATTR(padding_type, 0644, NULL, store_padding_type_rsa_data_tzapp);
+
+static DEVICE_ATTR(addr, 0644, NULL, store_addr_fuse_write_tzapp);
+static DEVICE_ATTR(value, 0644, NULL, store_value_fuse_write_tzapp);
+static DEVICE_ATTR(fec_enable, 0644, NULL, store_fec_enable_fuse_write_tzapp);
+static DEVICE_ATTR(blow, 0644, NULL, store_blow_fuse_write_tzapp);
+
+/* Tz app device attrs ends here....*/
 
 static DEVICE_ATTR(generate, 0644, generate_key_blob, NULL);
 static DEVICE_ATTR(import, 0644, import_key_blob, store_key);
 static DEVICE_ATTR(key_blob, 0644, NULL, store_key_blob);
 static DEVICE_ATTR(seal, 0644, show_sealed_data, store_unsealed_data);
 static DEVICE_ATTR(unseal, 0644, show_unsealed_data, store_sealed_data);
+static DEVICE_ATTR(aes_encrypt, 0644, show_encrypted_data, store_decrypted_data);
+static DEVICE_ATTR(aes_decrypt, 0644, show_decrypted_data, store_encrypted_data);
+static DEVICE_ATTR(aes_ivdata, 0644, NULL, store_iv_data);
+static DEVICE_ATTR(aes_type, 0644, NULL, store_aes_type);
+static DEVICE_ATTR(aes_mode, 0644, NULL, store_aes_mode);
 
 static DEVICE_ATTR(rsa_generate, 0644, generate_rsa_key_blob, NULL);
 static DEVICE_ATTR(rsa_key_blob, 0644, NULL, store_rsa_key_blob);
@@ -457,6 +846,11 @@ static struct attribute *sec_key_attrs[] = {
 	&dev_attr_key_blob.attr,
 	&dev_attr_seal.attr,
 	&dev_attr_unseal.attr,
+	&dev_attr_aes_encrypt.attr,
+	&dev_attr_aes_decrypt.attr,
+	&dev_attr_aes_ivdata.attr,
+	&dev_attr_aes_type.attr,
+	&dev_attr_aes_mode.attr,
 	NULL,
 };
 
@@ -469,6 +863,36 @@ static struct attribute *rsa_sec_key_attrs[] = {
 	NULL,
 };
 
+static struct attribute *tzapp_aes_attrs[] = {
+	&dev_attr_encrypt_aes.attr,
+	&dev_attr_decrypt_aes.attr,
+	&dev_attr_ivdata_aes.attr,
+	&dev_attr_type_aes.attr,
+	&dev_attr_mode_aes.attr,
+	NULL,
+};
+
+static struct attribute *tzapp_fuse_write_attrs[] = {
+	&dev_attr_addr.attr,
+	&dev_attr_value.attr,
+	&dev_attr_fec_enable.attr,
+	&dev_attr_blow.attr,
+	NULL,
+};
+
+static struct attribute *tzapp_rsa_attrs[] = {
+	&dev_attr_encrypt_rsa.attr,
+	&dev_attr_decrypt_rsa.attr,
+	&dev_attr_label_rsa.attr,
+	&dev_attr_modulus_key.attr,
+	&dev_attr_public_exponent_key.attr,
+	&dev_attr_private_exponent_key.attr,
+	&dev_attr_nbits_key.attr,
+	&dev_attr_hashidx.attr,
+	&dev_attr_padding_type.attr,
+	NULL,
+};
+
 static struct attribute_group sec_key_attr_grp = {
 	.attrs = sec_key_attrs,
 };
@@ -476,6 +900,18 @@ static struct attribute_group sec_key_attr_grp = {
 static struct attribute_group rsa_sec_key_attr_grp = {
 	.attrs = rsa_sec_key_attrs,
 };
+
+static struct attribute_group tzapp_aes_attr_grp = {
+	.attrs = tzapp_aes_attrs,
+};
+
+static struct attribute_group tzapp_rsa_attr_grp = {
+	.attrs = tzapp_rsa_attrs,
+};
+static struct attribute_group tzapp_fuse_write_attr_grp = {
+	.attrs = tzapp_fuse_write_attrs,
+};
+
 
 struct bin_attribute mdt_attr = {
 	.attr = {.name = "mdt_file", .mode = 0666},

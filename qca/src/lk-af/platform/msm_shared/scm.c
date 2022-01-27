@@ -42,6 +42,11 @@
 #  define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
 #endif
 
+struct tz_log_read {
+        uint32_t log_buf;
+        uint32_t buf_size;
+};
+
 /**
  * alloc_scm_command() - Allocate an SCM command
  * @cmd_size: size of the command buffer
@@ -447,7 +452,6 @@ static int scm_call_64(uint32_t svc_id, uint32_t cmd_id, struct qca_scm_desc *de
 	int ret;
 	uint32_t fn_id = QCA_SCM_SIP_FNID(svc_id, cmd_id);
 
-
 	if (arglen > QCA_MAX_ARG_LEN) {
 		dprintf(INFO, "Error Extra args not supported\n");
 		for(;;);
@@ -537,7 +541,17 @@ int qca_scm_call_write(uint32_t svc_id,
 	int ret = 0;
 
 	struct qca_scm_desc desc = {0};
-	desc.arginfo = QCA_SCM_ARGS(2, SCM_READ_OP);
+
+	/*
+	 * In ipq807x, this SCM call is called as a Fast
+	 * SCM call which means it will get executed in
+	 * EL3 monitor mode itself without jumping to QSEE.
+	 * But, In ipq6018, We need to jump into QSEE which
+	 * will execute the SCM call, as we do not have
+	 * support for Fast SCM call in ipq6018.
+	 */
+
+	desc.arginfo = QCA_SCM_ARGS(2, SCM_VAL, SCM_VAL);
 	desc.args[0] = (uint32_t)addr;
 	desc.args[1] = val;
 	ret = scm_call_64(svc_id, cmd_id, &desc);
@@ -643,6 +657,94 @@ int qca_scm_secure_authenticate(void *cmd_buf, size_t cmd_len)
 		ret = scm_call(SCM_SVC_BOOT, SCM_CMD_SEC_AUTH, cmd_buf, cmd_len,
 									NULL, 0);
 	}
+
+	return ret;
+}
+
+/*
+ * qcom_scm_set_resettype() - configure cold or warm reset
+ * @reset type: 0 cold
+ *		1 warm
+ * Returns 0 on success
+ */
+int qca_scm_set_resettype(uint32_t reset_type)
+{
+	uint32_t out;
+	int ret = 0;
+
+	if (is_scm_armv8()) {
+		struct qca_scm_desc desc = {0};
+
+		desc.args[0] = reset_type;
+		desc.arginfo = QCA_SCM_ARGS(1, SCM_VAL);
+
+		ret = scm_call_64(SCM_SVC_BOOT, SCM_SVC_RESETTYPE_CMD, &desc);
+		out = desc.ret[0];
+	}
+	else {
+		uint32_t in;
+
+		in = cpu_to_fdt32(reset_type);
+		ret = scm_call(SCM_SVC_BOOT, SCM_SVC_RESETTYPE_CMD,
+				 &in, sizeof(in), &out, sizeof(out));
+	}
+
+	if (!ret)
+		ret = fdt32_to_cpu(out);
+
+	return ret;
+}
+
+int qca_scm_fuseipq(uint32_t svc_id, uint32_t cmd_id, void *buf, size_t len)
+{
+	int ret = 0;
+	uint32_t *status;
+	if (is_scm_armv8())
+	{
+		struct qca_scm_desc desc = {0};
+
+		desc.arginfo = QCA_SCM_ARGS(1, SCM_READ_OP);
+		desc.args[0] = *((unsigned int *)buf);
+
+		ret = scm_call_64(svc_id, cmd_id, &desc);
+
+		status = (uint32_t *)(*(((uint32_t *)buf) + 1));
+		*status = desc.ret[0];
+	}
+	else
+	{
+		ret = scm_call(svc_id, cmd_id, buf, len, NULL, 0);
+	}
+	return ret;
+}
+
+int qca_scm_tz_log(uint32_t svc_id, uint32_t cmd_id,
+			void *ker_buf, uint32_t buf_len)
+{
+	int ret;
+	uint32_t log_buf = (uint32_t) ker_buf;
+
+	if (is_scm_armv8()) {
+		struct qca_scm_desc desc = {0};
+
+		desc.args[0] = log_buf;
+		desc.args[1] = buf_len;
+		desc.arginfo = QCA_SCM_ARGS(2, SCM_IO_WRITE, SCM_VAL);
+
+		ret = scm_call_64(svc_id, cmd_id, &desc);
+		if (!ret)
+			ret = fdt32_to_cpu(desc.ret[0]);
+	}
+	else {
+		struct tz_log_read tzlog;
+
+		tzlog.log_buf = log_buf;
+		tzlog.buf_size = buf_len;
+
+		ret = scm_call(svc_id, cmd_id, &tzlog, sizeof(struct tz_log_read),
+								NULL, 0);
+	}
+	arch_invalidate_cache_range((addr_t)log_buf, buf_len);
 
 	return ret;
 }

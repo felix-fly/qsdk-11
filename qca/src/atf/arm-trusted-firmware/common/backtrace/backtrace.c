@@ -249,9 +249,9 @@ void backtrace(const char *cookie)
 
 	fr = adjust_frame_record(fr);
 
-	printf("BACKTRACE: START: %s\n", cookie);
+	printf("ATF BACKTRACE: START: %s\n", cookie);
 
 	unwind_stack(fr, (uintptr_t)&backtrace, return_address);
 
-	printf("BACKTRACE: END: %s\n", cookie);
+	printf("ATF BACKTRACE: END: %s\n", cookie);
 }

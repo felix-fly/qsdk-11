@@ -11,7 +11,7 @@
 #pragma weak plat_log_get_prefix
 
 static const char *plat_prefix_str[] = {
-	"ERROR:   ", "NOTICE:  ", "WARNING: ", "INFO:    ", "VERBOSE: "};
+	"ATF ERROR:   ", "ATF NOTICE:  ", "ATF WARNING: ", "ATF INFO:    ", "ATF VERBOSE: "};
 
 const char *plat_log_get_prefix(unsigned int log_level)
 {

@@ -42,10 +42,6 @@
 #define PTP_HDR_CORRECTIONFIELD_OFFSET	8
 #define PTP_HDR_RESERVED2_OFFSET	16
 
-#ifndef SUPPORTED_PTP
-#define SUPPORTED_PTP               (1 << 31)
-#endif
-
 #define SKB_TIMESTAMP_TIMEOUT        1 /* jiffies */
 #define GPS_WORK_TIMEOUT             HZ
 
@@ -300,8 +296,8 @@ sw_error_t qca808x_ptp_config_init(struct phy_device *phydev)
 	rx_ts_mode = FAL_RX_TS_EMBED;
 	ret |= qca808x_phy_ptp_rx_timestamp_mode_set(dev_id, phy_id, rx_ts_mode);
 
-	/* enable SYNCE clock output */
-	ret |= qca808x_ptp_clock_synce_clock_enable(dev_id, phy_id, A_TRUE);
+	/* disable SYNCE clock output */
+	ret |= qca808x_ptp_clock_synce_clock_enable(dev_id, phy_id, A_FALSE);
 
 	if (ret != SW_OK) {
 		SSDK_ERROR("%s failed\n", __func__);
@@ -986,6 +982,8 @@ void qca808x_ptp_change_notify(struct phy_device *phydev)
 int qca808x_hwtstamp(struct phy_device *phydev, struct ifreq *ifr)
 {
 	struct hwtstamp_config cfg;
+	a_uint32_t gm_mode = 0;
+	fal_ptp_reference_clock_t ref_clock = FAL_REF_CLOCK_LOCAL;
 	sw_error_t ret = SW_OK;
 	fal_ptp_config_t ptp_config = {0};
 	qca808x_priv *priv = phydev->priv;
@@ -1054,14 +1052,38 @@ int qca808x_hwtstamp(struct phy_device *phydev, struct ifreq *ifr)
 		return -EFAULT;
 	}
 
-	pdata->step_mode = ptp_config.step_mode;
-	if (ptp_info->hwts_rx_type != PTP_CLASS_NONE) {
-		phydev->supported |= SUPPORTED_PTP;
-		phydev->advertising |= SUPPORTED_PTP;
-	} else {
-		phydev->supported &= ~SUPPORTED_PTP;
-		phydev->advertising &= ~SUPPORTED_PTP;
+	/*
+	 * disable SYNCE clock output by default,
+	 * only enabling the clock output under the
+	 * BC mode && not in external reference mode
+	 */
+	qca808x_ptp_clock_synce_clock_enable(pdata->dev_id, pdata->phy_addr, A_FALSE);
+
+	if (pdata->clock_mode == FAL_BC_CLOCK_MODE) {
+		ret = qca808x_ptp_gm_conf0_reg_grandmaster_mode_get(pdata->dev_id,
+				pdata->phy_addr, &gm_mode);
+		/* The grandmaster mode should be configured to sync RTC */
+		if (ret == SW_OK && gm_mode != PTP_REG_BIT_TRUE) {
+			ret = qca808x_phy_ptp_reference_clock_get(pdata->dev_id,
+					pdata->phy_addr, &ref_clock);
+			/*
+			 * The PHC should be with below PINs connected for clock synchronized
+			 * so NAPA1 should be configured as sync or local reference clock,
+			 * and NAPA2 is configured as FAL_REF_CLOCK_EXTERNAL & grandmaster mode.
+			 *
+			 * Napa1 ToD out  --- >  Napa2 ToD in.
+			 * Napa1 PPS out  --- >  Napa2 PPS in.
+			 * Napa1 sync clock out --- > Napa2 reference clock in.
+			 */
+			if (ret == SW_OK && ref_clock != FAL_REF_CLOCK_EXTERNAL) {
+				/* enable SYNCE clock output */
+				qca808x_ptp_clock_synce_clock_enable(pdata->dev_id,
+						pdata->phy_addr, A_TRUE);
+			}
+		}
 	}
+
+	pdata->step_mode = ptp_config.step_mode;
 
 	return copy_to_user(ifr->ifr_data, &cfg, sizeof(cfg)) ? -EFAULT : 0;
 }
@@ -1346,7 +1368,11 @@ static int qca808x_ptp_register(struct phy_device *phydev)
 
 	mutex_init(&clock->tsreg_lock);
 	clock->caps.owner = THIS_MODULE;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+	snprintf(clock->caps.name, sizeof(clock->caps.name), "qca808x timer %x", phydev->mdio.addr);
+#else
 	snprintf(clock->caps.name, sizeof(clock->caps.name), "qca808x timer %x", phydev->addr);
+#endif
 	clock->caps.max_adj	= 3124999;
 	clock->caps.n_alarm	= 0;
 	clock->caps.n_ext_ts	= 6;
@@ -1365,7 +1391,11 @@ static int qca808x_ptp_register(struct phy_device *phydev)
 	clock->caps.adjtime	= qca808x_ptp_adjtime;
 	clock->caps.enable	= qca808x_ptp_enable;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+	clock->ptp_clock = ptp_clock_register(&clock->caps, &phydev->mdio.dev);
+#else
 	clock->ptp_clock = ptp_clock_register(&clock->caps, &phydev->dev);
+#endif
 	if (IS_ERR(clock->ptp_clock)) {
 		err = PTR_ERR(clock->ptp_clock);
 		kfree(clock);

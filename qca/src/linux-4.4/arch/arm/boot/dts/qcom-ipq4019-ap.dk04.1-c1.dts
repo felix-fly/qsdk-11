@@ -19,6 +19,6 @@
 / {
 	model = "Qualcomm Technologies, Inc. IPQ4019/AP-DK04.1-C1";
 	qcom,board-id = <8 0>;
-	qcom,msm-id = <0x111 0>;
+	qcom,msm-id = <0x110 0>, <0x111 0>, <0x11F 0>, <0x120 0>;
 	qcom,pmic-id = <0 0 0 0>;
 };

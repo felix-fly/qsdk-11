@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -32,14 +32,18 @@
 /**
  * nss_dynamic_interface_type
  *	Dynamic interface types.
+ *
+ * @note
+ * Every time a new dynamic interface type is added to an enumeration in the following list,
+ * a corresponding type name string should be added in the dynamic interface type string array.
  */
 enum nss_dynamic_interface_type {
 	NSS_DYNAMIC_INTERFACE_TYPE_NONE,
 	NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR,
-	NSS_DYNAMIC_INTERFACE_TYPE_CAPWAP,
+	NSS_DYNAMIC_INTERFACE_TYPE_RESERVED_5,
 	NSS_DYNAMIC_INTERFACE_TYPE_TUNIPIP6_INNER,
 	NSS_DYNAMIC_INTERFACE_TYPE_TUNIPIP6_OUTER,
-	NSS_DYNAMIC_INTERFACE_TYPE_WIFI,
+	NSS_DYNAMIC_INTERFACE_TYPE_RESERVED,
 	NSS_DYNAMIC_INTERFACE_TYPE_VAP,
 	NSS_DYNAMIC_INTERFACE_TYPE_RESERVED_0,
 	NSS_DYNAMIC_INTERFACE_TYPE_PPPOE,
@@ -53,7 +57,7 @@ enum nss_dynamic_interface_type {
 	NSS_DYNAMIC_INTERFACE_TYPE_BRIDGE,
 	NSS_DYNAMIC_INTERFACE_TYPE_VLAN,
 	NSS_DYNAMIC_INTERFACE_TYPE_RESERVED_3,
-	NSS_DYNAMIC_INTERFACE_TYPE_WIFILI,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_INTERNAL,
 	NSS_DYNAMIC_INTERFACE_TYPE_MAP_T_INNER,
 	NSS_DYNAMIC_INTERFACE_TYPE_MAP_T_OUTER,
 	NSS_DYNAMIC_INTERFACE_TYPE_GRE_TUNNEL_INNER,
@@ -90,6 +94,22 @@ enum nss_dynamic_interface_type {
 	NSS_DYNAMIC_INTERFACE_TYPE_IGS,
 	NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US,
 	NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS,
+	NSS_DYNAMIC_INTERFACE_TYPE_VXLAN_INNER,
+	NSS_DYNAMIC_INTERFACE_TYPE_VXLAN_OUTER,
+	NSS_DYNAMIC_INTERFACE_TYPE_MATCH,
+	NSS_DYNAMIC_INTERFACE_TYPE_RMNET_RX_N2H,
+	NSS_DYNAMIC_INTERFACE_TYPE_RMNET_RX_H2N,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_EXTERNAL0,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFILI_EXTERNAL1,
+	NSS_DYNAMIC_INTERFACE_TYPE_TLS_INNER,
+	NSS_DYNAMIC_INTERFACE_TYPE_TLS_OUTER,
+	NSS_DYNAMIC_INTERFACE_TYPE_MIRROR,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFI_EXT_VDEV_WDS,
+	NSS_DYNAMIC_INTERFACE_TYPE_CAPWAP_HOST_INNER,
+	NSS_DYNAMIC_INTERFACE_TYPE_CAPWAP_OUTER,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFI_EXT_VDEV_VLAN,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFI_MESH_INNER,
+	NSS_DYNAMIC_INTERFACE_TYPE_WIFI_MESH_OUTER,
 	NSS_DYNAMIC_INTERFACE_TYPE_MAX
 };
 
@@ -121,6 +141,16 @@ enum nss_dynamic_interface_error_types {
 	NSS_DYNAMIC_INTERFACE_ERR_MAX,
 };
 
+/**
+ * nss_dynamic_interface_stats_notification
+ *	Dynamic interface statistics structure.
+ */
+struct nss_dynamic_interface_notification {
+	uint32_t core_id;	/**< Core ID. */
+	uint32_t if_num;	/**< Dynamic interface number. */
+};
+
+#ifdef __KERNEL__ /* only kernel will use. */
 /**
  * nss_dynamic_interface_alloc_node_msg
  *	Message information for a dynamic interface allocation node.
@@ -206,7 +236,7 @@ extern bool nss_is_dynamic_interface(int if_num);
 
 /**
  * nss_dynamic_interface_get_nss_ctx_by_type
- * 	Returns NSS context corresponding of that dynamic interface type.
+ *	Returns NSS context corresponding to the dynamic interface type.
  *
  * @datatypes
  * nss_dynamic_interface_type
@@ -276,6 +306,35 @@ typedef void (*nss_dynamic_interface_msg_callback_t)(void *app_data, struct nss_
  */
 void nss_dynamic_interface_msg_init(struct nss_dynamic_interface_msg *ndm, uint16_t if_num, uint32_t type, uint32_t len,
 						void *cb, void *app_data);
+
+/**
+ * nss_dynamic_interface_stats_register_notifier
+ *	Registers a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_dynamic_interface_stats_register_notifier(struct notifier_block *nb);
+
+/**
+ * nss_dynamic_interface_stats_unregister_notifier
+ *	Deregisters a statistics notifier.
+ *
+ * @datatypes
+ * notifier_block
+ *
+ * @param[in] nb Notifier block.
+ *
+ * @return
+ * 0 on success or -2 on failure.
+ */
+extern int nss_dynamic_interface_stats_unregister_notifier(struct notifier_block *nb);
+#endif /*__KERNEL__ */
 
 /**
  * @}

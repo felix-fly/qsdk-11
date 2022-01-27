@@ -412,7 +412,7 @@ class TZRegDump_v3():
 
         register_names = sysdbg_cpu64_register_names
         self.version = 'default'
-        self.ncores = 4
+        self.ncores = ram_dump.get_num_cpus()
         self.ramdump = ram_dump
 
         # uint32 status[4]; -- status fields

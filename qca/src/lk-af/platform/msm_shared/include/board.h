@@ -66,4 +66,5 @@ uint32_t board_hardware_id();
 uint32_t board_subtype_id();
 uint32_t board_platform_ver();
 uint32_t board_platform_ver_minor();
+void fdt_fixup_atf(void *);
 #endif

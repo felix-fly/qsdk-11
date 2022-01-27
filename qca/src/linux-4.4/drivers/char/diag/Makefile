@@ -12,7 +12,7 @@ endif
 ifdef CONFIG_DIAGFWD_BRIDGE_CODE
 diagchar-objs += diagfwd_bridge.o
 
-ifdef CONFIG_MSM_MHI
+ifdef CONFIG_MHI_BUS
 diagchar-objs += diagfwd_mhi.o
 endif
 

@@ -52,12 +52,7 @@ export SHELL:=/usr/bin/env bash
 
 OPTIMIZE_FOR_CPU=$(subst i386,i486,$(ARCH))
 
-ifeq ($(ARCH),powerpc)
-  FPIC:=-fPIC
-else
-  FPIC:=-fpic
-endif
-
+FPIC:=-fPIC
 HOST_FPIC:=-fPIC
 
 ARCH_SUFFIX:=$(call qstrip,$(CONFIG_CPU_TYPE))
@@ -94,8 +89,8 @@ ifeq ($(CONFIG_EXTERNAL_TOOLCHAIN),)
   GNU_TARGET_NAME=$(OPTIMIZE_FOR_CPU)-openwrt-linux
   DIR_SUFFIX:=_$(LIBC)-$(LIBCV)$(if $(CONFIG_arm),_eabi)
 #  BIN_DIR:=$(BIN_DIR)$(if $(CONFIG_USE_UCLIBC),,-$(LIBC))
-  TARGET_DIR_NAME = target-$(ARCH)$(ARCH_SUFFIX)$(DIR_SUFFIX)$(if $(BUILD_SUFFIX),_$(BUILD_SUFFIX))
-  TOOLCHAIN_DIR_NAME = toolchain-$(ARCH)$(ARCH_SUFFIX)_gcc-$(GCCV)$(DIR_SUFFIX)
+  TARGET_DIR_NAME = target-$(if $(CONFIG_BUILD_SHORTENED_PATH),$(ARCH),$(ARCH)$(ARCH_SUFFIX)$(DIR_SUFFIX)$(if $(BUILD_SUFFIX),_$(BUILD_SUFFIX)))
+  TOOLCHAIN_DIR_NAME = toolchain-$(if $(CONFIG_BUILD_SHORTENED_PATH),$(ARCH),$(ARCH)$(ARCH_SUFFIX)_gcc-$(GCCV)$(DIR_SUFFIX))
 else
   ifeq ($(CONFIG_NATIVE_TOOLCHAIN),)
     GNU_TARGET_NAME=$(call qstrip,$(CONFIG_TARGET_NAME))
@@ -219,6 +214,7 @@ TARGET_CC:=$(TARGET_CROSS)gcc
 TARGET_CXX:=$(TARGET_CROSS)g++
 KPATCH:=$(SCRIPT_DIR)/patch-kernel.sh
 SED:=$(STAGING_DIR_HOST)/bin/sed -i -e
+ESED:=$(STAGING_DIR_HOST)/bin/sed -E -i -e
 CP:=cp -fpR
 LN:=ln -sf
 XARGS:=xargs -r

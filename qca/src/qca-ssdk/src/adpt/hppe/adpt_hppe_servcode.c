@@ -99,9 +99,9 @@ sw_error_t adpt_hppe_servcode_config_get(a_uint32_t dev_id, a_uint32_t servcode_
 sw_error_t adpt_hppe_servcode_loopcheck_en(a_uint32_t dev_id, a_bool_t enable)
 {
 	ADPT_DEV_ID_CHECK(dev_id);
-
+#ifndef IN_FDB_MINI
 	SW_RTN_ON_ERROR(hppe_l2_global_conf_service_code_loop_set(dev_id, enable));
-
+#endif
 	return SW_OK;
 }
 
@@ -109,9 +109,9 @@ sw_error_t adpt_hppe_servcode_loopcheck_status_get(a_uint32_t dev_id, a_bool_t *
 {
 	ADPT_DEV_ID_CHECK(dev_id);
 	ADPT_NULL_POINT_CHECK(enable);
-
+#ifndef IN_FDB_MINI
 	SW_RTN_ON_ERROR(hppe_l2_global_conf_service_code_loop_get(dev_id, enable));
-
+#endif
 	return SW_OK;
 }
 

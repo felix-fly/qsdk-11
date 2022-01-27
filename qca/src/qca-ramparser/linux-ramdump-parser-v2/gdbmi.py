@@ -10,6 +10,7 @@
 # GNU General Public License for more details.
 
 import sys
+import os
 import re
 import subprocess
 
@@ -22,13 +23,22 @@ def gdb_hex_to_dec(val):
     match = re.search('(0x[0-9a-fA-F]+)', val)
     return int(match.group(1), 16)
 
+class GdbSymbolInfo(object):
+
+    def __init__(self, symbol, offset, section, addr):
+        self.symbol = symbol
+        self.offset= offset
+        self.section = section
+        self.addr = addr
 
 class GdbSymbol(object):
 
-    def __init__(self, symbol, section, addr):
+    def __init__(self, symbol, offset, section, addr, mod):
         self.symbol = symbol
+        self.offset = offset
         self.section = section
         self.addr = addr
+        self.mod = mod
 
 
 class GdbMIResult(object):
@@ -193,16 +203,44 @@ class GdbMI(object):
         result = self._run_for_one('print /x &{0}'.format(symbol))
         return int(result.split(' ')[-1], 16)
 
-    def get_symbol_info(self, address):
+    def get_symbol_info_fail_safe(self, address):
         """Returns a GdbSymbol representing the nearest symbol found at
         `address'."""
         result = self._run_for_one('info symbol ' + hex(address))
         parts = result.split(' ')
+        symbol = parts[0]
+        plus = parts[1]
+        offset = parts[2]
+        section = parts[-1]
+        if len(parts) < 3 or plus != "+":
+           symbol = None
+           offset = None
+
+        return GdbSymbolInfo(symbol, offset, section, address)
+
+    def get_symbol_info(self, address):
+        """Returns a GdbSymbol representing the nearest symbol found at
+        `address'. If symbol is not found, it returns No symbol matches `address'.
+        Hence, if the first word of result is 'No', return None.
+        """
+        result = self._run_for_one('info symbol ' + hex(address))
+        parts = result.split(' ')
+
+        if parts[0] == "No":
+            return None
         if len(parts) < 2:
             raise GdbMIException('Output looks bogus...', result)
+
         symbol = parts[0]
+        offset = 0
+        if parts[1] == "+":
+            offset = int(parts[2])
+
         section = parts[-1]
-        return GdbSymbol(symbol, section, address)
+        mod = "[" + os.path.splitext(os.path.basename(parts[len(parts) - 1]))[0] + "]"
+        if re.search("vmlinux", mod):
+            mod = ""
+        return GdbSymbol(symbol, offset, section, address, mod)
 
     def symbol_at(self, address):
         """Get the symbol at the specified address (using `get_symbol_info')"""
@@ -236,6 +274,16 @@ class GdbMI(object):
         """Returns the value of a symbol (in decimal)"""
         result = self._run_for_one('print /d {0}'.format(symbol))
         return int(result.split(' ')[-1], 10)
+
+    def add_sym_file(self, ko_file, addr):
+        """Returns the value of a symbol (in decimal)"""
+        try:
+            result = self._run_for_one('add-symbol-file {0} 0x{1:x}'.format(ko_file, addr))
+
+        except GdbMIException as g:
+            return 1
+
+        return 0
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:

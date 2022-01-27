@@ -118,34 +118,53 @@ endef
 
 $(eval $(call KernelPackage,usb-phy-dwc3-ipq4019))
 
-define KernelPackage/usb-phy-ipq807x
-  TITLE:=DWC3 USB QCOM PHY driver for IPQ807x
-  DEPENDS:=@TARGET_ipq||TARGET_ipq806x
+define KernelPackage/usb-phy-ipq5018
+  TITLE:=DWC3 USB PHY driver for IPQ5018
+  DEPENDS:=@TARGET_ipq_ipq50xx||TARGET_ipq_ipq50xx_64
   KCONFIG:= \
-	CONFIG_USB_QCOM_QUSB_PHY \
-	CONFIG_USB_QCOM_QMP_PHY
+	CONFIG_USB_QCA_M31_PHY \
+	CONFIG_PHY_IPQ_UNIPHY_USB
   FILES:= \
-	$(LINUX_DIR)/drivers/usb/phy/phy-msm-qusb.ko \
-	$(LINUX_DIR)/drivers/usb/phy/phy-msm-ssusb-qmp.ko
-  AUTOLOAD:=$(call AutoLoad,45,phy-msm-qusb phy-msm-ssusb-qmp,1)
+	$(LINUX_DIR)/drivers/usb/phy/phy-qca-m31.ko \
+	$(LINUX_DIR)/drivers/phy/phy-qca-uniphy.ko
+  AUTOLOAD:=$(call AutoLoad,45,phy-qca-m31 phy-qca-uniphy,1)
   $(call AddDepends/usb)
 endef
 
-define KernelPackage/usb-phy-ipq807x/description
+define KernelPackage/usb-phy-ipq5018/description
  This driver provides support for the USB PHY drivers
- within the IPQ807x SoCs.
+ within the IPQ5018 SoCs.
 endef
 
-$(eval $(call KernelPackage,usb-phy-ipq807x))
+$(eval $(call KernelPackage,usb-phy-ipq5018))
+
+define KernelPackage/usb-ks-bridge
+  TITLE:=DWC3 USB KS BRIDGE driver for ipq807x/ ipq50xx
+  DEPENDS:=@TARGET_ipq_ipq807x_64||TARGET_ipq_ipq807x||TARGET_ipq_ipq50xx||TARGET_ipq_ipq50xx_64
+  KCONFIG:= CONFIG_USB_QCOM_KS_BRIDGE
+  FILES:=$(LINUX_DIR)/drivers/usb/misc/ks_bridge.ko
+  AUTOLOAD:=$(call autoload,45,ks_bridge,1)
+  $(call AddDepends/usb)
+endef
+
+define KernelPackage/usb-ks-bridge/description
+ This driver provides support for the USB KS bridge
+ within the IPQ807x/IPQ50xx SoC
+endef
+
+$(eval $(call KernelPackage,usb-ks-bridge))
 
 define KernelPackage/qrtr_mproc
-  TITLE:= Ath11k Specific kernel configs for IPQ807x
-  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64
+  TITLE:= Ath11k Specific kernel configs for IPQ807x, IPQ60xx and IPQ50xx
+  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64||TARGET_ipq_ipq60xx||TARGET_ipq_ipq60xx_64||TARGET_ipq_ipq50xx||TARGET_ipq_ipq50xx_64
   KCONFIG:= \
 	  CONFIG_QRTR=y \
 	  CONFIG_QCOM_APCS_IPC=y \
 	  CONFIG_QCOM_GLINK_SSR=y \
 	  CONFIG_QCOM_Q6V5_WCSS=y \
+	  CONFIG_MSM_RPM_RPMSG=y \
+	  CONFIG_RPMSG_QCOM_GLINK_RPM=y \
+	  CONFIG_REGULATOR_RPM_GLINK=y \
 	  CONFIG_QCOM_SYSMON=y \
 	  CONFIG_RPMSG=y \
 	  CONFIG_RPMSG_CHAR=y \
@@ -171,38 +190,14 @@ define KernelPackage/qrtr_mproc
 endef
 
 define KernelPackage/qrtr_mproc/description
-Kernel configs for ath11k support specific to ipq807x.
+Kernel configs for ath11k support specific to ipq807x, IPQ60xx and IPQ50xx
 endef
 
 $(eval $(call KernelPackage,qrtr_mproc))
 
-define KernelPackage/msm-mproc
-  TITLE:= Default kernel configs
-  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64||TARGET_ipq_ipq60xx||TARGET_ipq_ipq60xx_64
-  KCONFIG:= \
-	  CONFIG_IPC_ROUTER=y \
-	  CONFIG_MSM_GLINK=y \
-	  CONFIG_MSM_GLINK_SMEM_NATIVE_XPRT=y \
-	  CONFIG_MSM_GLINK_PKT=y \
-	  CONFIG_MSM_IPC_ROUTER_GLINK_XPRT=y \
-	  CONFIG_MSM_QMI_INTERFACE=y \
-	  CONFIG_IPQ_SUBSYSTEM_RESTART=y \
-	  CONFIG_IPQ807X_REMOTEPROC=y \
-	  CONFIG_REGULATOR_RPM_GLINK=y \
-	  CONFIG_MSM_IPC_ROUTER_MHI_XPRT=y \
-	  CONFIG_MSM_RPM_GLINK=y \
-	  CONFIG_MAILBOX=y
-endef
-
-define KernelPackage/msm-mproc/description
-Default kernel configs.
-endef
-
-$(eval $(call KernelPackage,msm-mproc))
-
 define KernelPackage/mhi-qrtr-mproc
   TITLE:= Default kernel configs for QCCI to work with QRTR.
-  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64
+  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64||TARGET_ipq_ipq60xx||TARGET_ipq_ipq60xx_64||TARGET_ipq_ipq50xx||TARGET_ipq_ipq50xx_64
   KCONFIG:= \
 	  CONFIG_QRTR=y \
 	  CONFIG_QRTR_MHI=y \
@@ -218,19 +213,3 @@ Default kernel configs for QCCI to work with QRTR.
 endef
 
 $(eval $(call KernelPackage,mhi-qrtr-mproc))
-
-define KernelPackage/qmi_sample_client
-  TITLE:= Sample qmi test application.
-  DEPENDS+= @TARGET_ipq_ipq807x||TARGET_ipq_ipq807x_64
-  KCONFIG:= \
-	  CONFIG_SAMPLE_QMI_CLIENT
-  FILES:= \
-	  $(LINUX_DIR)/samples/qmi/qmi_sample_client.ko
-  AUTOLOAD:=$(call AutoLoad,53,qmi_sample_client,1)
-endef
-
-define KernelPackage/qmi_sample_client/description
-Add QMI ping_pong test application
-endef
-
-$(eval $(call KernelPackage,qmi_sample_client))

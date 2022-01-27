@@ -6,6 +6,7 @@ Required properties :
 
 			"qcom,apss-ipq807x"
 			"qcom,apss-ipq6018"
+			"qcom,apss-ipq5018"
 
 - reg : shall contain base register location and length
 - #clock-cells : shall contain 1

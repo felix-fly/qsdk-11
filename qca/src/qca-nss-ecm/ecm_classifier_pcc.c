@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015, The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2015, 2020-2021, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -49,7 +49,6 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
@@ -68,8 +67,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_tracker_datagram.h"
 #include "ecm_tracker_udp.h"
 #include "ecm_tracker_tcp.h"
@@ -94,6 +93,7 @@ struct ecm_classifier_pcc_instance {
 	long process_jiffies_last;				/* Rate limiting the calls to the registrant */
 	uint32_t reg_calls_to;					/* #calls to registrant */
 	uint32_t reg_calls_from;				/* #calls from registrant */
+	uint32_t feature_flags;					/* Feature flags */
 
 	struct ecm_classifier_process_response process_response;
 								/* Last process response computed */
@@ -174,7 +174,7 @@ void ecm_classifier_pcc_unregister_begin(struct ecm_classifier_pcc_registrant *r
 	}
 	if (reg != r) {
 		spin_unlock_bh(&ecm_classifier_pcc_lock);
-		DEBUG_WARN("Unexpected registrant, given: %p, expecting: %p\n", r, reg);
+		DEBUG_WARN("Unexpected registrant, given: %px, expecting: %px\n", r, reg);
 		return;
 	}
 
@@ -194,6 +194,117 @@ void ecm_classifier_pcc_unregister_begin(struct ecm_classifier_pcc_registrant *r
 	ecm_db_connection_defunct_all();
 }
 EXPORT_SYMBOL(ecm_classifier_pcc_unregister_begin);
+
+/*
+ * ecm_classifier_pcc_decel_v4()
+ *	Decelerate connection.
+ *
+ * Big endian parameters apart from protocol
+ */
+bool ecm_classifier_pcc_decel_v4(uint8_t *src_mac, __be32 src_ip, int src_port,
+		uint8_t *dest_mac, __be32 dest_ip, int dest_port, int protocol)
+{
+	ip_addr_t ecm_src_ip;
+	ip_addr_t ecm_dest_ip;
+	struct ecm_db_connection_instance *ci;
+
+	/*
+	 * Look up ECM connection from the given tuple
+	 */
+	src_port = ntohs(src_port);
+	dest_port = ntohs(dest_port);
+	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_src_ip, src_ip);
+	ECM_NIN4_ADDR_TO_IP_ADDR(ecm_dest_ip, dest_ip);
+
+	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
+	if (!ci) {
+		DEBUG_WARN("Decel v4 Connection lookup failed."
+				" Received connection tuple information: \n"
+				"Protocol: %d\n"
+				"src: " ECM_IP_ADDR_DOT_FMT ":%d\n"
+				"dest: " ECM_IP_ADDR_DOT_FMT ":%d\n",
+				protocol,
+				ECM_IP_ADDR_TO_DOT(ecm_src_ip), src_port,
+				ECM_IP_ADDR_TO_DOT(ecm_dest_ip), dest_port);
+		return false;
+	}
+
+	DEBUG_TRACE("Decel v4, connection tuple information: \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_DOT_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_DOT_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_DOT(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_DOT(ecm_dest_ip), dest_port);
+
+	/*
+	 * Defunct the connection.
+	 */
+	ecm_db_connection_make_defunct(ci);
+	ecm_db_connection_deref(ci);
+	return true;
+}
+EXPORT_SYMBOL(ecm_classifier_pcc_decel_v4);
+
+/*
+ * ecm_classifier_pcc_decel_v6()
+ *	Decelerate connection.
+ *
+ * Big endian parameters apart from protocol
+ *
+ * NOTE: If IPv6 is not supported in ECM this function must still exist as a stub to avoid compilation problems for registrants.
+ */
+bool ecm_classifier_pcc_decel_v6(uint8_t *src_mac, struct in6_addr *src_ip,
+		 int src_port, uint8_t *dest_mac, struct in6_addr *dest_ip,
+		 int dest_port, int protocol)
+{
+#ifdef ECM_IPV6_ENABLE
+	struct in6_addr in6;
+	ip_addr_t ecm_src_ip;
+	ip_addr_t ecm_dest_ip;
+	struct ecm_db_connection_instance *ci;
+
+	/*
+	 * Look up ECM connection from the given tuple
+	 */
+	src_port = ntohs(src_port);
+	dest_port = ntohs(dest_port);
+	in6 = *src_ip;
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_src_ip, in6);
+	in6 = *dest_ip;
+	ECM_NIN6_ADDR_TO_IP_ADDR(ecm_dest_ip, in6);
+
+	ci = ecm_db_connection_find_and_ref(ecm_src_ip, ecm_dest_ip, protocol, src_port, dest_port);
+	if (!ci) {
+		DEBUG_WARN("Decel v6, Connection lookup failed."
+				" Received connection tuple information: \n"
+				"Protocol: %d\n"
+				"src: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+				"dest: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+				protocol,
+				ECM_IP_ADDR_TO_OCTAL(ecm_src_ip), src_port,
+				ECM_IP_ADDR_TO_OCTAL(ecm_dest_ip), dest_port);
+		return false;
+	}
+
+	DEBUG_TRACE("Decel v6, connection tuple information: \n"
+			"Protocol: %d\n"
+			"src: " ECM_IP_ADDR_OCTAL_FMT ":%d\n"
+			"dest: " ECM_IP_ADDR_OCTAL_FMT ":%d\n",
+			protocol,
+			ECM_IP_ADDR_TO_OCTAL(ecm_src_ip), src_port,
+			ECM_IP_ADDR_TO_OCTAL(ecm_dest_ip), dest_port);
+
+	/*
+	 * Defunct the connection.
+	 */
+	ecm_db_connection_make_defunct(ci);
+	ecm_db_connection_deref(ci);
+	return true;
+#endif
+	return false;
+}
+EXPORT_SYMBOL(ecm_classifier_pcc_decel_v6);
 
 /*
  * ecm_classifier_pcc_permit_accel_v4()
@@ -241,7 +352,7 @@ void ecm_classifier_pcc_permit_accel_v4(uint8_t *src_mac, __be32 src_ip, int src
 		return;
 	}
 	pcci = (struct ecm_classifier_pcc_instance *)classi;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	/*
 	 * Set the permitted accel state to PERMITTED
@@ -312,7 +423,7 @@ void ecm_classifier_pcc_permit_accel_v6(uint8_t *src_mac, struct in6_addr *src_i
 		return;
 	}
 	pcci = (struct ecm_classifier_pcc_instance *)classi;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	/*
 	 * Set the permitted accel state to PERMITTED
@@ -377,7 +488,7 @@ void ecm_classifier_pcc_deny_accel_v4(uint8_t *src_mac, __be32 src_ip, int src_p
 		return;
 	}
 	pcci = (struct ecm_classifier_pcc_instance *)classi;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	/*
 	 * Set the permitted accel state to DENIED
@@ -455,7 +566,7 @@ void ecm_classifier_pcc_deny_accel_v6(uint8_t *src_mac, struct in6_addr *src_ip,
 		return;
 	}
 	pcci = (struct ecm_classifier_pcc_instance *)classi;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	/*
 	 * Set the permitted accel state to DENIED
@@ -504,7 +615,7 @@ static void ecm_classifier_pcc_unregister_force(struct ecm_classifier_pcc_instan
 	/*
 	 * Release our ref upon the registrant that we took when it was registered
 	 */
-	DEBUG_INFO("Force unregistration of: %p\n", reg);
+	DEBUG_INFO("Force unregistration of: %px\n", reg);
 	reg->deref(reg);
 
 	/*
@@ -525,8 +636,8 @@ static void ecm_classifier_pcc_unregister_force(struct ecm_classifier_pcc_instan
 static void _ecm_classifier_pcc_ref(struct ecm_classifier_pcc_instance *pcci)
 {
 	pcci->refs++;
-	DEBUG_TRACE("%p: pcci ref %d\n", pcci, pcci->refs);
-	DEBUG_ASSERT(pcci->refs > 0, "%p: ref wrap\n", pcci);
+	DEBUG_TRACE("%px: pcci ref %d\n", pcci, pcci->refs);
+	DEBUG_ASSERT(pcci->refs > 0, "%px: ref wrap\n", pcci);
 }
 
 /*
@@ -538,7 +649,7 @@ static void ecm_classifier_pcc_ref(struct ecm_classifier_instance *ci)
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)ci;
 
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 	spin_lock_bh(&ecm_classifier_pcc_lock);
 	_ecm_classifier_pcc_ref(pcci);
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
@@ -553,11 +664,11 @@ static int ecm_classifier_pcc_deref(struct ecm_classifier_instance *ci)
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)ci;
 
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 	spin_lock_bh(&ecm_classifier_pcc_lock);
 	pcci->refs--;
-	DEBUG_ASSERT(pcci->refs >= 0, "%p: refs wrapped\n", pcci);
-	DEBUG_TRACE("%p: Parental Controls classifier deref %d\n", pcci, pcci->refs);
+	DEBUG_ASSERT(pcci->refs >= 0, "%px: refs wrapped\n", pcci);
+	DEBUG_TRACE("%px: Parental Controls classifier deref %d\n", pcci, pcci->refs);
 	if (pcci->refs) {
 		int refs = pcci->refs;
 		spin_unlock_bh(&ecm_classifier_pcc_lock);
@@ -568,15 +679,48 @@ static int ecm_classifier_pcc_deref(struct ecm_classifier_instance *ci)
 	 * Object to be destroyed
 	 */
 	ecm_classifier_pcc_count--;
-	DEBUG_ASSERT(ecm_classifier_pcc_count >= 0, "%p: ecm_classifier_pcc_count wrap\n", pcci);
+	DEBUG_ASSERT(ecm_classifier_pcc_count >= 0, "%px: ecm_classifier_pcc_count wrap\n", pcci);
 
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
 
 	/*
 	 * Final
 	 */
-	DEBUG_INFO("%p: Final Parental Controls classifier instance\n", pcci);
+	DEBUG_INFO("%px: Final Parental Controls classifier instance\n", pcci);
 	kfree(pcci);
+
+	return 0;
+}
+
+/*
+ * ecm_classifier_pcc_get_mirror_info()
+ *	Get mirroring related information.
+ */
+static int ecm_classifier_pcc_get_mirror_info(struct ecm_classifier_pcc_info cinfo,
+		 int *flow_mirror_ifindex_ptr, int *return_mirror_ifindex_ptr)
+{
+	struct net_device *flow_dev = cinfo.mirror.tuple_mirror_dev;
+	struct net_device *return_dev = cinfo.mirror.tuple_ret_mirror_dev;
+
+	if (!flow_dev && !return_dev) {
+		DEBUG_ERROR("No mirror net devices are specified\n");
+		return -1;
+	}
+
+	/*
+	 * Fetch mirror interface information.
+	 */
+	if (flow_dev) {
+		dev_hold(flow_dev);
+		*flow_mirror_ifindex_ptr = flow_dev->ifindex;
+		dev_put(flow_dev);
+	}
+
+	if (return_dev) {
+		dev_hold(return_dev);
+		*return_mirror_ifindex_ptr = return_dev->ifindex;
+		dev_put(return_dev);
+	}
 
 	return 0;
 }
@@ -605,8 +749,11 @@ static void ecm_classifier_pcc_process(struct ecm_classifier_instance *aci, ecm_
 	ip_addr_t src_ip;
 	ip_addr_t dst_ip;
 	struct ecm_classifier_pcc_registrant *registrant;
+	struct ecm_classifier_pcc_info cinfo = {0};
+	int flow_mirror_ifindex = -1;
+	int return_mirror_ifindex = -1;
 
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: invalid state magic\n", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: invalid state magic\n", pcci);
 
 	/*
 	 * Get connection
@@ -731,7 +878,29 @@ static void ecm_classifier_pcc_process(struct ecm_classifier_instance *aci, ecm_
 
 		ECM_IP_ADDR_TO_NIN4_ADDR(src_ip4, src_ip);
 		ECM_IP_ADDR_TO_NIN4_ADDR(dest_ip4, dst_ip);
-		reg_result = registrant->okay_to_accel_v4(registrant, src_mac, src_ip4, src_port, dest_mac, dest_ip4, dst_port, protocol);
+
+		/*
+		 * get_accel_info_v4 callback has higher priority over
+		 * okay_to_accel_v4 callback.
+		 * get_accel_info_v4 callback is the advance version of older
+		 * okay_to_accel_v4 callback, from which the registrant can not
+		 * only can tell the final acceleration decision about the flow but
+		 * can also request for additional features like mirroring.
+		 * get_accel_info_v4 callback is also backward compatible, means
+		 * it can be used by the registrant for only specifying acceleration
+		 * decisions.
+		 */
+		if (registrant->get_accel_info_v4){
+			reg_result = registrant->get_accel_info_v4(registrant,
+					 src_mac, src_ip4, src_port, dest_mac,
+					 dest_ip4, dst_port, protocol, &cinfo);
+			pcci->feature_flags = cinfo.feature_flags;
+		} else {
+			reg_result = registrant->okay_to_accel_v4(registrant,
+					 src_mac, src_ip4, src_port, dest_mac,
+					 dest_ip4, dst_port, protocol);
+			pcci->feature_flags = ECM_CLASSIFIER_PCC_FEATURE_NONE;
+		}
 	}
 #ifdef ECM_IPV6_ENABLE
 	if (ip_version == 6) {
@@ -739,7 +908,29 @@ static void ecm_classifier_pcc_process(struct ecm_classifier_instance *aci, ecm_
 		struct in6_addr dest_ip6;
 		ECM_IP_ADDR_TO_NIN6_ADDR(src_ip6, src_ip);
 		ECM_IP_ADDR_TO_NIN6_ADDR(dest_ip6, dst_ip);
-		reg_result = registrant->okay_to_accel_v6(registrant, src_mac, &src_ip6, src_port, dest_mac, &dest_ip6, dst_port, protocol);
+
+		/*
+		 * get_accel_info_v6 callback has higher priority over
+		 * okay_to_accel_v6 callback.
+		 * get_accel_info_v6 callback is the advance version of older
+		 * okay_to_accel_v6 callback, from which the registrant can not
+		 * only can tell the final acceleration decision about the flow but
+		 * can also request for additional features like mirroring.
+		 * get_accel_info_v6 callback is also backward compatible, means
+		 * it can be used by the registrant for only specifying acceleration
+		 * decisions.
+		 */
+		if (registrant->get_accel_info_v6){
+			reg_result = registrant->get_accel_info_v6(registrant,
+					 src_mac, &src_ip6, src_port, dest_mac,
+					 &dest_ip6, dst_port, protocol, &cinfo);
+			pcci->feature_flags = cinfo.feature_flags;
+		} else {
+			reg_result = registrant->okay_to_accel_v6(registrant,
+					 src_mac, &src_ip6, src_port, dest_mac,
+					 &dest_ip6, dst_port, protocol);
+			pcci->feature_flags = ECM_CLASSIFIER_PCC_FEATURE_NONE;
+		}
 	}
 #endif
 
@@ -752,6 +943,17 @@ static void ecm_classifier_pcc_process(struct ecm_classifier_instance *aci, ecm_
 	 * Release the module ref taken.
 	 */
 	module_put(registrant->this_module);
+
+	/*
+	 * Handle the features requested by registrants, if any.
+	 */
+	if (cinfo.feature_flags & ECM_CLASSIFIER_PCC_FEATURE_MIRROR) {
+		if (ecm_classifier_pcc_get_mirror_info(cinfo, &flow_mirror_ifindex,
+					&return_mirror_ifindex) < 0) {
+			spin_lock_bh(&ecm_classifier_pcc_lock);
+			goto deny_accel;
+		}
+	}
 
 	/*
 	 * Handle the result
@@ -780,9 +982,20 @@ static void ecm_classifier_pcc_process(struct ecm_classifier_instance *aci, ecm_
 	 * Acceleration is permitted
 	 */
 	spin_lock_bh(&ecm_classifier_pcc_lock);
+
+	/*
+	 * Fill mirror information in the process response.
+	 */
+	if (cinfo.feature_flags & ECM_CLASSIFIER_PCC_FEATURE_MIRROR) {
+		pcci->process_response.flow_mirror_ifindex = flow_mirror_ifindex;
+		pcci->process_response.return_mirror_ifindex = return_mirror_ifindex;
+		pcci->process_response.process_actions |=
+			 ECM_CLASSIFIER_PROCESS_ACTION_MIRROR_ENABLED;
+	}
+
 	pcci->accel_permit_state = ECM_CLASSIFIER_PCC_RESULT_PERMITTED;
 	pcci->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
-	pcci->process_response.process_actions = ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
+	pcci->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
 	pcci->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
 	*process_response = pcci->process_response;
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
@@ -828,7 +1041,7 @@ static ecm_classifier_type_t ecm_classifier_pcc_type_get(struct ecm_classifier_i
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
 
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 	return ECM_CLASSIFIER_TYPE_PCC;
 }
 
@@ -841,7 +1054,7 @@ static bool ecm_classifier_pcc_reclassify_allowed(struct ecm_classifier_instance
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
 
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 	return true;
 }
 
@@ -853,7 +1066,7 @@ static void ecm_classifier_pcc_reclassify(struct ecm_classifier_instance *aci)
 {
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	/*
 	 * Connection needs to be reset to 'as new'
@@ -879,7 +1092,7 @@ static void ecm_classifier_pcc_last_process_response_get(struct ecm_classifier_i
 {
 	struct ecm_classifier_pcc_instance *pcci;
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	spin_lock_bh(&ecm_classifier_pcc_lock);
 	*process_response = pcci->process_response;
@@ -895,7 +1108,7 @@ static void ecm_classifier_pcc_sync_to_v4(struct ecm_classifier_instance *aci, s
 	struct ecm_classifier_pcc_instance *pcci __attribute__((unused));
 
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 }
 
 /*
@@ -907,7 +1120,7 @@ static void ecm_classifier_pcc_sync_from_v4(struct ecm_classifier_instance *aci,
 	struct ecm_classifier_pcc_instance *pcci __attribute__((unused));
 
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 }
 
 /*
@@ -919,7 +1132,7 @@ static void ecm_classifier_pcc_sync_to_v6(struct ecm_classifier_instance *aci, s
 	struct ecm_classifier_pcc_instance *pcci __attribute__((unused));
 
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 }
 
 /*
@@ -931,7 +1144,7 @@ static void ecm_classifier_pcc_sync_from_v6(struct ecm_classifier_instance *aci,
 	struct ecm_classifier_pcc_instance *pcci __attribute__((unused));
 
 	pcci = (struct ecm_classifier_pcc_instance *)aci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 }
 
 #ifdef ECM_STATE_OUTPUT_ENABLE
@@ -947,9 +1160,10 @@ static int ecm_classifier_pcc_state_get(struct ecm_classifier_instance *ci, stru
 	ecm_classifier_pcc_result_t accel_permit_state;
 	uint32_t reg_calls_to;
 	uint32_t reg_calls_from;
+	uint32_t feature_flags;
 
 	pcci = (struct ecm_classifier_pcc_instance *)ci;
-	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%p: magic failed", pcci);
+	DEBUG_CHECK_MAGIC(pcci, ECM_CLASSIFIER_PCC_INSTANCE_MAGIC, "%px: magic failed", pcci);
 
 	if ((result = ecm_state_prefix_add(sfi, "pcc"))) {
 		return result;
@@ -960,17 +1174,45 @@ static int ecm_classifier_pcc_state_get(struct ecm_classifier_instance *ci, stru
 	process_response = pcci->process_response;
 	reg_calls_to = pcci->reg_calls_to;
 	reg_calls_from = pcci->reg_calls_from;
+	feature_flags = pcci->feature_flags;
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
-
 
 	if ((result = ecm_state_write(sfi, "accel_permit_state", "%d", accel_permit_state))) {
 		return result;
 	}
+
 	if ((result = ecm_state_write(sfi, "reg_calls_to", "%d", reg_calls_to))) {
 		return result;
 	}
+
 	if ((result = ecm_state_write(sfi, "reg_calls_from", "%d", reg_calls_from))) {
 		return result;
+	}
+
+	if ((result = ecm_state_write(sfi, "feature_flags", "0x%x", feature_flags))) {
+		return result;
+	}
+
+	if (process_response.process_actions & ECM_CLASSIFIER_PROCESS_ACTION_MIRROR_ENABLED) {
+		struct net_device *dev;
+
+		if ((dev = dev_get_by_index(&init_net, process_response.flow_mirror_ifindex))) {
+			if ((result = ecm_state_write(sfi, "flow_mirror", "%s",
+							dev->name))) {
+				dev_put(dev);
+				return result;
+			}
+			dev_put(dev);
+		}
+
+		if ((dev = dev_get_by_index(&init_net, process_response.return_mirror_ifindex))) {
+			if ((result = ecm_state_write(sfi, "return_mirror", "%s",
+							dev->name))) {
+				dev_put(dev);
+				return result;
+			}
+			dev_put(dev);
+		}
 	}
 
 	/*
@@ -1045,10 +1287,10 @@ struct ecm_classifier_pcc_instance *ecm_classifier_pcc_instance_alloc(struct ecm
 	 */
 	spin_lock_bh(&ecm_classifier_pcc_lock);
 	ecm_classifier_pcc_count++;
-	DEBUG_ASSERT(ecm_classifier_pcc_count > 0, "%p: ecm_classifier_pcc_count wrap\n", pcci);
+	DEBUG_ASSERT(ecm_classifier_pcc_count > 0, "%px: ecm_classifier_pcc_count wrap\n", pcci);
 	spin_unlock_bh(&ecm_classifier_pcc_lock);
 
-	DEBUG_INFO("Parental Controls classifier instance alloc: %p\n", pcci);
+	DEBUG_INFO("Parental Controls classifier instance alloc: %px\n", pcci);
 	return pcci;
 }
 EXPORT_SYMBOL(ecm_classifier_pcc_instance_alloc);

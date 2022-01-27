@@ -38,6 +38,7 @@ struct sadb_sa {
 	__u8		sadb_sa_auth;
 	__u8		sadb_sa_encrypt;
 	__u32	sadb_sa_flags;
+	__u32	sadb_sa_encap_mode;
 } __attribute__((packed));
 /* sizeof(struct sadb_sa) == 16 */
 

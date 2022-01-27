@@ -1,4 +1,4 @@
-# Copyright (c) 2014, 2018-2019 The Linux Foundation. All rights reserved.
+# Copyright (c) 2014, 2018-2019, 2021 The Linux Foundation. All rights reserved.
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -38,7 +38,7 @@ qca-nss-macsec-objs +=	nss_macsec_init.o \
 NSS_MACSEC_INCLUDE = -I$(obj)/include -I$(obj)/dal -I$(obj)/fal -I$(obj)/dal/qca808x
 
 ccflags-y += $(NSS_MACSEC_INCLUDE)
-ccflags-y += -Werror
+ccflags-y += -Wall -Werror
 
 ifeq ($(SoC), ipq806x)
 ccflags-y += -DMACSEC_IPQ806X_SUPPORT

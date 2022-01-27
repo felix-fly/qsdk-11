@@ -52,7 +52,7 @@ extern unsigned int nf_conntrack_htable_size;
 a_bool_t napt_aging_ctrl_en = 0;
 
 void
-napt_ct_aging_disable(uint32_t ct_addr)
+napt_ct_aging_disable(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	if(nf_athrs17_hnat_sync_counter_en || !napt_aging_ctrl_en)
@@ -72,7 +72,7 @@ napt_ct_aging_disable(uint32_t ct_addr)
 }
 
 int
-napt_ct_aging_is_enable(uint32_t ct_addr)
+napt_ct_aging_is_enable(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
     if(!ct_addr)
@@ -89,7 +89,7 @@ napt_ct_aging_is_enable(uint32_t ct_addr)
 }
 
 void
-napt_ct_aging_enable(uint32_t ct_addr)
+napt_ct_aging_enable(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	uint16_t l3num = 0;
@@ -126,7 +126,7 @@ napt_ct_aging_enable(uint32_t ct_addr)
 }
 
 void
-napt_ct_to_hw_entry(uint32_t ct_addr, napt_entry_t *napt)
+napt_ct_to_hw_entry(uintptr_t ct_addr, napt_entry_t *napt)
 {
 	struct nf_conn *ct = NULL;
 	struct nf_conntrack_tuple *org_tuple, *rep_tuple;
@@ -181,7 +181,7 @@ napt_ct_to_hw_entry(uint32_t ct_addr, napt_entry_t *napt)
 }
 
 uint64_t
-napt_ct_pkts_get(uint32_t ct_addr)
+napt_ct_pkts_get(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	struct nf_conn_counter *cct = NULL;
@@ -205,7 +205,7 @@ napt_ct_pkts_get(uint32_t ct_addr)
 }
 
 int
-napt_ct_type_is_nat(uint32_t ct_addr)
+napt_ct_type_is_nat(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
     if(!ct_addr)
@@ -219,7 +219,7 @@ napt_ct_type_is_nat(uint32_t ct_addr)
 }
 
 int
-napt_ct_type_is_nat_alg(uint32_t ct_addr)
+napt_ct_type_is_nat_alg(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	if(!ct_addr)
@@ -231,7 +231,7 @@ napt_ct_type_is_nat_alg(uint32_t ct_addr)
 }
 
 int
-napt_ct_intf_is_expected(uint32_t ct_addr)
+napt_ct_intf_is_expected(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = (struct nf_conn *)ct_addr;
 	struct nf_conntrack_tuple *rep_tuple;
@@ -252,7 +252,7 @@ napt_ct_intf_is_expected(uint32_t ct_addr)
 	if(dev) {
 		if(dev->type == ARPHRD_ETHER) {
 			if(strstr(dev->name, "eth0") || strstr(dev->name, "erouter0") ||
-			   strstr(dev->name, "br-wan")) {
+			   strstr(dev->name, "br-wan") || strstr(dev->name, "eth1")) {
 				dev_put(dev);
 				return 1;
 			}
@@ -267,7 +267,7 @@ napt_ct_intf_is_expected(uint32_t ct_addr)
 }
 
 int
-napt_ct_status_is_estab(uint32_t ct_addr)
+napt_ct_status_is_estab(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	uint16_t l3num = 0;
@@ -298,7 +298,7 @@ napt_ct_status_is_estab(uint32_t ct_addr)
 }
 
 uint32_t
-napt_ct_priv_ip_get(uint32_t ct_addr)
+napt_ct_priv_ip_get(uintptr_t ct_addr)
 {
 	struct nf_conn *ct = NULL;
 	uint32_t usaddr = 0;
@@ -336,8 +336,8 @@ napt_ct_list_unlock(void)
     rcu_read_unlock();
 }
 
-uint32_t
-napt_ct_list_iterate(uint32_t *hash, uint32_t *iterate)
+uintptr_t
+napt_ct_list_iterate(uint32_t *hash, uintptr_t *iterate)
 {
 	struct net *net = &init_net;
 	struct nf_conntrack_tuple_hash *h = NULL;
@@ -354,9 +354,9 @@ napt_ct_list_iterate(uint32_t *hash, uint32_t *iterate)
 
 		hlist_nulls_for_each_entry_from(h, pos, hnnode)
 		{
-			(*iterate) = (uint32_t)(pos->next);
+			(*iterate) = (uintptr_t)(pos->next);
 			ct = nf_ct_tuplehash_to_ctrack(h);
-			return (uint32_t) ct;
+			return  (uintptr_t) ct;
 		}
 
 		++(*hash);

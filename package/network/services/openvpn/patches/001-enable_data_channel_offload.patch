@@ -1,6 +1,6 @@
 --- a/configure.ac
 +++ b/configure.ac
-@@ -89,6 +89,12 @@ AC_ARG_ENABLE(
+@@ -92,6 +92,12 @@ AC_ARG_ENABLE(
  )
  
  AC_ARG_ENABLE(
@@ -13,22 +13,22 @@
  	[x509-alt-username],
  	[AS_HELP_STRING([--enable-x509-alt-username], [enable the --x509-username-field feature @<:@default=no@:>@])],
  	,
-@@ -1000,6 +1006,10 @@ if test "${enable_ssl}" = "yes"; then
- 	AC_DEFINE([ENABLE_SSL], [1], [Enable ssl library])
- fi
+@@ -1227,6 +1233,10 @@ test "${enable_def_auth}" = "yes" && AC_
+ test "${enable_pf}" = "yes" && AC_DEFINE([ENABLE_PF], [1], [Enable internal packet filter])
+ test "${enable_strict_options}" = "yes" && AC_DEFINE([ENABLE_STRICT_OPTIONS_CHECK], [1], [Enable strict options check between peers])
  
 +if test "${enable_dca}" = "yes"; then
 +	AC_DEFINE([ENABLE_DCA], [1], [Enable data channel acceleration])
 +fi
 +
  if test "${enable_crypto}" = "yes"; then
- 	test "${have_crypto_crypto}" != "yes" && AC_MSG_ERROR([${with_crypto_library} crypto is required but missing])
+ 	test "${have_crypto}" != "yes" && AC_MSG_ERROR([${with_crypto_library} crypto is required but missing])
  	test "${enable_crypto_ofb_cfb}" = "yes" && AC_DEFINE([ENABLE_OFB_CFB_MODE], [1], [Enable OFB and CFB cipher modes])
 --- a/src/openvpn/Makefile.am
 +++ b/src/openvpn/Makefile.am
 @@ -20,7 +20,10 @@ EXTRA_DIST = \
  
- INCLUDES = \
+ AM_CPPFLAGS = \
  	-I$(top_srcdir)/include \
 -	-I$(top_srcdir)/src/compat
 +	-I$(top_srcdir)/src/compat \
@@ -38,10 +38,10 @@
  
  AM_CFLAGS = \
  	$(TAP_CFLAGS) \
-@@ -111,7 +114,8 @@ openvpn_SOURCES = \
- 	syshead.h \
+@@ -119,7 +122,8 @@ openvpn_SOURCES = \
+ 	tls_crypt.c tls_crypt.h \
  	tun.c tun.h \
- 	win32.h win32_wfp.h win32.c \
+ 	win32.h win32.c \
 -	cryptoapi.h cryptoapi.c
 +	cryptoapi.h cryptoapi.c dca.h dca.c \
 +	dca_crypto.c dca_route.c
@@ -50,39 +50,37 @@
  	$(SOCKETS_LIBS) \
 --- a/src/openvpn/crypto.c
 +++ b/src/openvpn/crypto.c
-@@ -485,7 +485,20 @@ init_key_ctx (struct key_ctx *ctx, struc
- 	      const char *prefix)
+@@ -39,6 +39,10 @@
+ 
+ #include "memdbg.h"
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ /*
+  * Encryption and Compression Routines.
+  *
+@@ -847,7 +851,19 @@ init_key_ctx(struct key_ctx *ctx, const
+              const char *prefix)
  {
-   struct gc_arena gc = gc_new ();
+     struct gc_arena gc = gc_new();
 +#ifdef ENABLE_DCA
-+  void *dca_crypto_ctx = ctx->dca_crypto_ctx;
++    void *dca_crypto_ctx = ctx->dca_crypto_ctx;
 +
-+  if (!dca_crypto_ctx_init(ctx, key, kt, enc))
-+      dmsg (D_DCA_INFO, "Successfully Initialized data path crypto Ctx\n");
-+  else
-+      dmsg (D_DCA_INFO, "Couldn't Initialized data path crypto Ctx\n");
++    if (!dca_crypto_ctx_init(ctx, key, kt, enc))
++        dmsg (D_DCA_INFO, "Successfully Initialized data path crypto Ctx\n");
++    else
++        dmsg (D_DCA_INFO, "Couldn't Initialized data path crypto Ctx\n");
 +#endif
 +
-   CLEAR (*ctx);
+     CLEAR(*ctx);
 +#ifdef ENABLE_DCA
-+  ctx->dca_crypto_ctx = dca_crypto_ctx;
++    ctx->dca_crypto_ctx = dca_crypto_ctx;
 +#endif
-+
-   if (kt->cipher && kt->cipher_length > 0)
+     if (kt->cipher && kt->cipher_length > 0)
      {
  
---- a/src/openvpn/crypto.h
-+++ b/src/openvpn/crypto.h
-@@ -140,6 +140,9 @@ struct key_ctx
- {
-   cipher_ctx_t *cipher;      	/**< Generic cipher %context. */
-   hmac_ctx_t *hmac;               /**< Generic HMAC %context. */
-+#ifdef ENABLE_DCA
-+  void *dca_crypto_ctx;
-+#endif
- };
- 
- #define KEY_DIRECTION_BIDIRECTIONAL 0 /* same keys for both directions */
 --- a/src/openvpn/forward.c
 +++ b/src/openvpn/forward.c
 @@ -46,6 +46,9 @@
@@ -95,197 +93,141 @@
  
  counter_type link_read_bytes_global;  /* GLOBAL */
  counter_type link_write_bytes_global; /* GLOBAL */
-@@ -442,6 +445,17 @@ encrypt_sign (struct context *c, bool co
-   if (c->c2.context_auth != CAS_SUCCEEDED)
-     c->c2.buf.len = 0;
+@@ -467,6 +470,19 @@ encrypt_sign(struct context *c, bool com
+         c->c2.buf.len = 0;
+     }
  #endif
 +#ifdef ENABLE_DCA
 +  /* Below changes are to handle data packet offload support */
-+  if (c->c2.buf.len && c->c2.dca_ctx)
++    if (c->c2.buf.len && c->c2.dca_ctx)
 +    {
-+      if (!dca_pkt_offload(c, DCA_PKT_OFFLOAD_ENCAP))
-+        dmsg(D_DCA_ERRORS, "DCA: Packet (Encap) offload Failed! Dropping packet.");
++        if (dca_pkt_offload(c, DCA_PKT_OFFLOAD_ENCAP))
++        {
++            dmsg(D_DCA_ERRORS, "DCA: Packet (Encap) offload Failed! Dropping packet.");
++        }
 +
-+      c->c2.buf.len = 0;
-+      return;
++        c->c2.buf.len = 0;
++        return;
 +    }
 +#endif
  
-   if (comp_frag)
+     if (comp_frag)
      {
-@@ -743,6 +757,21 @@ process_incoming_link (struct context *c
+@@ -787,6 +803,27 @@ process_incoming_link_part1(struct conte
  
-   if (c->c2.buf.len > 0)
+     if (c->c2.buf.len > 0)
      {
 +#ifdef ENABLE_DCA
-+  /* Below changes are to handle data packet offload support */
-+      if (c->c2.dca_ctx)
++        /* Below changes are to handle data packet offload support */
++        if (c->c2.dca_ctx)
 +        {
-+          int ret;
++            int ret;
 +
-+          ret = dca_pkt_offload(c, DCA_PKT_OFFLOAD_DECAP);
-+          if (ret == DCA_PKT_OFFLOAD_RETURN_SUCCESS)
++	    /*
++	     * This function returns success only when packets forwarded are
++	     * data packets and tunnel is offloaded.  If the packets are control
++	     * packets it will return DCA_PKT_OFFLOAD_RETURN_CTRL_PKT, else it
++	     * will return DCA_PKT_OFFLOAD_RETURN_FAILURE.
++	     */
++            ret = dca_pkt_offload(c, DCA_PKT_OFFLOAD_DECAP);
++            if (ret == DCA_PKT_OFFLOAD_RETURN_SUCCESS)
 +            {
-+              dmsg(D_DCA_INFO, "DCA: Packet (Decap) offloaded.");
-+              c->c2.buf.len = 0;
-+              return;
++                dmsg(D_DCA_INFO, "DCA: Packet (Decap) offloaded.");
++                c->c2.buf.len = 0;
++                return decrypt_status;
 +            }
 +        }
 +#endif
-       c->c2.link_read_bytes += c->c2.buf.len;
-       link_read_bytes_global += c->c2.buf.len;
+         c->c2.link_read_bytes += c->c2.buf.len;
+         link_read_bytes_global += c->c2.buf.len;
  #ifdef ENABLE_MEMSTATS
-@@ -1415,6 +1444,11 @@ pre_select (struct context *c)
-   check_send_occ_msg (c);
+@@ -1015,8 +1052,10 @@ process_incoming_link(struct context *c)
+     struct link_socket_info *lsi = get_link_socket_info(c);
+     const uint8_t *orig_buf = c->c2.buf.data;
+ 
+-    process_incoming_link_part1(c, lsi, false);
+-    process_incoming_link_part2(c, lsi, orig_buf);
++    if (process_incoming_link_part1(c, lsi, false))
++    {
++        process_incoming_link_part2(c, lsi, orig_buf);
++    }
+ 
+     perf_pop();
+ }
+@@ -1598,6 +1637,13 @@ pre_select(struct context *c)
+     check_send_occ_msg(c);
  #endif
  
 +#ifdef ENABLE_DCA
-+  if (c->c2.dca_ctx)
-+    dca_stats_update(c, DCA_APP_MODE_CLIENT);
++    if (c->c2.dca_ctx)
++    {
++        dca_stats_update(c, DCA_APP_MODE_CLIENT);
++    }
 +#endif
 +
  #ifdef ENABLE_FRAGMENT
-   /* Should we deliver a datagram fragment to remote? */
-   check_fragment (c);
-@@ -1444,6 +1478,9 @@ io_wait_dowork (struct context *c, const
- #ifdef ENABLE_MANAGEMENT
-   static int management_shift = 6; /* depends on MANAGEMENT_READ and MANAGEMENT_WRITE */
+     /* Should we deliver a datagram fragment to remote? */
+     check_fragment(c);
+@@ -1630,6 +1676,9 @@ io_wait_dowork(struct context *c, const
+ #ifdef ENABLE_ASYNC_PUSH
+     static int file_shift = 8;     /* listening inotify events */
  #endif
 +#ifdef ENABLE_DCA
-+  static int dca_shift = 8; /* depends on DCA_SOCKET_READ */
++    static int dca_shift = 9; /* depends on DCA_SOCKET_READ */
 +#endif
  
-   /*
-    * Decide what kind of events we want to wait for.
-@@ -1538,6 +1575,9 @@ io_wait_dowork (struct context *c, const
-     management_socket_set (management, c->c2.event_set, (void*)&management_shift, NULL);
- #endif
- 
-+#ifdef ENABLE_DCA
-+  dca_socket_set (c->c2.event_set, EVENT_READ, (void*)&dca_shift);
-+#endif
-   /*
-    * Possible scenarios:
-    *  (1) tcp/udp port has data available to read
-@@ -1612,6 +1652,11 @@ process_io (struct context *c)
+     /*
+      * Decide what kind of events we want to wait for.
+@@ -1746,6 +1795,10 @@ io_wait_dowork(struct context *c, const
      }
  #endif
  
 +#ifdef ENABLE_DCA
-+  if (c->c2.dca_ctx && (status & DCA_SOCKET_READ))
-+    dca_recv(c);
++    dca_socket_set (c->c2.event_set, EVENT_READ, (void*)&dca_shift);
 +#endif
 +
-   /* TCP/UDP port ready to accept write */
-   if (status & SOCKET_WRITE)
-     {
---- a/src/openvpn/init.c
-+++ b/src/openvpn/init.c
-@@ -1746,7 +1746,10 @@ do_up (struct context *c, bool pulled_op
- #if P2MP
- 	  save_pulled_options_digest (c, &c->c2.pulled_options_digest);
- #endif
--
-+#ifdef ENABLE_DCA
-+      if (c->options.enable_dca)
-+        dca_tun_up(c);
-+#endif
- 	  /* if --route-delay was specified, start timer */
- 	  if (c->options.route_delay_defined)
- 	    {
-@@ -3569,6 +3572,12 @@ init_instance (struct context *c, const
-     pf_init_context (c);
- #endif
- 
-+#ifdef ENABLE_DCA
-+  /* Initialize Data Plane */
-+  if (options->enable_dca && (c->mode == CM_P2P || c->mode == CM_CHILD_UDP))
-+    dca_tun_alloc(c);
-+#endif
-+
-   /* Check for signals */
-   if (IS_SIG (c))
-     goto sig;
-@@ -3598,6 +3607,19 @@ close_instance (struct context *c)
-       {
- 	/* if xinetd/inetd mode, don't allow restart */
- 	do_close_check_if_restart_permitted (c);
-+#ifdef ENABLE_DCA
-+        if (c->c2.dca_ctx)
-+          {
-+            if (c->mode == CM_P2P)
-+              {
-+                dca_tun_down(c);
-+                dca_tun_free(c);
-+              }
-+          }
-+
-+        if ((c->mode == CM_TOP) || (c->mode == CM_P2P))
-+          dca_uninit(c);
-+#endif
- 
- #ifdef ENABLE_LZO
- 	if (lzo_defined (&c->c2.lzo_compwork))
---- a/src/openvpn/mudp.c
-+++ b/src/openvpn/mudp.c
-@@ -143,6 +143,10 @@ multi_process_io_udp (struct multi_conte
-     strcat (buf, "TR/");
-   else if (status & TUN_WRITE)
-     strcat (buf, "TW/");
-+#ifdef ENABLE_DCA
-+  else if (status & DCA_SOCKET_READ)
-+    strcat (buf, "DR/");
-+#endif
-   printf ("IO %s\n", buf);
- #endif
- 
-@@ -154,6 +158,11 @@ multi_process_io_udp (struct multi_conte
+     /*
+      * Possible scenarios:
+      *  (1) tcp/udp port has data available to read
+@@ -1824,6 +1877,13 @@ process_io(struct context *c)
      }
  #endif
  
 +#ifdef ENABLE_DCA
-+  if (status & DCA_SOCKET_READ)
-+    dca_recv(m->top);
++    if (c->c2.dca_ctx && (status & DCA_SOCKET_READ))
++    {
++        dca_recv(c);
++    }
 +#endif
 +
-   /* UDP port ready to accept write */
-   if (status & SOCKET_WRITE)
+     /* TCP/UDP port ready to accept write */
+     if (status & SOCKET_WRITE)
      {
-@@ -239,6 +248,10 @@ tunnel_server_udp_single_threaded (struc
- 
-   /* finished with initialization */
-   initialization_sequence_completed (top, ISC_SERVER); /* --mode server --proto udp */
-+#ifdef ENABLE_DCA
-+    if (top->options.enable_dca)
-+      dca_init(top);
-+#endif
- 
-   /* per-packet event loop */
-   while (true)
 --- a/src/openvpn/multi.c
 +++ b/src/openvpn/multi.c
-@@ -43,6 +43,9 @@
- 
+@@ -50,6 +50,10 @@
  #include "forward-inline.h"
  #include "pf-inline.h"
+ 
 +#ifdef ENABLE_DCA
 +#include "dca.h"
 +#endif
- 
++
  /*#define MULTI_DEBUG_EVENT_LOOP*/
  
-@@ -171,6 +174,9 @@ multi_reap_range (const struct multi_con
- 	  dmsg (D_MULTI_DEBUG, "MULTI: REAP DEL %s",
- 	       mroute_addr_print (&r->addr, &gc));
- 	  learn_address_script (m, NULL, "delete", &r->addr);
+ #ifdef MULTI_DEBUG_EVENT_LOOP
+@@ -197,6 +201,9 @@ multi_reap_range(const struct multi_cont
+             dmsg(D_MULTI_DEBUG, "MULTI: REAP DEL %s",
+                  mroute_addr_print(&r->addr, &gc));
+             learn_address_script(m, NULL, "delete", &r->addr);
 +#ifdef ENABLE_DCA
-+	  dca_route_del(r);
++     dca_route_del(r);
 +#endif
- 	  multi_route_del (r);
- 	  hash_iterator_delete_element (&hi);
- 	}
-@@ -572,6 +578,14 @@ multi_close_instance (struct multi_conte
-   set_cc_config (mi, NULL);
+             multi_route_del(r);
+             hash_iterator_delete_element(&hi);
+         }
+@@ -685,6 +692,14 @@ multi_close_instance(struct multi_contex
+     set_cc_config(mi, NULL);
  #endif
  
 +#ifdef ENABLE_DCA
@@ -296,68 +238,32 @@
 +    }
 +#endif
 +
-   multi_client_disconnect_script (m, mi);
+     multi_client_disconnect_script(m, mi);
  
-   if (mi->did_open_context)
-@@ -651,6 +665,7 @@ multi_create_instance (struct multi_cont
+     if (mi->did_open_context)
+@@ -773,6 +788,7 @@ multi_create_instance(struct multi_conte
  
-   perf_push (PERF_MULTI_CREATE_INSTANCE);
+     perf_push(PERF_MULTI_CREATE_INSTANCE);
  
-+  msg (M_INFO, "MULTI: multi_create_instance called");
-   msg (D_MULTI_MEDIUM, "MULTI: multi_create_instance called");
++    msg(M_INFO, "MULTI: multi_create_instance called");
+     msg(D_MULTI_MEDIUM, "MULTI: multi_create_instance called");
  
-   ALLOC_OBJ_CLEAR (mi, struct multi_instance);
-@@ -970,12 +985,11 @@ multi_learn_addr (struct multi_context *
- 	      owner = mi;
- 	      multi_instance_inc_refcount (mi);
- 	      route_quota_inc (mi);
--
- 	      /* add new route */
- 	      hash_add_fast (m->vhash, bucket, &newroute->addr, hv, newroute);
- 	    }
- 	}
--      
-+
-       msg (D_MULTI_LOW, "MULTI: Learn%s: %s -> %s",
- 	   learn_succeeded ? "" : " FAILED",
- 	   mroute_addr_print (&newroute->addr, &gc),
-@@ -986,7 +1000,6 @@ multi_learn_addr (struct multi_context *
- 
-       gc_free (&gc);
+     ALLOC_OBJ_CLEAR(mi, struct multi_instance);
+@@ -1210,6 +1226,11 @@ multi_get_instance_by_virtual_addr(struc
+         }
      }
--
-   return owner;
- }
  
-@@ -1041,7 +1054,12 @@ multi_get_instance_by_virtual_addr (stru
- 	    }
- 	}
-     }
--  
-+
 +#ifdef ENABLE_DCA
 +  if (ret)
 +    dca_route_add(route);
 +#endif
 +
  #ifdef ENABLE_DEBUG
-   if (check_debug_level (D_MULTI_DEBUG))
+     if (check_debug_level(D_MULTI_DEBUG))
      {
-@@ -1880,7 +1898,10 @@ multi_connection_established (struct mul
- 
-       /* set flag so we don't get called again */
-       mi->connection_established_flag = true;
--
-+#ifdef ENABLE_DCA
-+      if (mi->context.c2.dca_ctx)
-+        dca_tun_up(&mi->context);
-+#endif
-       /* increment number of current authenticated clients */
-       ++m->n_clients;
-       update_mstat_n_clients(m->n_clients);
-@@ -2568,6 +2589,13 @@ stale_route_check_trigger (struct multi_
+@@ -2979,6 +3000,13 @@ stale_route_check_trigger(struct multi_c
  void
- multi_process_per_second_timers_dowork (struct multi_context *m)
+ multi_process_per_second_timers_dowork(struct multi_context *m)
  {
 +#ifdef ENABLE_DCA
 +  if (m->top.options.enable_dca)
@@ -366,38 +272,50 @@
 +      dca_routes_update(m);
 +    }
 +#endif
-   /* possibly reap instances/routes in vhash */
-   multi_reap_process (m);
+     /* possibly reap instances/routes in vhash */
+     multi_reap_process(m);
  
---- a/src/openvpn/openvpn.c
-+++ b/src/openvpn/openvpn.c
-@@ -66,6 +66,11 @@ tunnel_point_to_point (struct context *c
-   /* set point-to-point mode */
-   c->mode = CM_P2P;
- 
-+#ifdef ENABLE_DCA
-+  if (c->options.enable_dca)
-+    dca_init(c);
-+#endif
-+
-   /* initialize tunnel instance */
-   init_instance_handle_signals (c, c->es, CC_HARD_USR1_TO_HUP);
-   if (IS_SIG (c))
 --- a/src/openvpn/openvpn.h
 +++ b/src/openvpn/openvpn.h
-@@ -247,6 +247,9 @@ struct context_2
- #  define MANAGEMENT_READ  (1<<6)
- #  define MANAGEMENT_WRITE (1<<7)
- # endif
-+# ifdef ENABLE_DCA
-+#  define DCA_SOCKET_READ  (1<<8)
-+#endif
+@@ -237,19 +237,22 @@ struct context_2
+     bool event_set_owned;
  
-   unsigned int event_set_status;
+     /* event flags returned by io_wait */
+-#define SOCKET_READ       (1<<0)
+-#define SOCKET_WRITE      (1<<1)
+-#define TUN_READ          (1<<2)
+-#define TUN_WRITE         (1<<3)
+-#define ES_ERROR          (1<<4)
+-#define ES_TIMEOUT        (1<<5)
+-#ifdef ENABLE_MANAGEMENT
+-#define MANAGEMENT_READ  (1<<6)
+-#define MANAGEMENT_WRITE (1<<7)
+-#endif
+-#ifdef ENABLE_ASYNC_PUSH
+-#define FILE_CLOSED       (1<<8)
+-#endif
++# define SOCKET_READ       (1<<0)
++# define SOCKET_WRITE      (1<<1)
++# define TUN_READ          (1<<2)
++# define TUN_WRITE         (1<<3)
++# define ES_ERROR          (1<<4)
++# define ES_TIMEOUT        (1<<5)
++# ifdef ENABLE_MANAGEMENT
++#  define MANAGEMENT_READ  (1<<6)
++#  define MANAGEMENT_WRITE (1<<7)
++# endif
++# ifdef ENABLE_ASYNC_PUSH
++#  define FILE_CLOSED       (1<<8)
++# endif
++# ifdef ENABLE_DCA
++#  define DCA_SOCKET_READ  (1<<9)
++# endif
+ 
+     unsigned int event_set_status;
  
 @@ -491,6 +494,9 @@ struct context_2
- #ifdef MANAGEMENT_DEF_AUTH
-   struct man_def_auth_context mda_context;
+ #ifdef ENABLE_ASYNC_PUSH
+     int inotify_fd; /* descriptor for monitoring file changes */
  #endif
 +#ifdef ENABLE_DCA
 +  void *dca_ctx;
@@ -407,50 +325,61 @@
  
 --- a/src/openvpn/options.c
 +++ b/src/openvpn/options.c
-@@ -757,6 +757,9 @@ static const char usage_message[] =
+@@ -61,6 +61,10 @@
+ 
+ #include "memdbg.h"
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ const char title_string[] =
+     PACKAGE_STRING
+ #ifdef CONFIGURE_GIT_REVISION
+@@ -772,6 +776,9 @@ static const char usage_message[] =
  #ifdef ENABLE_DEBUG
-   "--show-gateway : Show info about default gateway.\n"
+     "--show-gateway : Show info about default gateway.\n"
  #endif
 +#ifdef ENABLE_DCA
 +  "--enable-dca : Enable data channel acceleration (dca).\n"
 +#endif
-  ;
+ ;
  
  #endif /* !ENABLE_SMALL */
-@@ -878,6 +881,9 @@ init_options (struct options *o, const b
-   }
- #endif /* WIN32 */
+@@ -902,6 +909,9 @@ init_options(struct options *o, const bo
+     }
+ #endif /* _WIN32 */
  #endif /* P2MP_SERVER */
 +#ifdef ENABLE_DCA
 +  o->enable_dca = false;
 +#endif
-   o->allow_recursive_routing = false;
+     o->allow_recursive_routing = false;
  }
  
-@@ -1687,6 +1693,9 @@ show_settings (const struct options *o)
-   SHOW_BOOL (block_outside_dns);
-   show_tuntap_options (&o->tuntap_options);
+@@ -1789,6 +1799,9 @@ show_settings(const struct options *o)
+     SHOW_BOOL(block_outside_dns);
+     show_tuntap_options(&o->tuntap_options);
  #endif
 +#ifdef ENABLE_DCA
 +  SHOW_BOOL (enable_dca);
 +#endif
- #endif
+ #endif /* ifndef ENABLE_SMALL */
  }
  
-@@ -2374,6 +2383,10 @@ options_postprocess_verify_ce (const str
-   if (options->auth_user_pass_file && !options->pull)
-     msg (M_USAGE, "--auth-user-pass requires --pull");
+@@ -2767,6 +2780,10 @@ options_postprocess_verify_ce(const stru
+         msg(M_USAGE, "--auth-user-pass requires --pull");
+     }
  #endif
 +#ifdef ENABLE_DCA
 +  if (options->enable_dca)
 +    dca_validate_options(options, ce);
 +#endif
  
-   uninit_options (&defaults);
+     uninit_options(&defaults);
  }
-@@ -7142,6 +7155,13 @@ add_option (struct options *options,
-       VERIFY_PERMISSION (OPT_P_GENERAL);
-       options->allow_recursive_routing = true;
+@@ -8244,6 +8261,13 @@ add_option(struct options *options,
+         VERIFY_PERMISSION(OPT_P_GENERAL);
+         options->allow_recursive_routing = true;
      }
 +#ifdef ENABLE_DCA
 +  else if (streq (p[0], "enable-dca") && !p[1])
@@ -459,125 +388,12 @@
 +      options->enable_dca = true;
 +    }
 +#endif
-   else
+     else
      {
-       int i;
---- a/src/openvpn/options.h
-+++ b/src/openvpn/options.h
-@@ -602,6 +602,9 @@ struct options
-   /* Useful when packets sent by openvpn itself are not subject
-      to the routing tables that would move packets into the tunnel. */
-   bool allow_recursive_routing;
-+#ifdef ENABLE_DCA
-+  bool enable_dca;
-+#endif
- };
- 
- #define streq(x, y) (!strcmp((x), (y)))
---- a/src/openvpn/ssl.c
-+++ b/src/openvpn/ssl.c
-@@ -752,10 +752,17 @@ is_hard_reset (int op, int key_method)
- static void
- key_state_init (struct tls_session *session, struct key_state *ks)
- {
-+#ifdef ENABLE_DCA
-+  void *dca_crypto_ctx = ks->key.encrypt.dca_crypto_ctx;
-+#endif
-   update_time ();
- 
-   CLEAR (*ks);
- 
-+#ifdef ENABLE_DCA
-+  ks->key.encrypt.dca_crypto_ctx = dca_crypto_ctx;
-+  ks->key.decrypt.dca_crypto_ctx = dca_crypto_ctx;
-+#endif
-   /*
-    * Build TLS object that reads/writes ciphertext
-    * to/from memory BIOs.
-@@ -827,6 +834,12 @@ key_state_init (struct tls_session *sess
- static void
- key_state_free (struct key_state *ks, bool clear)
- {
-+#ifdef ENABLE_DCA
-+  void *dca_crypto_ctx = ks->key.encrypt.dca_crypto_ctx;
-+
-+  if (dca_crypto_ctx)
-+    dca_crypto_key_del(ks);
-+#endif
-   ks->state = S_UNDEF;
- 
-   key_state_ssl_free(&ks->ks_ssl);
-@@ -863,6 +876,10 @@ key_state_free (struct key_state *ks, bo
- 
-   if (clear)
-     CLEAR (*ks);
-+#ifdef ENABLE_DCA
-+  ks->key.encrypt.dca_crypto_ctx = dca_crypto_ctx;
-+  ks->key.decrypt.dca_crypto_ctx = dca_crypto_ctx;
-+#endif
- }
- 
- /** @} name Functions for initialization and cleanup of key_state structures */
-@@ -902,11 +919,24 @@ static void
- tls_session_init (struct tls_multi *multi, struct tls_session *session)
- {
-   struct gc_arena gc = gc_new ();
-+#ifdef ENABLE_DCA
-+  void *dca_crypto_ctx = session->key[KS_PRIMARY].key.encrypt.dca_crypto_ctx;
-+  int j;
-+#endif
- 
-   dmsg (D_TLS_DEBUG, "TLS: tls_session_init: entry");
- 
-   CLEAR (*session);
- 
-+#ifdef ENABLE_DCA
-+  for (j = 0; j < KS_SIZE; j++)
-+    {
-+      struct key_state *ks = &session->key[j];
-+      ks->key.encrypt.dca_crypto_ctx = dca_crypto_ctx;
-+      ks->key.decrypt.dca_crypto_ctx = dca_crypto_ctx;
-+    }
-+#endif
-+
-   /* Set options data to point to parent's option structure */
-   session->opt = &multi->opt;
-   
-@@ -991,7 +1021,7 @@ tls_session_free (struct tls_session *se
- static void
- move_session (struct tls_multi* multi, int dest, int src, bool reinit_src)
- {
--  msg (D_TLS_DEBUG_LOW, "TLS: move_session: dest=%s src=%s reinit_src=%d",
-+  msg (M_INFO, "TLS: move_session: dest=%s src=%s reinit_src=%d",
-        session_index_name(dest),
-        session_index_name(src),
-        reinit_src);
-@@ -1078,6 +1108,7 @@ tls_multi_init (struct tls_options *tls_
- 
-   ALLOC_OBJ_CLEAR (ret, struct tls_multi);
- 
-+
-   /* get command line derived options */
-   ret->opt = *tls_options;
- 
-@@ -2376,6 +2407,14 @@ tls_process (struct tls_multi *multi,
- 		    print_details (&ks->ks_ssl, "Control Channel:");
- 		  state_change = true;
- 		  ks->state = S_ACTIVE;
-+#ifdef ENABLE_DCA
-+                  if (ks->key.encrypt.dca_crypto_ctx)
-+                    if (dca_crypto_key_add(ks))
-+                      {
-+		        dmsg (D_DCA_ERRORS, "DCA Error: Couldn't add key, deleting tunnel");
-+		        goto error;
-+		      }
-+#endif
- 		  INCR_SUCCESS;
- 
- 		  /* Set outgoing address for data channel packets */
+         int i;
 --- a/src/openvpn/errlevel.h
 +++ b/src/openvpn/errlevel.h
-@@ -69,6 +69,7 @@
+@@ -68,6 +68,7 @@
  #define D_PID_PERSIST        LOGLEV(1, 12, M_NONFATAL)   /* show packet_id persist errors */
  #define D_FRAG_ERRORS        LOGLEV(1, 13, M_NONFATAL)   /* show fragmentation errors */
  #define D_ALIGN_ERRORS       LOGLEV(1, 14, M_NONFATAL)   /* show bad struct alignments */
@@ -585,7 +401,7 @@
  
  #define D_HANDSHAKE          LOGLEV(2, 20, 0)        /* show data & control channel handshakes */
  #define D_CLOSE              LOGLEV(2, 22, 0)        /* show socket and TUN/TAP close */
-@@ -92,6 +93,7 @@
+@@ -91,6 +92,7 @@
  #define D_OSBUF              LOGLEV(3, 43, 0)        /* show socket/tun/tap buffer sizes */
  #define D_PS_PROXY           LOGLEV(3, 44, 0)        /* messages related to --port-share option */
  #define D_PF_INFO            LOGLEV(3, 45, 0)        /* packet filter informational messages */
@@ -595,10 +411,10 @@
  #define D_SHOW_OCC           LOGLEV(4, 51, 0)        /* show options compatibility string */
 --- /dev/null
 +++ b/src/openvpn/dca.c
-@@ -0,0 +1,962 @@
+@@ -0,0 +1,961 @@
 +/*
 + **************************************************************************
-+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
 + * Permission to use, copy, modify, and/or distribute this software for
 + * any purpose with or without fee is hereby granted, provided that the
 + * above copyright notice and this permission notice appear in all copies.
@@ -641,6 +457,7 @@
 +#include <arpa/inet.h>
 +#include <linux/socket.h>
 +#include <linux/sockios.h>
++#include <netdb.h>
 +
 +#include "syshead.h"
 +
@@ -673,390 +490,387 @@
 +/*
 + * dca_send_msg
 + */
-+int
-+dca_send_msg(int cmd, void *data)
++int dca_send_msg(int cmd, void *data)
 +{
-+  return ioctl(g_dca_ctx->dca_sock, cmd, data);
++    return ioctl(g_dca_ctx->dca_sock, cmd, data);
 +}
 +
 +/*
 + * __dca_app_register_msg
 + */
-+static int
-+__dca_app_register_msg(struct context *c)
++static int __dca_app_register_msg(struct context *c)
 +{
-+  struct nss_ovpn_sk_app_inst app;
-+  int err;
-+  char *tun_dev_name;
++    struct nss_ovpn_sk_app_inst app;
++    char *tun_dev_name;
 +
-+  if (!c->c1.tuntap)
++    if (!c->c1.tuntap)
 +    {
-+      msg(D_DCA_INFO, "DCA: TUN/TAP is not initialized");
-+      return -1;
++        msg(D_DCA_INFO, "DCA: TUN/TAP is not initialized");
++        return -1;
 +    }
 +
-+  tun_dev_name = c->c1.tuntap->actual_name;
-+  msg(D_DCA_INFO, "DCA: Registering app [%d], tun dev=%s", g_dca_ctx->pid,
-+       tun_dev_name);
-+  /*
-+   * Init the message structure
-+   */
-+  strcpy(app.tun_dev, tun_dev_name);
-+  app.pid = g_dca_ctx->pid;
-+  if (c->mode == CM_P2P)
-+    app.app_mode = NSS_OVPN_SK_APP_MODE_CLIENT;
-+  else
-+    app.app_mode = NSS_OVPN_SK_APP_MODE_SERVER;
++    tun_dev_name = c->c1.tuntap->actual_name;
++    msg(D_DCA_INFO, "DCA: Registering app [%d], tun dev=%s", g_dca_ctx->pid,
++            tun_dev_name);
++    /*
++     * Init the message structure
++     */
++    strlcpy(app.tun_dev, tun_dev_name, IFNAMSIZ);
++    app.pid = g_dca_ctx->pid;
++    if (c->mode == CM_P2P)
++        app.app_mode = NSS_OVPN_SK_APP_MODE_CLIENT;
++    else
++        app.app_mode = NSS_OVPN_SK_APP_MODE_SERVER;
 +
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_APP_REG, &app);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_APP_REG, &app);
 +}
 +
 +/*
 + * __dca_app_unregister_msg
 + */
-+static int
-+__dca_app_unregister_msg()
++static int __dca_app_unregister_msg()
 +{
-+  struct nss_ovpn_sk_app_inst app;
++    struct nss_ovpn_sk_app_inst app;
 +
-+  /*
-+   * Init the message structure
-+   */
-+  app.pid = g_dca_ctx->pid;
++    /*
++     * Init the message structure
++     */
++    app.pid = g_dca_ctx->pid;
 +
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_APP_DEREG, &app);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_APP_DEREG, &app);
 +}
 +
 +/*
 + * __dca_tun_add_msg
 + */
-+static int
-+__dca_tun_add_msg(struct nss_ovpn_sk_tunnel *tun)
++static int __dca_tun_add_msg(struct nss_ovpn_sk_tunnel *tun)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_TUN_ADD, tun);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_TUN_ADD, tun);
 +}
 +
 +/*
 + * __dca_tun_del_msg
 + */
-+static int
-+__dca_tun_del_msg(int tunnel_id)
++static int __dca_tun_del_msg(int tunnel_id)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_TUN_DEL, &tunnel_id);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_TUN_DEL, &tunnel_id);
 +}
 +
 +/*
 + * __dca_tun_stats_get_msg
 + */
-+static int
-+__dca_tun_stats_get_msg(struct nss_ovpn_sk_tun_stats *stats)
++static int __dca_tun_stats_get_msg(struct nss_ovpn_sk_tun_stats *stats)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_STATS_GET, stats);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_STATS_GET, stats);
 +}
 +
 +/*
 + * __dca_tun_find_by_id
 + */
-+static struct dca_tun *
-+__dca_tun_find_by_id(unsigned int tun_id)
++static struct dca_tun * __dca_tun_find_by_id(unsigned int tun_id)
 +{
-+  struct dca_tun *tun;
-+  struct dca_tun_db *temp;
++    struct dca_tun_db *temp;
 +
-+  if (!g_dca_ctx || !g_dca_ctx->tun_db)
++    if (!g_dca_ctx || !g_dca_ctx->tun_db)
 +    {
-+      msg(D_DCA_INFO, "DCA: Tunnel database is empty");
-+      return NULL;
++        msg(D_DCA_INFO, "DCA: Tunnel database is empty");
++        return NULL;
 +    }
 +
-+  temp = g_dca_ctx->tun_db;
-+  while (temp)
++    temp = g_dca_ctx->tun_db;
++    while (temp)
 +    {
-+      if (temp->tun.tun.ovpn.tunnel_id == tun_id)
-+          return &temp->tun;
++        if (temp->tun.tun.ovpn.tunnel_id == tun_id)
++            return &temp->tun;
 +
-+      temp = temp->next;
++        temp = temp->next;
 +    }
 +
-+  return NULL;
++    return NULL;
 +}
 +
 +/*
 + * __dca_tun_alloc
 + */
-+static struct dca_tun *
-+__dca_tun_alloc(void)
++static struct dca_tun * __dca_tun_alloc(void)
 +{
-+  struct dca_tun *tun;
-+  struct dca_tun_db *tun_db;
-+  struct dca_tun_db *temp;
++    struct dca_tun *tun;
++    struct dca_tun_db *tun_db;
++    struct dca_tun_db *temp;
 +
-+  tun_db = calloc(1, sizeof(struct dca_tun_db));
-+  if (!tun_db)
++    tun_db = calloc(1, sizeof(struct dca_tun_db));
++    if (!tun_db)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Memory allocation for tun_db failed");
-+      return NULL;
++        msg(D_DCA_ERRORS, "DCA: Memory allocation for tun_db failed");
++        return NULL;
 +    }
 +
-+  if (!g_dca_ctx->tun_db)
++    if (!g_dca_ctx->tun_db)
 +    {
-+      g_dca_ctx->tun_db = tun_db;
-+      tun = &tun_db->tun;
-+      return tun;
++        g_dca_ctx->tun_db = tun_db;
++        tun = &tun_db->tun;
++        return tun;
 +    }
 +
-+  temp = g_dca_ctx->tun_db;
-+  while (temp->next)
-+    temp = temp->next;
++    temp = g_dca_ctx->tun_db;
++    while (temp->next)
++        temp = temp->next;
 +
-+  temp->next = tun_db;
-+  tun_db->prev = temp;
++    temp->next = tun_db;
++    tun_db->prev = temp;
 +
-+  tun = &tun_db->tun;
-+  return tun;
++    tun = &tun_db->tun;
++    return tun;
 +}
 +
 +/*
 + * __dca_tun_free
 + */
-+static int
-+__dca_tun_free(struct dca_tun *tun)
++static int __dca_tun_free(struct dca_tun *tun)
 +{
-+  struct dca_tun_db *temp;
++    struct dca_tun_db *temp;
 +
-+  if (!g_dca_ctx || !g_dca_ctx->tun_db)
++    if (!g_dca_ctx || !g_dca_ctx->tun_db)
 +    {
-+      msg(D_DCA_INFO, "DCA: Tunnel database is empty");
-+      return -1;
++        msg(D_DCA_INFO, "DCA: Tunnel database is empty");
++        return -1;
 +    }
 +
-+  temp = g_dca_ctx->tun_db;
-+  while (temp && (&temp->tun != tun))
-+      temp = temp->next;
++    temp = g_dca_ctx->tun_db;
++    while (temp && (&temp->tun != tun))
++        temp = temp->next;
 +
-+  if (!temp)
++    if (!temp)
 +    {
-+      msg(D_DCA_INFO, "DCA: Couldn't find the tunnel in database");
-+      return -1;
++        msg(D_DCA_INFO, "DCA: Couldn't find the tunnel in database");
++        return -1;
 +    }
 +
-+  if (temp->prev)
-+    temp->prev->next = temp->next;
++    if (temp->prev)
++        temp->prev->next = temp->next;
 +
-+  if (temp->next)
-+    temp->next->prev = temp->prev;
++    if (temp->next)
++        temp->next->prev = temp->prev;
 +
-+  if (temp == g_dca_ctx->tun_db) /* If the tunnel is in 1st slot */
-+    g_dca_ctx->tun_db = temp->next;
++    if (temp == g_dca_ctx->tun_db) /* If the tunnel is in 1st slot */
++        g_dca_ctx->tun_db = temp->next;
 +
-+  free(temp);
-+  return 0;
++    free(temp);
++    return 0;
 +}
 +
 +/*
 + * dca_validate_options
 + */
-+void
-+dca_validate_options(const struct options *options, const struct connection_entry *ce)
++void dca_validate_options(const struct options *options, const struct connection_entry *ce)
 +{
-+  struct options defaults;
-+  int dev;
-+  bool pull = false;
-+  bool packet_id_long_form;
-+
-+  /*
-+   * DCA supports only TUN mode.
-+   */
-+  dev = dev_type_enum(options->dev, options->dev_type);
-+  if (dev != DEV_TYPE_TUN)
-+    msg (M_USAGE, "Only --dev tun mode can be used with --enable-dca");
-+
-+  /*
-+   * DCA supports only UDP Encapsulation.
-+   */
-+  if (!proto_is_udp(ce->proto))
-+    msg (M_USAGE, "Only --proto udp can be used with --enable-dca");
-+
-+  /*
-+   * DCA does not support OpenVPN fragmentation.
-+   */
-+#ifdef ENABLE_FRAGMENT
-+  if (ce->fragment)
-+    msg (M_USAGE, "--fragment cannot be used with --enable-dca");
-+#endif
-+
-+  /*
-+   * DCA does not support Long Packet ID format.
-+   */
++    int dev;
 +#ifdef ENABLE_CRYPTO
-+  if (options->shared_secret_file)
-+    msg (M_USAGE, "--static cannot be used with --enable-dca");
++    char *ciphername, *authname;
++#endif
 +
-+  if (dca_alg_get(options->ciphername, options->authname) < 0)
-+    msg (M_USAGE, "--cipher %s, --auth %s is not supported with --enable-dca",
-+           options->ciphername, options->authname);
++    /*
++     * DCA supports only TUN mode.
++     */
++    dev = dev_type_enum(options->dev, options->dev_type);
++    if (dev != DEV_TYPE_TUN)
++        msg (M_USAGE, "Only --dev tun mode can be used with --enable-dca");
++
++    /*
++     * DCA supports only UDP Encapsulation.
++     */
++    if (!proto_is_udp(ce->proto))
++        msg (M_USAGE, "Only --proto udp can be used with --enable-dca");
++
++    /*
++     * DCA does not support OpenVPN fragmentation.
++     */
++#ifdef ENABLE_FRAGMENT
++    if (ce->fragment)
++        msg (M_USAGE, "--fragment cannot be used with --enable-dca");
 +#endif
-+  /*
-+   * DCA does not support PASSTOS.
-+   */
++
++    /*
++     * DCA does not support Long Packet ID format.
++     */
++#ifdef ENABLE_CRYPTO
++    if (options->shared_secret_file)
++        msg (M_USAGE, "--static cannot be used with --enable-dca");
++
++    ciphername = options->ciphername;
++    authname = options->authname;
++
++    /*
++     * check if ciphername or authname are set to none
++     */
++    if (ciphername && !strncmp(ciphername, "none", 4))
++        ciphername = NULL;
++
++    if (authname && !strncmp(authname, "none", 4))
++        authname = NULL;
++
++    if (dca_crypto_alg_get(ciphername, authname) < 0)
++    {
++        msg (M_USAGE, "--cipher %s, --auth %s is not supported with --enable-dca",
++                ciphername, authname);
++    }
++#endif
++    /*
++     * DCA does not support PASSTOS.
++     */
 +#if PASSTOS_CAPABILITY
-+  if (options->passtos)
-+    msg (M_USAGE, "--passtos cannot be used with --enable-dca");
++    if (options->passtos)
++        msg (M_USAGE, "--passtos cannot be used with --enable-dca");
 +#endif
-+  /*
-+   * DCA does not support compression.
-+   */
++    /*
++     * DCA does not support compression.
++     */
 +#ifdef ENABLE_LZO
-+  if (options->lzo)
-+    msg (M_USAGE, "--comp-lzo cannot be used with --enable-dca");
++    if (options->comp.alg == COMP_ALG_LZO)
++        msg (M_USAGE, "--comp-lzo cannot be used with --enable-dca");
 +#endif
 +}
 +
 +/*
 + * dca_socket_set
 + */
-+void
-+dca_socket_set(struct event_set *es,
-+      unsigned int rwflags,
-+      void *arg)
++void dca_socket_set(struct event_set *es, unsigned int rwflags, void *arg)
 +{
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx)
++        return;
 +
-+  event_ctl (es, g_dca_ctx->dca_sock, rwflags, arg);
++    event_ctl (es, g_dca_ctx->dca_sock, rwflags, arg);
 +}
 +
 +/*
 + * dca_recv
 + *     This API is called when there are packets in DCA layer.
 + */
-+void
-+dca_recv(struct context *c)
++void dca_recv(struct context *c)
 +{
-+  struct dca_tun *tun;
-+  unsigned char *data;
-+  struct iovec iov;
-+  struct msghdr mesg;
-+  struct cmsghdr *cmsg;
-+  uint8_t pkt_info_buf[CMSG_SPACE(sizeof(struct nss_ovpn_sk_pkt_info))];
-+  int ret;
++    struct dca_tun *tun;
++    unsigned char *data;
++    struct iovec iov;
++    struct msghdr mesg;
++    struct cmsghdr *cmsg;
++    uint8_t pkt_info_buf[CMSG_SPACE(sizeof(struct nss_ovpn_sk_pkt_info))];
++    int ret;
 +
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx)
++        return;
 +
-+  data = malloc(DCA_MAX_PKT_SIZE);
-+  if (!data)
-+    return;
++    data = malloc(DCA_MAX_PKT_SIZE);
++    if (!data)
++        return;
 +
-+  memset(pkt_info_buf,0, sizeof(pkt_info_buf));
-+  memset(&mesg, 0, sizeof(mesg));
-+  iov.iov_base = data;
-+  iov.iov_len = DCA_MAX_PKT_SIZE;
-+  mesg.msg_iov = &iov;
-+  mesg.msg_iovlen = 1;
-+  mesg.msg_namelen =  0;
-+  mesg.msg_control = pkt_info_buf;
-+  mesg.msg_flags = 0;
-+  mesg.msg_controllen = sizeof(pkt_info_buf);
-+  cmsg = CMSG_FIRSTHDR(&mesg);
-+  cmsg->cmsg_len = CMSG_LEN(sizeof(struct nss_ovpn_sk_pkt_info));
-+  cmsg->cmsg_level = SOL_IP;
-+  cmsg->cmsg_type = IP_PKTINFO;
++    memset(pkt_info_buf,0, sizeof(pkt_info_buf));
++    memset(&mesg, 0, sizeof(mesg));
++    iov.iov_base = data;
++    iov.iov_len = DCA_MAX_PKT_SIZE;
++    mesg.msg_iov = &iov;
++    mesg.msg_iovlen = 1;
++    mesg.msg_namelen =  0;
++    mesg.msg_control = pkt_info_buf;
++    mesg.msg_flags = 0;
++    mesg.msg_controllen = sizeof(pkt_info_buf);
++    cmsg = CMSG_FIRSTHDR(&mesg);
++    cmsg->cmsg_len = CMSG_LEN(sizeof(struct nss_ovpn_sk_pkt_info));
++    cmsg->cmsg_level = SOL_IP;
++    cmsg->cmsg_type = IP_PKTINFO;
 +
-+  ret = recvmsg(g_dca_ctx->dca_sock, &mesg, MSG_DONTWAIT);
-+  if (ret < 0)
-+    goto exit_clean_buf;
++    ret = recvmsg(g_dca_ctx->dca_sock, &mesg, MSG_DONTWAIT);
++    if (ret < 0)
++        goto exit_clean_buf;
 +
-+  for (cmsg = CMSG_FIRSTHDR(&mesg); cmsg; cmsg = CMSG_NXTHDR(&mesg, cmsg))
++    for (cmsg = CMSG_FIRSTHDR(&mesg); cmsg; cmsg = CMSG_NXTHDR(&mesg, cmsg))
 +    {
-+      struct nss_ovpn_sk_pkt_info *pkt_info;
-+      struct context *c1;
++        struct nss_ovpn_sk_pkt_info *pkt_info;
++        struct context *c1;
 +
-+      pkt_info = (struct nss_ovpn_sk_pkt_info *) CMSG_DATA(cmsg);
-+      tun = __dca_tun_find_by_id(pkt_info->tunnel_id);
-+      if (!tun)
++        pkt_info = (struct nss_ovpn_sk_pkt_info *) CMSG_DATA(cmsg);
++        tun = __dca_tun_find_by_id(pkt_info->tunnel_id);
++        if (!tun)
 +        {
-+          msg(D_DCA_ERRORS, "DCA: Tunnel is not found");
-+          goto exit_clean_buf;
++            msg(D_DCA_ERRORS, "DCA: Tunnel is not found");
++            goto exit_clean_buf;
 +        }
-+      c1 = tun->c;
++        c1 = tun->c;
 +
-+      if (buf_write(&c1->c2.buf, (void *)data, ret) == false)
++        if (buf_write(&c1->c2.buf, (void *)data, ret) == false)
 +        {
-+          msg(D_DCA_ERRORS, "DCA: buf_write failed: %p", tun);
-+          goto exit_clean_buf;
++            msg(D_DCA_ERRORS, "DCA: buf_write failed: %p", tun);
++            goto exit_clean_buf;
 +        }
 +
-+      /*
-+       * PING packets are transmitted when the tunnel is idle.
-+       * If packets are received from peer, there is no need to
-+       * send PING packets.  Reset packet received timer.
-+       */
-+      if (c1->options.ping_rec_timeout && c1->c2.buf.len > 0)
-+        event_timeout_reset(&c1->c2.ping_rec_interval);
++        /*
++         * PING packets are transmitted when the tunnel is idle.
++         * If packets are received from peer, there is no need to
++         * send PING packets.  Reset packet received timer.
++         */
++        if (c1->options.ping_rec_timeout && c1->c2.buf.len > 0)
++            event_timeout_reset(&c1->c2.ping_rec_interval);
 +
-+      /*
-+       * Handle PING packets.
-+       */
-+      if (is_ping_msg(&c1->c2.buf))
-+        msg(D_DCA_INFO, "DCA: Received PING packet:%p", tun);
++        /*
++         * Handle PING packets.
++         */
++        if (is_ping_msg(&c1->c2.buf))
++            msg(D_DCA_INFO, "DCA: Received PING packet:%p", tun);
 +
 +#ifdef ENABLE_OCC
-+       /* Did we just receive an OCC packet? */
-+       if (is_occ_msg(&c1->c2.buf))
-+         process_received_occ_msg(c1);
++        /* Did we just receive an OCC packet? */
++        if (is_occ_msg(&c1->c2.buf))
++            process_received_occ_msg(c1);
 +#endif
-+       /*
-+        * PING/OCC packets are only expected from OVPN client.
-+        * Packet is processed above, drop the packet here
-+        */
-+       c1->c2.buf.len = 0;
++        /*
++         * PING/OCC packets are only expected from OVPN client.
++         * Packet is processed above, drop the packet here
++         */
++        c1->c2.buf.len = 0;
 +    }
 +exit_clean_buf:
-+  free(data);
++    free(data);
 +}
 +
 +/*
 + * dca_tun_stats_update
 + *     This API updates statistics of given tun.
 + */
-+void
-+dca_tun_stats_update(struct context *c, struct dca_tun *tun)
++void dca_tun_stats_update(struct context *c, struct dca_tun *tun)
 +{
-+  struct nss_ovpn_sk_tun_stats stats;
++    struct nss_ovpn_sk_tun_stats stats;
 +
-+  if (c->c2.context_auth != CAS_SUCCEEDED)
-+    return;
++    if (c->c2.context_auth != CAS_SUCCEEDED)
++        return;
 +
-+  if (tun->state == DCA_TUN_STATE_DOWN)
-+    return;
++    if (tun->state == DCA_TUN_STATE_DOWN)
++        return;
 +
-+  stats.tunnel_id = tun->tun.ovpn.tunnel_id;
-+  if (__dca_tun_stats_get_msg(&stats))
-+    return;
++    stats.tunnel_id = tun->tun.ovpn.tunnel_id;
++    if (__dca_tun_stats_get_msg(&stats))
++        return;
 +
-+  /*
-+   * Update tunnel statistics.
-+   */
-+  c->c2.tun_read_bytes += stats.tun_read_bytes;
-+  c->c2.tun_write_bytes += stats.tun_write_bytes;
-+  c->c2.link_read_bytes += stats.link_read_bytes;
-+  link_read_bytes_global += stats.link_read_bytes;
-+  c->c2.link_read_bytes_auth += stats.link_read_bytes_auth;
-+  c->c2.link_write_bytes     += stats.link_write_bytes;
-+  link_write_bytes_global += stats.link_write_bytes;
++    /*
++     * Update tunnel statistics.
++     */
++    c->c2.tun_read_bytes += stats.tun_read_bytes;
++    c->c2.tun_write_bytes += stats.tun_write_bytes;
++    c->c2.link_read_bytes += stats.link_read_bytes;
++    link_read_bytes_global += stats.link_read_bytes;
++    c->c2.link_read_bytes_auth += stats.link_read_bytes_auth;
++    c->c2.link_write_bytes     += stats.link_write_bytes;
++    link_write_bytes_global += stats.link_write_bytes;
 +
-+  /*
-+   * Statistics are maintained by application in c->c2 context.
-+   * DCA layer clears statistics after sending to application.
-+   * If link_read_bytes is non-zero then packets are handled in DCA layer indicating
-+   * that data channel is busy.
-+   * Reset PING timer, there is no need to send PING packets.
-+   */
-+  if (stats.link_read_bytes)
++    /*
++     * Statistics are maintained by application in c->c2 context.
++     * DCA layer clears statistics after sending to application.
++     * If link_read_bytes is non-zero then packets are handled in DCA layer indicating
++     * that data channel is busy.
++     * Reset PING timer, there is no need to send PING packets.
++     */
++    if (stats.link_read_bytes)
 +    {
-+      if (c->options.ping_rec_timeout)
-+        event_timeout_reset(&c->c2.ping_rec_interval);
++        if (c->options.ping_rec_timeout)
++            event_timeout_reset(&c->c2.ping_rec_interval);
 +    }
 +}
 +
@@ -1064,49 +878,48 @@
 + * dca_stats_update
 + *   This API handles updating statistics of all tunnels.
 + */
-+void
-+dca_stats_update(void *p, int server)
++void dca_stats_update(void *p, int server)
 +{
 +
-+  if (!g_dca_ctx)
-+    return;
-+
-+  if (!server)
-+    {
-+      struct context *c = p;
-+      struct dca_tun *tun = c->c2.dca_ctx;
-+
-+      if (!tun)
++    if (!g_dca_ctx)
 +        return;
 +
-+      dca_tun_stats_update(c, tun);
-+    }
-+  else
++    if (!server)
 +    {
-+      struct multi_context *m = p;
-+      struct hash_iterator hi;
-+      struct hash_element *he;
-+      struct multi_instance *mi;
++        struct context *c = p;
++        struct dca_tun *tun = c->c2.dca_ctx;
 +
-+      /*
-+       * Tunnels are maintained in Hash Table.
-+       * hash_iterator* APIs are used to parse through
-+       * hash table.
-+       */
-+      hash_iterator_init(m->iter, &hi);
-+      while ((he = hash_iterator_next(&hi)))
++        if (!tun)
++            return;
++
++        dca_tun_stats_update(c, tun);
++    }
++    else
++    {
++        struct multi_context *m = p;
++        struct hash_iterator hi;
++        struct hash_element *he;
++        struct multi_instance *mi;
++
++        /*
++         * Tunnels are maintained in Hash Table.
++         * hash_iterator* APIs are used to parse through
++         * hash table.
++         */
++        hash_iterator_init(m->iter, &hi);
++        while ((he = hash_iterator_next(&hi)))
 +        {
-+          struct context *c;
-+          struct dca_tun *tun;
-+          mi = (struct multi_instance *) he->value;
-+          c = &mi->context;
-+          tun = c->c2.dca_ctx;
-+          if (!tun)
-+            continue;
++            struct context *c;
++            struct dca_tun *tun;
++            mi = (struct multi_instance *) he->value;
++            c = &mi->context;
++            tun = c->c2.dca_ctx;
++            if (!tun)
++                continue;
 +
-+          dca_tun_stats_update(c, tun);
++            dca_tun_stats_update(c, tun);
 +        }
-+      hash_iterator_free(&hi);
++        hash_iterator_free(&hi);
 +    }
 +}
 +
@@ -1123,103 +936,98 @@
 + *         2. DCA_PKT_OFFLOAD_RETURN_SUCCESS - Packet is offloaded Successfully.
 + *         3. DCA_PKT_OFFLOAD_RETURN_CTRL_PKT - Packet is control packet (SSL/TLS packet).
 + */
-+int
-+dca_pkt_offload(struct context *c, int decrypt)
++int dca_pkt_offload(struct context *c, int decrypt)
 +{
-+  struct dca_tun *tun = c->c2.dca_ctx;
-+  struct buffer *buf = &c->c2.buf;
-+  struct iovec iov;
-+  struct msghdr mesg;
-+  struct cmsghdr *cmsg;
-+  struct nss_ovpn_sk_pkt_info *pkti;
-+  struct buffer ipbuf = *buf;
-+  uint8_t pkt_info_buf[CMSG_SPACE(sizeof(struct nss_ovpn_sk_pkt_info))];
-+  int ret;
-+  int i;
-+  int key_id;
++    struct dca_tun *tun = c->c2.dca_ctx;
++    struct buffer *buf = &c->c2.buf;
++    struct iovec iov;
++    struct msghdr mesg;
++    struct cmsghdr *cmsg;
++    struct nss_ovpn_sk_pkt_info *pkti;
++    uint8_t pkt_info_buf[CMSG_SPACE(sizeof(struct nss_ovpn_sk_pkt_info))];
++    int ret;
 +
-+  if (!g_dca_ctx || !tun)
-+    return DCA_PKT_OFFLOAD_RETURN_FAILURE;
-+
-+  if (decrypt)
-+    {
-+      int op;
-+      uint8_t op_key = *BPTR(buf);
-+
-+      /* Check if data channel is up */
-+      if (c->c2.context_auth != CAS_SUCCEEDED)
++    if (!g_dca_ctx || !tun)
 +        return DCA_PKT_OFFLOAD_RETURN_FAILURE;
 +
-+      /* Get opcode and key ID */
-+      op = op_key >> P_OPCODE_SHIFT;
-+      key_id = op_key & P_KEY_ID_MASK;
++    if (decrypt)
++    {
++        int op;
++        uint8_t op_key = *BPTR(buf);
 +
-+      /*
-+       * Offload only data packets
-+       * Return if the packets received are not data packets.
-+       */
-+      if (!((op == P_DATA_V1) || (op == P_DATA_V2)))
++        /* Check if data channel is up */
++        if (c->c2.context_auth != CAS_SUCCEEDED)
++            return DCA_PKT_OFFLOAD_RETURN_FAILURE;
++
++        /* Get opcode and key ID */
++        op = op_key >> P_OPCODE_SHIFT;
++
++        /*
++         * Offload only data packets
++         * Return if the packets received are not data packets.
++         */
++        if (!((op == P_DATA_V1) || (op == P_DATA_V2)))
 +        {
-+          /*
-+           * If we get reset here, it means client which is already connected has
-+           * restarted.
-+           */
-+          if ((op == P_CONTROL_HARD_RESET_CLIENT_V2) || (op == P_CONTROL_HARD_RESET_CLIENT_V1))
++            /*
++             * If we get reset here, it means client which is already connected has
++             * restarted.
++             */
++            if ((op == P_CONTROL_HARD_RESET_CLIENT_V2) || (op == P_CONTROL_HARD_RESET_CLIENT_V1))
 +            {
-+              if (tun->state == DCA_TUN_STATE_UP)
++                if (tun->state == DCA_TUN_STATE_UP)
 +                {
-+                  msg(D_DCA_INFO, "DCA: Client restarted, deleting tunnel in DCA layer: %p", tun);
-+                  dca_tun_down(tun->c);
++                    msg(D_DCA_INFO, "DCA: Client restarted, deleting tunnel in DCA layer: %p", tun);
++                    dca_tun_down(tun->c);
 +                }
 +            }
-+          return DCA_PKT_OFFLOAD_RETURN_CTRL_PKT;
++            return DCA_PKT_OFFLOAD_RETURN_CTRL_PKT;
 +        }
 +
-+      if (tun->state == DCA_TUN_STATE_DOWN)
++        if (tun->state == DCA_TUN_STATE_DOWN)
 +        {
-+          msg(D_DCA_INFO, "DCA: Client re-established tunnel successfully, adding tunnel in DCA layer: %p", tun);
-+          dca_tun_up(tun->c);
++            msg(D_DCA_INFO, "DCA: Client re-established tunnel successfully, adding tunnel in DCA layer: %p", tun);
++            dca_tun_up(tun->c);
 +        }
 +    }
 +
-+  if (tun->state == DCA_TUN_STATE_DOWN)
-+    return DCA_PKT_OFFLOAD_RETURN_FAILURE;
++    if (tun->state == DCA_TUN_STATE_DOWN)
++        return DCA_PKT_OFFLOAD_RETURN_FAILURE;
 +
-+  memset(pkt_info_buf,0, sizeof(pkt_info_buf));
-+  memset(&mesg, 0, sizeof(mesg));
-+  iov.iov_base = BPTR(buf);
-+  iov.iov_len = BLEN(buf);
-+  mesg.msg_iov = &iov;
-+  mesg.msg_iovlen = 1;
-+  mesg.msg_namelen =  0;
-+  mesg.msg_control = pkt_info_buf;
-+  mesg.msg_flags = 0;
-+  mesg.msg_controllen = sizeof(pkt_info_buf);
-+  cmsg = CMSG_FIRSTHDR(&mesg);
-+  cmsg->cmsg_len = CMSG_LEN(sizeof(struct nss_ovpn_sk_pkt_info));
-+  cmsg->cmsg_level = SOL_IP;
-+  cmsg->cmsg_type = IP_PKTINFO;
++    memset(pkt_info_buf,0, sizeof(pkt_info_buf));
++    memset(&mesg, 0, sizeof(mesg));
++    iov.iov_base = BPTR(buf);
++    iov.iov_len = BLEN(buf);
++    mesg.msg_iov = &iov;
++    mesg.msg_iovlen = 1;
++    mesg.msg_namelen =  0;
++    mesg.msg_control = pkt_info_buf;
++    mesg.msg_flags = 0;
++    mesg.msg_controllen = sizeof(pkt_info_buf);
++    cmsg = CMSG_FIRSTHDR(&mesg);
++    cmsg->cmsg_len = CMSG_LEN(sizeof(struct nss_ovpn_sk_pkt_info));
++    cmsg->cmsg_level = SOL_IP;
++    cmsg->cmsg_type = IP_PKTINFO;
 +
-+  pkti = (struct nss_ovpn_sk_pkt_info *) CMSG_DATA(cmsg);
-+  if (decrypt)
++    pkti = (struct nss_ovpn_sk_pkt_info *) CMSG_DATA(cmsg);
++    if (decrypt)
 +    {
-+      pkti->flags |= NSS_OVPN_SK_PKT_INFO_FLAG_DIR_DECAP;
-+      if (tun->tun.ovpn.flags & NSS_OVPN_SK_OVPN_HDR_FLAG_IPv6)
++        pkti->flags |= NSS_OVPN_SK_PKT_INFO_FLAG_DIR_DECAP;
++        if (tun->tun.ovpn.flags & NSS_OVPN_SK_OVPN_HDR_FLAG_IPv6)
 +        {
-+          /* IPv6 packet. */
-+          pkti->flags |= NSS_OVPN_SK_PKT_INFO_FLAG_PKT_TYPE_IPV6;
++            /* IPv6 packet. */
++            pkti->flags |= NSS_OVPN_SK_PKT_INFO_FLAG_PKT_TYPE_IPV6;
 +        }
 +    }
 +
-+  pkti->tunnel_id = tun->tun.ovpn.tunnel_id;
++    pkti->tunnel_id = tun->tun.ovpn.tunnel_id;
 +
-+  ret = sendmsg(g_dca_ctx->dca_sock, &mesg, 0);
-+  if (ret < 0)
++    ret = sendmsg(g_dca_ctx->dca_sock, &mesg, 0);
++    if (ret < 0)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Packet offload failed:%p", tun);
++        msg(D_DCA_ERRORS, "DCA: Packet offload failed:%p", tun);
 +    }
 +
-+  return DCA_PKT_OFFLOAD_RETURN_SUCCESS;
++    return DCA_PKT_OFFLOAD_RETURN_SUCCESS;
 +}
 +
 +/*
@@ -1227,343 +1035,350 @@
 + *     This API is called when tunnel is negotiated successfully.  It will
 + *     extract necessary parameters from c and adds tunnel in DCA layer.
 + */
-+void
-+dca_tun_up(struct context *c)
++void dca_tun_up(struct context *c)
 +{
-+  struct dca_tun *tun = c->c2.dca_ctx;
-+  struct gc_arena gc = gc_new();
-+  struct tls_multi *multi = c->c2.tls_multi;
-+  struct link_socket_info *info = get_link_socket_info(c);
-+  struct openvpn_sockaddr *addr = &info->lsa->actual.dest;
-+  const struct link_socket_actual *act = c->c2.to_link_addr;
-+  struct push_entry *e = c->options.push_list.head;
++    struct dca_tun *tun = c->c2.dca_ctx;
++    struct gc_arena gc = gc_new();
++    struct tls_multi *multi = c->c2.tls_multi;
++    struct link_socket_info *info = get_link_socket_info(c);
++    struct openvpn_sockaddr *addr = &info->lsa->actual.dest;
++    const struct link_socket_actual *act = c->c2.to_link_addr;
++    struct servent *serv;
 +
-+  if (!g_dca_ctx || !tun)
++    if (!g_dca_ctx || !tun)
 +    {
-+      gc_free(&gc);
-+      return;
++        gc_free(&gc);
++        return;
 +    }
 +
-+  if (c->mode == CM_P2P)
++    if (c->mode == CM_P2P)
 +    {
-+      if (__dca_app_register_msg(c))
++        if (__dca_app_register_msg(c))
 +        {
-+          msg(D_DCA_INFO, "DCA: Failed to register app:%p", tun);
-+          close(g_dca_ctx->dca_sock);
-+          free(g_dca_ctx);
-+          g_dca_ctx = NULL;
-+          gc_free(&gc);
-+          return;
++            msg(D_DCA_INFO, "DCA: Failed to register app:%p", tun);
++            close(g_dca_ctx->dca_sock);
++            free(g_dca_ctx);
++            g_dca_ctx = NULL;
++            gc_free(&gc);
++            return;
 +        }
 +    }
 +
-+  /*
-+   *  Copy Tunnel end point parameters
-+   */
-+  switch (addr->addr.sa.sa_family)
++    /*
++     * get local port number
++     */
++    serv = getservbyname(c->options.ce.local_port, NULL);
++    if (!serv)
 +    {
-+      case AF_INET:
-+        {
-+          /* Get tunnel destination port */
-+          tun->tun.tun_hdr.dst_port =  addr->addr.in4.sin_port;
-+          /* Get tunnel source port */
-+          tun->tun.tun_hdr.src_port = htons(c->options.ce.local_port);
-+          /* Get tunnel destination IP */
-+          tun->tun.tun_hdr.dst_ip[0] = addr->addr.in4.sin_addr.s_addr;
++        msg(D_DCA_INFO, "DCA: Couldn't get port number: %s", c->options.ce.local_port);
++        goto err_exit;
++    }
 +
-+          /* Get tunnel source IP */
-+          if (act)
++    /*
++     *  Copy Tunnel end point parameters
++     */
++    switch (addr->addr.sa.sa_family)
++    {
++        case AF_INET:
 +            {
-+              struct openvpn_sockaddr sa;
-+              CLEAR(sa);
-+              sa.addr.in4.sin_family = AF_INET;
++                /* Get tunnel destination port */
++                tun->tun.tun_hdr.dst_port =  addr->addr.in4.sin_port;
++                /* Get tunnel source port */
++                tun->tun.tun_hdr.src_port = serv->s_port;
++                /* Get tunnel destination IP */
++                tun->tun.tun_hdr.dst_ip[0] = addr->addr.in4.sin_addr.s_addr;
++
++                /* Get tunnel source IP */
++                if (act)
++                {
++                    struct openvpn_sockaddr sa;
++                    CLEAR(sa);
++                    sa.addr.in4.sin_family = AF_INET;
 +#ifdef IP_PKTINFO
-+               sa.addr.in4.sin_addr = act->pi.in4.ipi_spec_dst;
++                    sa.addr.in4.sin_addr = act->pi.in4.ipi_spec_dst;
 +#elif defined(IP_RECVDSTADDR)
-+               sa.addr.in4.sin_addr = act->pi.in4;
-+               ifname[0] = 0;
++                    sa.addr.in4.sin_addr = act->pi.in4;
++                    ifname[0] = 0;
 +#endif
-+               tun->tun.tun_hdr.src_ip[0] = sa.addr.in4.sin_addr.s_addr;
++                    tun->tun.tun_hdr.src_ip[0] = sa.addr.in4.sin_addr.s_addr;
++                }
++                else
++                {
++                    /* Can't continue since tunnel source IP is not available */
++                    goto err_exit;
++                }
 +            }
-+          else
++            break;
++
++        case AF_INET6:
 +            {
-+              /* Can't continue since tunnel source IP is not available */
-+              goto err_exit;
++                /* Get tunnel destination port */
++                tun->tun.tun_hdr.dst_port =  addr->addr.in6.sin6_port;
++                /* Get tunnel source port */
++                tun->tun.tun_hdr.src_port = serv->s_port;
++
++                /* Get tunnel destination IP */
++                memcpy(&tun->tun.tun_hdr.dst_ip[0], &addr->addr.in6.sin6_addr, sizeof(addr->addr.in6.sin6_addr));
++
++                /* Get tunnel Source IP */
++                if (act)
++                {
++                    memcpy(&tun->tun.tun_hdr.src_ip[0], &act->pi.in6.ipi6_addr, sizeof(act->pi.in6.ipi6_addr));
++                }
++                else
++                {
++                    /* Can't continue since tunnel source IP is not available */
++                    goto err_exit;
++                }
++                tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_IPv6;
 +            }
-+        }
-+      break;
++            break;
 +
-+      case AF_INET6:
-+        {
-+          /* Get tunnel destination port */
-+          tun->tun.tun_hdr.dst_port =  addr->addr.in6.sin6_port;
-+          /* Get tunnel source port */
-+          tun->tun.tun_hdr.src_port = htons(c->options.ce.local_port);
-+
-+          /* Get tunnel destination IP */
-+          memcpy(&tun->tun.tun_hdr.dst_ip[0], &addr->addr.in6.sin6_addr, sizeof(addr->addr.in6.sin6_addr));
-+
-+          /* Get tunnel Source IP */
-+          if (act)
-+            {
-+               memcpy(&tun->tun.tun_hdr.src_ip[0], &act->pi.in6.ipi6_addr, sizeof(act->pi.in6.ipi6_addr));
-+            }
-+          else
-+            {
-+              /* Can't continue since tunnel source IP is not available */
++        default:
++            msg(D_DCA_INFO, "DCA: Incorrect address family");
 +            goto err_exit;
-+        }
-+          tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_IPv6;
-+        }
-+      break;
-+
-+      default:
-+          msg(D_DCA_INFO, "DCA: Incorrect address family");
-+          goto err_exit;
 +    }
 +
-+  /*
-+   * Copy Crypto parameters.
-+   */
-+  memcpy(&tun->tun.crypto, &tun->crypto, sizeof(tun->crypto));
-+  tun->tun.crypto.key_id = 0;  /* Note: When tunnel is up, key_id always starts with 0 */
++    /*
++     * Copy Crypto parameters.
++     */
++    memcpy(&tun->tun.crypto, &tun->crypto, sizeof(tun->crypto));
++    tun->tun.crypto.key_id = 0;  /* Note: When tunnel is up, key_id always starts with 0 */
 +
-+  /*
-+   *  Check if this is V2 Data header
-+   */
-+  if (!multi->opt.server && multi->use_peer_id)
++    /*
++     *  Check if this is V2 Data header
++     */
++    if (multi->use_peer_id)
 +    {
-+      tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_DATA_V2;
-+      tun->tun.ovpn.peer_id = multi->peer_id;
++        tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_DATA_V2;
++        tun->tun.ovpn.peer_id = multi->peer_id;
++        tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_PEER_DATA_V2;
++        msg(D_DCA_INFO, "DCA: Data V2 is enabled peer-id = %d", multi->peer_id);
 +    }
 +
-+  /*
-+   * Check if server allows Data V2 for the client.
-+   */
-+  if (c->mode != CM_P2P)
++    /* All Set. Send Tunnel add message */
++    if (__dca_tun_add_msg(&tun->tun))
 +    {
-+      while (e)
-+        {
-+          if (e->enable && strstr (e->option, "peer-id"))
-+            {
-+              msg(D_DCA_INFO, "DCA: Client will send V2 data packets: %s ", e->option);
-+              tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_PEER_DATA_V2;
-+              break;
-+            }
-+            e = e->next;
-+        }
-+    }
-+
-+  /* All Set. Send Tunnel add message */
-+  if (__dca_tun_add_msg(&tun->tun))
-+    {
-+      msg(D_DCA_INFO, "DCA: Failed to add tunnel in DCA: %p", tun);
-+      goto err_exit;
++        msg(D_DCA_INFO, "DCA: Failed to add tunnel in DCA: %p", tun);
++        goto err_exit;
 +    }
 +
 +    msg(D_DCA_INFO, "Tunnel add successful: tun_id = %d\n",
-+           tun->tun.ovpn.tunnel_id);
++            tun->tun.ovpn.tunnel_id);
 +
-+  /*
-+   * Packets are routed in DCA as host based route.  It doesn't maintain
-+   * address assigned to us (client) or address assigned by us (server).
-+   * Add remote assigned IP Address as route here.
-+   */
-+  if (c->c2.push_ifconfig_local)
++    /*
++     * Packets are routed in DCA as host based route.  It doesn't maintain
++     * address assigned to us (client) or address assigned by us (server).
++     * Add remote assigned IP Address as route here.
++     */
++    if (c->c2.push_ifconfig_local)
 +    {
-+      /* Add ipv4 route */
-+      struct nss_ovpn_sk_route_info route_info;
++        /* Add ipv4 route */
++        struct nss_ovpn_sk_route_info route_info;
 +
-+      msg(D_DCA_INFO, "DCA: Remote IPv4 Addr : %s",
-+           print_in_addr_t( c->c2.push_ifconfig_local, IA_NET_ORDER, &gc));
-+      route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
-+      route_info.ip_version = 4;
-+      route_info.ip_network[0] = htonl(c->c2.push_ifconfig_local);
-+      route_info.netmask_bits = 32;
++        msg(D_DCA_INFO, "DCA: Remote IPv4 Addr : %s",
++                print_in_addr_t( c->c2.push_ifconfig_local, IA_NET_ORDER, &gc));
++        route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
++        route_info.ip_version = 4;
++        route_info.ip_network[0] = htonl(c->c2.push_ifconfig_local);
++        route_info.netmask_bits = 32;
 +
-+      if (dca_route_add_msg(&route_info))
-+        msg(D_DCA_INFO, "%s:%s Failed to add route", __func__,
-+           print_in_addr_t( c->c2.push_ifconfig_local, IA_NET_ORDER, &gc));
++        if (dca_route_add_msg(&route_info))
++            msg(D_DCA_INFO, "%s:%s Failed to add route", __func__,
++                    print_in_addr_t( c->c2.push_ifconfig_local, IA_NET_ORDER, &gc));
 +    }
 +
-+  if (c->c2.push_ifconfig_ipv6_defined)
++    if (c->c2.push_ifconfig_ipv6_defined)
 +    {
-+       /* Add ipv6 route */
-+      struct nss_ovpn_sk_route_info route_info;
++        /* Add ipv6 route */
++        struct nss_ovpn_sk_route_info route_info;
 +
-+      msg(D_DCA_INFO, "DCA: Remote IPv6 Addr : %s",
-+           print_in6_addr( c->c2.push_ifconfig_ipv6_remote, 0, &gc));
++        msg(D_DCA_INFO, "DCA: Remote IPv6 Addr : %s",
++                print_in6_addr( c->c2.push_ifconfig_ipv6_remote, 0, &gc));
 +
-+      memcpy(&route_info.ip_network[0],
-+             &c->c2.push_ifconfig_ipv6_local, sizeof(struct in6_addr));
-+      route_info.ip_version = 6;
-+      route_info.netmask_bits = 128;
++        memcpy(&route_info.ip_network[0],
++                &c->c2.push_ifconfig_ipv6_local, sizeof(struct in6_addr));
++        route_info.ip_version = 6;
++        route_info.netmask_bits = 128;
 +
-+      if (dca_route_add_msg(&route_info))
-+        msg(D_DCA_INFO, "%s:%s Failed to add route", __func__,
-+             &c->c2.push_ifconfig_ipv6_local, sizeof(struct in6_addr));
++        if (dca_route_add_msg(&route_info))
++            msg(D_DCA_INFO, "%s:%s Failed to add route", __func__,
++                    print_in6_addr( c->c2.push_ifconfig_ipv6_local, 0, &gc ));
 +    }
 +
-+  /*
-+   * Copy reference of c into tun.  This is required to update statistics later.
-+   */
-+  tun->c = c;
-+  tun->state = DCA_TUN_STATE_UP;
++    /*
++     * Copy reference of c into tun.  This is required to update statistics later.
++     */
++    tun->c = c;
++    tun->state = DCA_TUN_STATE_UP;
 +
-+  gc_free(&gc);
-+  return;
++    gc_free(&gc);
++    return;
 +
 +err_exit:
-+  __dca_tun_free(tun);
-+  c->c2.dca_ctx = NULL;
-+  gc_free(&gc);
++    dca_tun_free(c);
++    c->c2.dca_ctx = NULL;
++    gc_free(&gc);
 +}
 +
 +/*
 + * dca_tun_down
 + */
-+void
-+dca_tun_down(struct context *c)
++void dca_tun_down(struct context *c)
 +{
-+  struct dca_tun *tun = c->c2.dca_ctx;
++    struct dca_tun *tun = c->c2.dca_ctx;
 +
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx || !tun)
++        return;
 +
-+  if (__dca_tun_del_msg(tun->tun.ovpn.tunnel_id))
-+    msg(D_DCA_ERRORS, "DCA: Tunnel delete failed:%p", tun);
++    if (__dca_tun_del_msg(tun->tun.ovpn.tunnel_id))
++        msg(D_DCA_ERRORS, "DCA: Tunnel delete failed:%p", tun);
 +
-+  tun->state = DCA_TUN_STATE_DOWN;
++    tun->state = DCA_TUN_STATE_DOWN;
 +}
 +
 +/*
 + * dca_tun_alloc
 + */
-+void
-+dca_tun_alloc(struct context *c)
++void dca_tun_alloc(struct context *c)
 +{
-+  struct dca_tun *tun;
-+  int i;
-+  struct tls_multi *multi = c->c2.tls_multi;
++    struct dca_tun *tun;
++    int i;
++    struct tls_multi *multi = c->c2.tls_multi;
 +
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx)
++        return;
 +
-+  tun = __dca_tun_alloc();
-+  if (!tun)
++    tun = __dca_tun_alloc();
++    if (!tun)
 +    {
-+      msg(D_DCA_INFO, "DCA: Tunnel alloc failed");
-+      return;
++        msg(D_DCA_INFO, "DCA: Tunnel alloc failed");
++        return;
 +    }
 +
-+  for (i = 0; i < TM_SIZE; ++i)
++    for (i = 0; i < TM_SIZE; ++i)
 +    {
-+      int j;
-+      struct tls_session *session = &multi->session[i];
++        int j;
++        struct tls_session *session = &multi->session[i];
 +
-+      for (j = 0; j < KS_SIZE; j++)
++        for (j = 0; j < KS_SIZE; j++)
 +        {
-+          struct key_state *ks = &session->key[j];
-+          ks->key.encrypt.dca_crypto_ctx = (void *)tun;
-+          ks->key.decrypt.dca_crypto_ctx = (void *)tun;
++            struct key_ctx_bi *kcb = &session->key[j].crypto_options.key_ctx_bi;
++            kcb->encrypt.dca_crypto_ctx = (void *)tun;
++            kcb->decrypt.dca_crypto_ctx = (void *)tun;
 +        }
 +    }
-+  msg(D_DCA_INFO, "DCA: Tunnel alloc successful:%p", tun);
-+  c->c2.dca_ctx = (void *)tun;
++    msg(D_DCA_INFO, "DCA: Tunnel alloc successful:%p", tun);
++    c->c2.dca_ctx = (void *)tun;
 +}
 +
 +/*
 + * dca_tun_free
 + */
-+void
-+dca_tun_free(struct context *c)
++void dca_tun_free(struct context *c)
 +{
-+  struct dca_tun *tun = c->c2.dca_ctx;
++    struct dca_tun *tun = c->c2.dca_ctx;
++    struct tls_multi *multi = c->c2.tls_multi;
++    int i;
 +
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx || !tun)
++        return;
 +
-+  __dca_tun_free(tun);
-+  c->c2.dca_ctx = NULL;
++    /*
++     * Clean up dca_crypto_ctx in all crypto sessions of tunnel context
++     */
++    for (i = 0; i < TM_SIZE; ++i)
++    {
++        int j;
++        struct tls_session *session = &multi->session[i];
++
++        for (j = 0; j < KS_SIZE; j++)
++        {
++            struct key_ctx_bi *kcb = &session->key[j].crypto_options.key_ctx_bi;
++            kcb->encrypt.dca_crypto_ctx = NULL;
++            kcb->decrypt.dca_crypto_ctx = NULL;
++        }
++    }
++
++    /*
++     * Free up tunnel.
++     */
++    __dca_tun_free(tun);
++    c->c2.dca_ctx = NULL;
 +}
 +
 +/*
 + * dca_init
 + */
-+void
-+dca_init(struct context *c)
++void dca_init(struct context *c)
 +{
-+  int i;
-+  struct tls_multi *multi = c->c2.tls_multi;
 +
-+  g_dca_ctx = calloc(1, sizeof(*g_dca_ctx));
-+  if (!g_dca_ctx)
++    g_dca_ctx = calloc(1, sizeof(*g_dca_ctx));
++    if (!g_dca_ctx)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Memory allocation failed.  DCA failed");
-+      return;
++        msg(D_DCA_ERRORS, "DCA: Memory allocation failed.  DCA failed");
++        return;
 +    }
 +
-+  g_dca_ctx->dca_sock = socket(AF_OVPN, SOCK_DGRAM, 0);
-+  if (g_dca_ctx->dca_sock < 0)
++    g_dca_ctx->dca_sock = socket(AF_OVPN, SOCK_DGRAM, 0);
++    if (g_dca_ctx->dca_sock < 0)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Unable to create OVPN socket");
-+      free(g_dca_ctx);
-+      g_dca_ctx = NULL;
-+      return;
++        msg(D_DCA_ERRORS, "DCA: Unable to create OVPN socket");
++        free(g_dca_ctx);
++        g_dca_ctx = NULL;
++        return;
 +    }
 +
-+  g_dca_ctx->pid = getpid();
++    g_dca_ctx->pid = getpid();
 +
-+  if (c->mode != CM_P2P)
++    if (c->mode != CM_P2P)
 +    {
-+      msg(D_DCA_INFO, "DCA: mode is server");
-+      /*
-+       * Register application
-+       * Note: Application register is done for Client mode in dca_tun_up()
-+       */
-+      if (__dca_app_register_msg(c))
++        msg(D_DCA_INFO, "DCA: mode is server");
++        /*
++         * Register application
++         * Note: Application register is done for Client mode in dca_tun_up()
++         */
++        if (__dca_app_register_msg(c))
 +        {
-+          msg(D_DCA_ERRORS, "DCA: Failed to register app");
-+          close(g_dca_ctx->dca_sock);
-+          free(g_dca_ctx);
-+          g_dca_ctx = NULL;
-+          return;
++            msg(D_DCA_ERRORS, "DCA: Failed to register app");
++            close(g_dca_ctx->dca_sock);
++            free(g_dca_ctx);
++            g_dca_ctx = NULL;
++            return;
 +        }
 +    }
-+  else
-+    msg(D_DCA_INFO, "DCA: mode is client");
++    else
++        msg(D_DCA_INFO, "DCA: mode is client");
 +
-+  msg(D_DCA_INFO, "DCA: Application is registered successfully\n");
++    msg(D_DCA_INFO, "DCA: Application is registered successfully\n");
 +}
 +
 +/*
 + * dca_uninit
 + */
-+void
-+dca_uninit(struct context *c)
++void dca_uninit(struct context *c)
 +{
-+  if (!g_dca_ctx)
-+    return;
++    if (!g_dca_ctx)
++        return;
 +
-+  if (__dca_app_unregister_msg())
-+    msg(D_DCA_INFO, "DCA: Failed to unregister app");
++    if (__dca_app_unregister_msg())
++        msg(D_DCA_INFO, "DCA: Failed to unregister app");
 +
-+  close(g_dca_ctx->dca_sock);
-+  free(g_dca_ctx);
-+  msg(D_DCA_INFO, "DCA: Application is deregistered successfully\n");
++    close(g_dca_ctx->dca_sock);
++    free(g_dca_ctx);
++    msg(D_DCA_INFO, "DCA: Application is deregistered successfully\n");
 +}
 +#else /* ifdef ENABLE_DCA */
-+static void
-+dummy(void)
++static void dummy(void)
 +{
 +}
 +#endif /* ENABLE_DCA */
 --- /dev/null
 +++ b/src/openvpn/dca.h
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,142 @@
 +/*
 + **************************************************************************
-+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
 + * Permission to use, copy, modify, and/or distribute this software for
 + * any purpose with or without fee is hereby granted, provided that the
 + * above copyright notice and this permission notice appear in all copies.
@@ -1586,6 +1401,7 @@
 +#define __DCA_H__
 +
 +#include "openvpn.h"
++#include "multi.h"
 +#include "nss_ovpn_sk.h"
 +
 +#define DCA_APP_MODE_CLIENT 0
@@ -1666,28 +1482,48 @@
 +    struct dca_tun_db *tun_db;  /* Active Tunnels Database */
 +};
 +
-+int dca_pkt_offload(struct context *c, int decrypt);
-+int dca_crypto_ctx_init(struct key_ctx *ctx, struct key *key,
-+                        const struct key_type *kt, int enc);
-+void dca_tun_up(struct context *c);
-+void dca_crypto_key_free(struct key_state *ks);
-+int dca_crypto_key_add(struct key_state *ks);
++/**
++ * Tunnnel offload core functions
++ */
 +void dca_init(struct context *c);
 +void dca_uninit(struct context *c);
-+void dca_route_add(struct multi_route *r);
-+void dca_route_del(struct multi_route *r);
-+int dca_route_add_msg(struct nss_ovpn_sk_route_info *route_info);
++int dca_send_msg(int cmd, void *data);
 +void dca_tun_alloc(struct context *c);
 +void dca_tun_delete(struct context *c);
 +void dca_tun_down(struct context *c);
++void dca_tun_up(struct context *c);
++void dca_tun_free(struct context *c);
++void dca_stats_update(void *p, int server);
++int dca_pkt_offload(struct context *c, int decrypt);
++void dca_socket_set(struct event_set *es, unsigned int rwflags, void *arg);
++void dca_validate_options(const struct options *options, const struct connection_entry *ce);
++void dca_recv(struct context *c);
++
++/**
++ * Crypto procesing functions
++ */
++int dca_crypto_ctx_init(struct key_ctx *ctx, struct key *key,
++                        const struct key_type *kt, int enc);
++void dca_crypto_key_free(struct key_state *ks);
++int dca_crypto_key_add(struct key_state *ks);
++int dca_crypto_alg_get(const char *cipher_alg, const char *hmac_alg);
++void dca_crypto_key_del(struct key_state *ks);
++
++/**
++ * Route handling functions
++ */
++void dca_route_add(struct multi_route *r);
++void dca_route_del(struct multi_route *r);
++int dca_route_add_msg(struct nss_ovpn_sk_route_info *route_info);
++void dca_routes_update(struct multi_context *m);
 +
 +#endif  /* __DCA_H__ */
 --- /dev/null
 +++ b/src/openvpn/dca_crypto.c
-@@ -0,0 +1,324 @@
+@@ -0,0 +1,322 @@
 +/*
 + **************************************************************************
-+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
 + * Permission to use, copy, modify, and/or distribute this software for
 + * any purpose with or without fee is hereby granted, provided that the
 + * above copyright notice and this permission notice appear in all copies.
@@ -1753,268 +1589,266 @@
 + * dca_alg
 + */
 +struct dca_alg {
-+	char *cipher_alg;
-+	char *hmac_alg;
-+	int algo;
++    char *cipher_alg;
++    char *hmac_alg;
++    int algo;
 +};
 +
 +/*
 + * Algorithms supported in DCA layer.
 + */
 +static struct dca_alg aead_alg[] = {
-+	{ "aes-128-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
-+	{ "aes-192-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
-+	{ "aes-256-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
-+	{ "aes-128-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
-+	{ "aes-192-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
-+	{ "aes-256-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
-+	{ "des-ede3-cbc", "sha1",   NSS_OVPN_SK_ALGO_3DES_CBC_SHA1_HMAC},
-+	{ "des-ede3-cbc", "sha256", NSS_OVPN_SK_ALGO_3DES_CBC_SHA256_HMAC},
++    { "aes-128-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
++    { "aes-192-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
++    { "aes-256-cbc",  "sha1",   NSS_OVPN_SK_ALGO_AES_CBC_SHA1_HMAC},
++    { "aes-128-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
++    { "aes-192-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
++    { "aes-256-cbc",  "sha256", NSS_OVPN_SK_ALGO_AES_CBC_SHA256_HMAC},
++    { "des-ede3-cbc", "sha1",   NSS_OVPN_SK_ALGO_3DES_CBC_SHA1_HMAC},
++    { "des-ede3-cbc", "sha256", NSS_OVPN_SK_ALGO_3DES_CBC_SHA256_HMAC},
 +};
 +
 +/*
 + * Application crypto algorithm names.
 + */
 +static struct dca_alg ablk_alg[] = {
-+	{ "aes-128-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
-+	{ "aes-192-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
-+	{ "aes-256-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
-+	{ "des-ede3-cbc",  NULL,    NSS_OVPN_SK_ALGO_3DES_CBC_NULL_AUTH},
++    { "aes-128-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
++    { "aes-192-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
++    { "aes-256-cbc",   NULL,    NSS_OVPN_SK_ALGO_AES_CBC_NULL_AUTH},
++    { "des-ede3-cbc",  NULL,    NSS_OVPN_SK_ALGO_3DES_CBC_NULL_AUTH},
 +};
 +
 +/*
 + * Application hash algorithm names.
 + */
 +static struct dca_alg ahash_alg[] = {
-+	{ NULL,           "sha1",   NSS_OVPN_SK_ALGO_NULL_CIPHER_SHA1_HMAC},
-+	{ NULL,           "sha256", NSS_OVPN_SK_ALGO_NULL_CIPHER_SHA256_HMAC},
++    { NULL,           "sha1",   NSS_OVPN_SK_ALGO_NULL_CIPHER_SHA1_HMAC},
++    { NULL,           "sha256", NSS_OVPN_SK_ALGO_NULL_CIPHER_SHA256_HMAC},
 +};
 +
 +/*
 + * __dca_crypto_key_add_msg
 + */
-+static int
-+__dca_crypto_key_add_msg(struct nss_ovpn_sk_crypto_session *crypto_key)
++static int __dca_crypto_key_add_msg(struct nss_ovpn_sk_crypto_session *crypto_key)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_CRYPTO_KEY_ADD,  crypto_key);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_CRYPTO_KEY_ADD,  crypto_key);
 +}
 +
 +/*
 + * __dca_crypto_key_del_msg
 + */
-+static int
-+__dca_crypto_key_del_msg(struct nss_ovpn_sk_crypto_session *crypto_session)
++static int __dca_crypto_key_del_msg(struct nss_ovpn_sk_crypto_session *crypto_session)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_CRYPTO_KEY_DEL, crypto_session);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_CRYPTO_KEY_DEL, crypto_session);
 +}
 +
 +/*
-+ * dca_alg_get()
++ * dca_crypto_alg_get()
 + *	Return DCA crypto algorithm index.
 + */
-+int
-+dca_alg_get(const char *cipher_alg, const char *hmac_alg)
++int dca_crypto_alg_get(const char *cipher_alg, const char *hmac_alg)
 +{
-+  int i;
++    int i;
 +
-+  /*
-+   * AEAD mode?
-+   */
-+  if (cipher_alg && hmac_alg)
++    /*
++     * AEAD mode?
++     */
++    if (cipher_alg && hmac_alg)
 +    {
-+      for (i = 0; i < ARRAY_SIZE(aead_alg); i++)
-+        if ((strncasecmp(aead_alg[i].cipher_alg, cipher_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0) &&
-+            (strncasecmp(aead_alg[i].hmac_alg, hmac_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0))
-+              return aead_alg[i].algo;
++        for (i = 0; i < ARRAY_SIZE(aead_alg); i++)
++            if ((strncasecmp(aead_alg[i].cipher_alg, cipher_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0) &&
++                    (strncasecmp(aead_alg[i].hmac_alg, hmac_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0))
++                return aead_alg[i].algo;
 +
-+      return -1;
++        return -1;
 +    }
 +
-+  /*
-+   * ABLK mode?
-+   */
-+  if (cipher_alg)
++    /*
++     * ABLK mode?
++     */
++    if (cipher_alg)
 +    {
-+      for (i = 0; i < ARRAY_SIZE(ablk_alg); i++)
-+        if (strncasecmp(ablk_alg[i].cipher_alg, cipher_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0)
-+          return ablk_alg[i].algo;
++        for (i = 0; i < ARRAY_SIZE(ablk_alg); i++)
++            if (strncasecmp(ablk_alg[i].cipher_alg, cipher_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0)
++                return ablk_alg[i].algo;
 +
-+      return -1;
++        return -1;
 +    }
 +
-+  /*
-+   * AHASH mode?
-+   */
-+  if (hmac_alg)
++    /*
++     * AHASH mode?
++     */
++    if (hmac_alg)
 +    {
-+      for (i = 0; i < ARRAY_SIZE(ahash_alg); i++)
-+        if (strncasecmp(ahash_alg[i].hmac_alg, hmac_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0)
-+          return ahash_alg[i].algo;
++        for (i = 0; i < ARRAY_SIZE(ahash_alg); i++)
++            if (strncasecmp(ahash_alg[i].hmac_alg, hmac_alg, DCA_CRYPTO_ALG_NAME_MAX_LEN) == 0)
++                return ahash_alg[i].algo;
 +
-+      return -1;
++        return -1;
 +    }
 +
-+  /*
-+   * Cipher is none.
-+   * Hash is none.
-+   */
-+  return NSS_OVPN_SK_ALGO_NULL_CIPHER_NULL_AUTH;
++    /*
++     * Cipher is none.
++     * Hash is none.
++     */
++    return NSS_OVPN_SK_ALGO_NULL_CIPHER_NULL_AUTH;
 +}
 +
 +/*
 + * dca_crypto_ctx_init
 + */
-+int
-+dca_crypto_ctx_init(struct key_ctx *ctx, struct key *key,
-+                    const struct key_type *kt, int enc)
++int dca_crypto_ctx_init(struct key_ctx *ctx, struct key *key,
++      const struct key_type *kt, int enc)
 +{
-+  struct dca_tun *tun = ctx->dca_crypto_ctx;
-+  struct nss_ovpn_sk_crypto_session *crypto;
-+  struct nss_ovpn_sk_crypto_key *crypto_key;
-+  const char *cipher_alg = NULL, *hmac_alg = NULL;
++    struct dca_tun *tun = ctx->dca_crypto_ctx;
++    struct nss_ovpn_sk_crypto_session *crypto;
++    struct nss_ovpn_sk_crypto_key *crypto_key;
++    const char *cipher_alg = NULL, *hmac_alg = NULL;
 +
-+  if (!g_dca_ctx || !tun)
-+    return -1;
++    if (!g_dca_ctx || !tun)
++        return -1;
 +
-+  crypto = &tun->crypto;
++    crypto = &tun->crypto;
 +
-+  if (enc)
-+    crypto_key = &crypto->encrypt;
-+  else
-+    crypto_key = &crypto->decrypt;
-+
-+  /*
-+   * Copy Cipher Key.
-+   */
-+  if (kt->cipher && kt->cipher_length > 0)
++    if (enc)
 +    {
-+      cipher_alg = cipher_kt_name(kt->cipher);
-+      crypto->config.cipher_key_size = kt->cipher_length;
-+      memcpy(&crypto_key->cipher_key, key->cipher, kt->cipher_length);
-+      msg(D_DCA_INFO, "DCA: Cipher is '%s': %p", cipher_alg, tun);
++        crypto_key = &crypto->encrypt;
 +    }
-+  else
++    else
 +    {
-+      crypto->config.cipher_key_size = 0;
-+      msg(D_DCA_INFO, "DCA: Cipher is 'none': %p", tun);
-+      /* Set the flags if there is no crypto */
-+      tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_NO_CIPHER;
++        crypto_key = &crypto->decrypt;
 +    }
 +
-+  /*
-+   * Copy HMAC Key.
-+   */
-+  if (kt->digest && kt->hmac_length > 0)
++    /*
++     * Copy Cipher Key.
++     */
++    if (kt->cipher && kt->cipher_length > 0)
 +    {
-+      hmac_alg = md_kt_name(kt->digest);
-+      crypto->config.hmac_key_size = kt->hmac_length;
-+      memcpy(&crypto_key->hmac_key, key->hmac, kt->hmac_length);
-+      msg(D_DCA_INFO, "DCA: Auth is '%s': %p", hmac_alg, tun);
++        cipher_alg = cipher_kt_name(kt->cipher);
++        crypto->config.cipher_key_size = kt->cipher_length;
++        memcpy(&crypto_key->cipher_key, key->cipher, kt->cipher_length);
++        msg(D_DCA_INFO, "DCA: Cipher is '%s': %p", cipher_alg, tun);
 +    }
-+  else
++    else
 +    {
-+      msg(D_DCA_INFO, "DCA: Auth is 'none': %p", tun);
-+      crypto->config.hmac_key_size = 0;
-+      /* Set the flags if there is no crypto */
-+      tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_NO_AUTH;
++        crypto->config.cipher_key_size = 0;
++        msg(D_DCA_INFO, "DCA: Cipher is 'none': %p", tun);
++        /* Set the flags if there is no crypto */
++        tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_NO_CIPHER;
 +    }
 +
-+  /*
-+   * DCA layer support some of crypto algorithms which are validated during
-+   * configuration when enable_dca is configured.
-+   * dca_alg_get should return proper value.
-+   */
-+  crypto->config.algo = dca_alg_get(cipher_alg, hmac_alg);
++    /*
++     * Copy HMAC Key.
++     */
++    if (kt->digest && kt->hmac_length > 0)
++    {
++        hmac_alg = md_kt_name(kt->digest);
++        crypto->config.hmac_key_size = kt->hmac_length;
++        memcpy(&crypto_key->hmac_key, key->hmac, kt->hmac_length);
++        msg(D_DCA_INFO, "DCA: Auth is '%s': %p", hmac_alg, tun);
++    }
++    else
++    {
++        msg(D_DCA_INFO, "DCA: Auth is 'none': %p", tun);
++        crypto->config.hmac_key_size = 0;
++        /* Set the flags if there is no crypto */
++        tun->tun.ovpn.flags |= NSS_OVPN_SK_OVPN_HDR_FLAG_NO_AUTH;
++    }
 +
-+  return 0;
++    /*
++     * DCA layer support some of crypto algorithms which are validated during
++     * configuration when enable_dca is configured.
++     * dca_crypto_alg_get should return proper value.
++     */
++    crypto->config.algo = dca_crypto_alg_get(cipher_alg, hmac_alg);
++
++    return 0;
 +}
 +
 +/*
 + * dca_crypto_key_del
 + */
-+void
-+dca_crypto_key_del(struct key_state *ks)
++void dca_crypto_key_del(struct key_state *ks)
 +{
-+  struct key_ctx *ctx = &ks->key.encrypt;
-+  struct dca_tun *tun = ctx->dca_crypto_ctx;
-+  struct nss_ovpn_sk_crypto_session *crypto;
++    struct key_ctx *ctx = &ks->crypto_options.key_ctx_bi.encrypt;
++    struct dca_tun *tun = ctx->dca_crypto_ctx;
++    struct nss_ovpn_sk_crypto_session *crypto;
 +
-+  if (!ctx->cipher || !ctx->hmac || !tun)
-+    return;
++    if (!ctx->cipher || !ctx->hmac || !tun)
++        return;
 +
-+  if (tun->state == DCA_TUN_STATE_DOWN)
-+    return;
++    if (tun->state == DCA_TUN_STATE_DOWN)
++        return;
 +
-+  msg(D_DCA_INFO, "DCA: Deleting key for tunnel: %d, key_id = %d: %p",
-+    tun->tun.ovpn.tunnel_id, ks->key_id, tun);
++    msg(D_DCA_INFO, "DCA: Deleting key for tunnel: %d, key_id = %d: %p",
++            tun->tun.ovpn.tunnel_id, ks->key_id, tun);
 +
-+  crypto = calloc(1, sizeof(*crypto));
-+  if (!crypto)
++    crypto = calloc(1, sizeof(*crypto));
++    if (!crypto)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Memory Allocation Failed, couldn't delete key: %p", tun);
-+      return;
++        msg(D_DCA_ERRORS, "DCA: Memory Allocation Failed, couldn't delete key: %p", tun);
++        return;
 +    }
 +
-+  crypto->tunnel_id = tun->tun.ovpn.tunnel_id;
-+  crypto->key_id = ks->key_id;
++    crypto->tunnel_id = tun->tun.ovpn.tunnel_id;
++    crypto->key_id = ks->key_id;
 +
-+  if (__dca_crypto_key_del_msg(crypto))
-+    msg(D_DCA_ERRORS,"DCA: Crypto key delete failed : %p", tun);
++    if (__dca_crypto_key_del_msg(crypto))
++        msg(D_DCA_ERRORS,"DCA: Crypto key delete failed : %p", tun);
 +
-+  free(crypto);
++    free(crypto);
 +}
 +
 +/*
 + * dca_crypto_key_add
 + */
-+int
-+dca_crypto_key_add(struct key_state *ks)
++int dca_crypto_key_add(struct key_state *ks)
 +{
-+  int ret;
-+  struct dca_tun *tun = ks->key.encrypt.dca_crypto_ctx;
-+  struct nss_ovpn_sk_crypto_session *crypto;
++    int ret;
++    struct key_ctx *ctx = &ks->crypto_options.key_ctx_bi.encrypt;
++    struct dca_tun *tun = ctx->dca_crypto_ctx;
++    struct nss_ovpn_sk_crypto_session *crypto;
 +
-+  if (!tun || !ks->key_id)
-+    return 0;
++    if (!tun || !ks->key_id)
++        return 0;
 +
-+  if (tun->state == DCA_TUN_STATE_DOWN)
-+    return 0;
++    if (tun->state == DCA_TUN_STATE_DOWN)
++        return 0;
 +
-+  msg(D_DCA_INFO, "DCA: Updating key for tunnel: %d, key_id = %d: %p",
-+      tun->tun.ovpn.tunnel_id, ks->key_id, tun);
++    msg(D_DCA_INFO, "DCA: Updating key for tunnel: %d, key_id = %d: %p",
++            tun->tun.ovpn.tunnel_id, ks->key_id, tun);
 +
-+  crypto = calloc(1, sizeof(*crypto));
-+  if (!crypto)
++    crypto = calloc(1, sizeof(*crypto));
++    if (!crypto)
 +    {
-+      msg(D_DCA_ERRORS, "DCA: Memory Allocation Failed, couldn't update key : %p", tun);
-+      return -1;
++        msg(D_DCA_ERRORS, "DCA: Memory Allocation Failed, couldn't update key : %p", tun);
++        return -1;
 +    }
 +
-+  memcpy(crypto, &tun->crypto, sizeof(tun->crypto));
++    memcpy(crypto, &tun->crypto, sizeof(tun->crypto));
 +
-+  crypto->tunnel_id = tun->tun.ovpn.tunnel_id;
-+  crypto->key_id = ks->key_id;
++    crypto->tunnel_id = tun->tun.ovpn.tunnel_id;
++    crypto->key_id = ks->key_id;
 +
-+  ret = __dca_crypto_key_add_msg(crypto);
-+  if (ret)
-+    msg(D_DCA_ERRORS, "DCA: Crypto key add failed : %p", tun);
++    ret = __dca_crypto_key_add_msg(crypto);
++    if (ret)
++        msg(D_DCA_ERRORS, "DCA: Crypto key add failed : %p", tun);
 +
-+  free(crypto);
++    free(crypto);
 +
-+  return ret;
++    return ret;
 +}
 +#else /* ifdef ENABLE_DCA */
-+static void
-+dummy(void)
++static void dummy(void)
 +{
 +}
 +#endif /* ENABLE_DCA */
 --- /dev/null
 +++ b/src/openvpn/dca_route.c
-@@ -0,0 +1,256 @@
+@@ -0,0 +1,245 @@
 +/*
 + **************************************************************************
-+ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
 + * Permission to use, copy, modify, and/or distribute this software for
 + * any purpose with or without fee is hereby granted, provided that the
 + * above copyright notice and this permission notice appear in all copies.
@@ -2079,192 +1913,481 @@
 +/*
 + * __dca_route_del_msg
 + */
-+static int
-+__dca_route_del_msg(struct nss_ovpn_sk_route_info *route_info)
++static int __dca_route_del_msg(struct nss_ovpn_sk_route_info *route_info)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_DEL,  route_info);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_DEL,  route_info);
 +}
 +
 +/*
 + * __dca_route_status_get_msg
 + */
-+static int
-+__dca_route_status_get_msg(struct nss_ovpn_sk_route_info *route_info)
++static int __dca_route_status_get_msg(struct nss_ovpn_sk_route_info *route_info)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_STATE_GET,  route_info);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_STATE_GET,  route_info);
 +}
 +
 +/*
 + * __dca_route_info_fill
 + */
-+static int
-+__dca_route_info_fill(struct mroute_addr *addr,
-+                      struct nss_ovpn_sk_route_info *route_info)
++static int __dca_route_info_fill(struct mroute_addr *addr,
++                                 struct nss_ovpn_sk_route_info *route_info)
 +{
-+  switch (addr->type & MR_ADDR_MASK)
++    switch (addr->type & MR_ADDR_MASK)
 +    {
-+      case MR_ADDR_IPV4:
++        case MR_ADDR_IPV4:
 +        {
-+          int port;
-+          bool status;
++            if ((addr->type & MR_WITH_NETBITS) && (addr->netbits != 32))
++                return -1;
 +
-+          if ((addr->type & MR_WITH_NETBITS) && (addr->netbits != 32))
-+            return -1;
-+
-+          route_info->ip_version = 4;
-+          memcpy(&route_info->ip_network[0], addr->addr, addr->len);
-+          route_info->netmask_bits = 32;
++            route_info->ip_version = 4;
++            route_info->ip_network[0] = addr->v4.addr;
++            route_info->netmask_bits = 32;
 +        }
-+      break;
++        break;
 +
-+      case MR_ADDR_IPV6:
++        case MR_ADDR_IPV6:
 +        {
-+          if ((addr->type & MR_WITH_NETBITS) && (addr->netbits != 128))
-+            return -1;
++            if ((addr->type & MR_WITH_NETBITS) && (addr->netbits != 128))
++                return -1;
 +
-+          memcpy(&route_info->ip_network[0], &addr->addr, sizeof(struct in6_addr));
-+          route_info->ip_version = 6;
-+          route_info->netmask_bits = addr->netbits;
++            memcpy(&route_info->ip_network[0], &addr->v6.addr, sizeof(struct in6_addr));
++            route_info->ip_version = 6;
++            route_info->netmask_bits = addr->netbits;
 +        }
-+      break;
++        break;
 +
-+      default:
-+          return -1;
-+  }
-+  return 0;
++        default:
++            return -1;
++    }
++    return 0;
 +}
 +
 +/*
 + * dca_route_add_msg
 + */
-+int
-+dca_route_add_msg(struct nss_ovpn_sk_route_info *route_info)
++int dca_route_add_msg(struct nss_ovpn_sk_route_info *route_info)
 +{
-+  return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_ADD, route_info);
++    return dca_send_msg(NSS_OVPN_SK_SIOC_ROUTE_ADD, route_info);
 +}
 +
 +/*
 + * dca_routes_update
 + */
-+void
-+dca_routes_update(struct multi_context *m)
++void dca_routes_update(struct multi_context *m)
 +{
-+  struct hash_iterator hi;
-+  struct hash_element *he;
++    struct hash_iterator hi;
++    struct hash_element *he;
 +
-+  if (!g_dca_ctx)
-+    return;
-+
-+  hash_iterator_init_range(m->vhash, &hi, 0, hash_n_buckets(m->vhash));
-+  while ((he = hash_iterator_next(&hi)) != NULL)
-+    {
-+      struct multi_route *r = (struct multi_route *) he->value;
-+      struct context *c = &r->instance->context;
-+      struct dca_tun *tun = c->c2.dca_ctx;
-+      struct mroute_addr *addr = &r->addr;
-+      struct nss_ovpn_sk_route_info route_info;
-+
-+      if (c->c2.context_auth != CAS_SUCCEEDED)
-+        continue;
-+
-+      /*
-+       * Check if tunnel is offloaded.
-+       */
-+      if (!tun)
-+        continue;
-+
-+      if (tun->state == DCA_TUN_STATE_DOWN)
++    if (!g_dca_ctx)
 +        return;
 +
-+      /*
-+       * Update routes which are dynamically added (ageable).
-+       */
-+      if (!(r->flags & MULTI_ROUTE_AGEABLE))
-+        continue;
++    hash_iterator_init_range(m->vhash, &hi, 0, hash_n_buckets(m->vhash));
++    while ((he = hash_iterator_next(&hi)) != NULL)
++    {
++        struct multi_route *r = (struct multi_route *) he->value;
++        struct context *c = &r->instance->context;
++        struct dca_tun *tun = c->c2.dca_ctx;
++        struct mroute_addr *addr = &r->addr;
++        struct nss_ovpn_sk_route_info route_info;
 +
-+      memset(&route_info, 0, sizeof(route_info));
-+      route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
++        if (c->c2.context_auth != CAS_SUCCEEDED)
++            continue;
 +
-+      if (__dca_route_info_fill(addr, &route_info))
-+        continue;
++        /*
++         * Check if tunnel is offloaded.
++         */
++        if (!tun)
++            continue;
 +
-+      if (!__dca_route_status_get_msg(&route_info))
-+        continue;
++        if (tun->state == DCA_TUN_STATE_DOWN)
++            return;
 +
-+      /*
-+       * Packets are transmitted and received from host in
-+       * data channel offload layer, update reference.
-+       */
-+      r->last_reference = now;
++        /*
++         * Update routes which are dynamically added (ageable).
++         */
++        if (!(r->flags & MULTI_ROUTE_AGEABLE))
++            continue;
++
++        memset(&route_info, 0, sizeof(route_info));
++        route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
++
++        if (__dca_route_info_fill(addr, &route_info))
++            continue;
++
++        if (!__dca_route_status_get_msg(&route_info))
++            continue;
++
++        /*
++         * Packets are transmitted and received from host in
++         * data channel offload layer, update reference.
++         */
++        r->last_reference = now;
 +    }
-+  hash_iterator_free(&hi);
++    hash_iterator_free(&hi);
 +}
 +
 +/*
 + * dca_route_add
 + */
-+void
-+dca_route_add(struct multi_route *r)
++void dca_route_add(struct multi_route *r)
 +{
-+  struct context *c = &r->instance->context;
-+  struct dca_tun *tun = c->c2.dca_ctx;
-+  struct mroute_addr *addr = &r->addr;
-+  struct nss_ovpn_sk_route_info route_info;
++    struct context *c = &r->instance->context;
++    struct dca_tun *tun = c->c2.dca_ctx;
++    struct mroute_addr *addr = &r->addr;
++    struct nss_ovpn_sk_route_info route_info;
 +
-+  if (!g_dca_ctx || !tun)
-+    return;
++    if (!g_dca_ctx || !tun)
++        return;
 +
-+  if (!(r->flags & MULTI_ROUTE_AGEABLE))
-+    return;
++    if (!(r->flags & MULTI_ROUTE_AGEABLE))
++        return;
 +
-+  /*
-+   * Add route.
-+   */
-+  memset(&route_info, 0, sizeof(route_info));
-+  route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
-+  if (__dca_route_info_fill(addr, &route_info))
-+    return;
++    /*
++     * Add route.
++     */
++    memset(&route_info, 0, sizeof(route_info));
++    route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
++    if (__dca_route_info_fill(addr, &route_info))
++        return;
 +
-+  if (!dca_route_add_msg(&route_info))
++    if (!dca_route_add_msg(&route_info))
 +    {
-+      struct gc_arena gc = gc_new();
-+      msg (D_DCA_INFO, "DCA: route added %s", mroute_addr_print_ex (addr, MAPF_IA_EMPTY_IF_UNDEF, &gc));
-+      gc_free(&gc);
++        struct gc_arena gc = gc_new();
++        msg (D_DCA_INFO, "DCA: route added %s", mroute_addr_print_ex (addr, MAPF_IA_EMPTY_IF_UNDEF, &gc));
++        gc_free(&gc);
 +    }
 +}
 +
 +/*
 + * dca_route_del
 + */
-+void
-+dca_route_del(struct multi_route *r)
++void dca_route_del(struct multi_route *r)
 +{
-+  struct mroute_addr *addr = &r->addr;
-+  struct context *c = &r->instance->context;
-+  struct dca_tun *tun = c->c2.dca_ctx;
-+  struct nss_ovpn_sk_route_info route_info;
++    struct mroute_addr *addr = &r->addr;
++    struct context *c = &r->instance->context;
++    struct dca_tun *tun = c->c2.dca_ctx;
++    struct nss_ovpn_sk_route_info route_info;
 +
-+  if (!g_dca_ctx || !tun)
-+    return;
++    if (!g_dca_ctx || !tun)
++        return;
 +
-+  /*
-+   * Delete route.
-+   */
-+  memset(&route_info, 0, sizeof(route_info));
-+  route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
-+  if (__dca_route_info_fill(addr, &route_info))
-+    return;
++    /*
++     * Delete route.
++     */
++    memset(&route_info, 0, sizeof(route_info));
++    route_info.tunnel_id = tun->tun.ovpn.tunnel_id;
++    if (__dca_route_info_fill(addr, &route_info))
++        return;
 +
-+  if (!__dca_route_del_msg(&route_info))
++    if (!__dca_route_del_msg(&route_info))
 +    {
-+      struct gc_arena gc = gc_new();
-+      msg (D_DCA_INFO, "DCA: route deleted %s", mroute_addr_print_ex (addr, MAPF_IA_EMPTY_IF_UNDEF, &gc));
-+      gc_free(&gc);
++        struct gc_arena gc = gc_new();
++        msg (D_DCA_INFO, "DCA: route deleted %s", mroute_addr_print_ex (addr, MAPF_IA_EMPTY_IF_UNDEF, &gc));
++        gc_free(&gc);
 +    }
 +}
 +#else /* ifdef ENABLE_DCA */
-+static void
-+dummy(void)
++static void dummy(void)
 +{
 +}
 +#endif /* ENABLE_DCA */
+--- a/src/openvpn/crypto.h
++++ b/src/openvpn/crypto.h
+@@ -168,6 +168,9 @@ struct key_ctx
+ {
+     cipher_ctx_t *cipher;       /**< Generic cipher %context. */
+     hmac_ctx_t *hmac;           /**< Generic HMAC %context. */
++#ifdef ENABLE_DCA
++    void *dca_crypto_ctx;
++#endif
+     uint8_t implicit_iv[OPENVPN_MAX_IV_LENGTH];
+     /**< The implicit part of the IV */
+     size_t implicit_iv_len;     /**< The length of implicit_iv */
+--- a/src/openvpn/init.c
++++ b/src/openvpn/init.c
+@@ -54,6 +54,10 @@
+ 
+ #include "occ-inline.h"
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ static struct context *static_context; /* GLOBAL */
+ 
+ /*
+@@ -2115,6 +2119,12 @@ do_up(struct context *c, bool pulled_opt
+             c->c1.pulled_options_digest_save = c->c2.pulled_options_digest;
+ #endif
+ 
++#ifdef ENABLE_DCA
++            if (c->options.enable_dca)
++            {
++                dca_tun_up(c);
++            }
++#endif
+             /* if --route-delay was specified, start timer */
+             if ((route_order() == ROUTE_AFTER_TUN) && c->options.route_delay_defined)
+             {
+@@ -4288,6 +4298,12 @@ init_instance(struct context *c, const s
+     }
+ #endif
+ 
++#ifdef ENABLE_DCA
++  /* Initialize Data Plane */
++  if (options->enable_dca && (c->mode == CM_P2P || c->mode == CM_CHILD_UDP))
++    dca_tun_alloc(c);
++#endif
++
+     /* Check for signals */
+     if (IS_SIG(c))
+     {
+@@ -4322,6 +4338,20 @@ close_instance(struct context *c)
+         /* if xinetd/inetd mode, don't allow restart */
+         do_close_check_if_restart_permitted(c);
+ 
++#ifdef ENABLE_DCA
++        if (c->c2.dca_ctx)
++          {
++            if (c->mode == CM_P2P)
++              {
++                dca_tun_down(c);
++                dca_tun_free(c);
++              }
++          }
++
++        if ((c->mode == CM_TOP) || (c->mode == CM_P2P))
++          dca_uninit(c);
++#endif
++
+ #ifdef USE_COMP
+         if (c->c2.comp_context)
+         {
+--- a/src/openvpn/mudp.c
++++ b/src/openvpn/mudp.c
+@@ -41,6 +41,10 @@
+ #include <sys/inotify.h>
+ #endif
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ /*
+  * Get a client instance based on real address.  If
+  * the instance doesn't exist, create it while
+@@ -197,6 +201,12 @@ multi_process_io_udp(struct multi_contex
+     {
+         strcat(buf, "TW/");
+     }
++#ifdef ENABLE_DCA
++    else if (status & DCA_SOCKET_READ)
++    {
++        strlcat (buf, "DR/", sizeof(buf));
++    }
++#endif
+ #ifdef ENABLE_ASYNC_PUSH
+     else if (status & FILE_CLOSED)
+     {
+@@ -214,6 +224,13 @@ multi_process_io_udp(struct multi_contex
+     }
+ #endif
+ 
++#ifdef ENABLE_DCA
++    if (status & DCA_SOCKET_READ)
++    {
++        dca_recv(&m->top);
++    }
++#endif
++
+     /* UDP port ready to accept write */
+     if (status & SOCKET_WRITE)
+     {
+@@ -320,6 +337,10 @@ tunnel_server_udp_single_threaded(struct
+ 
+     /* finished with initialization */
+     initialization_sequence_completed(top, ISC_SERVER); /* --mode server --proto udp */
++#ifdef ENABLE_DCA
++    if (top->options.enable_dca)
++        dca_init(top);
++#endif
+ 
+ #ifdef ENABLE_ASYNC_PUSH
+     multi.top.c2.inotify_fd = inotify_init();
+--- a/src/openvpn/openvpn.c
++++ b/src/openvpn/openvpn.c
+@@ -39,6 +39,10 @@
+ 
+ #include "forward-inline.h"
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ #define P2P_CHECK_SIG() EVENT_LOOP_CHECK_SIGNAL(c, process_signal_p2p, c);
+ 
+ static bool
+@@ -87,6 +91,13 @@ tunnel_point_to_point(struct context *c)
+     /* set point-to-point mode */
+     c->mode = CM_P2P;
+ 
++#ifdef ENABLE_DCA
++    if (c->options.enable_dca)
++    {
++        dca_init(c);
++    }
++#endif
++
+     /* initialize tunnel instance */
+     init_instance_handle_signals(c, c->es, CC_HARD_USR1_TO_HUP);
+     if (IS_SIG(c))
+--- a/src/openvpn/options.h
++++ b/src/openvpn/options.h
+@@ -611,6 +611,9 @@ struct options
+     /* Useful when packets sent by openvpn itself are not subject
+      * to the routing tables that would move packets into the tunnel. */
+     bool allow_recursive_routing;
++#ifdef ENABLE_DCA
++  bool enable_dca;
++#endif
+ };
+ 
+ #define streq(x, y) (!strcmp((x), (y)))
+--- a/src/openvpn/ssl.c
++++ b/src/openvpn/ssl.c
+@@ -64,6 +64,10 @@
+ 
+ #include "memdbg.h"
+ 
++#ifdef ENABLE_DCA
++#include "dca.h"
++#endif
++
+ #ifndef ENABLE_OCC
+ static const char ssl_default_options_string[] = "V0 UNDEF";
+ #endif
+@@ -906,10 +910,18 @@ is_hard_reset(int op, int key_method)
+ static void
+ key_state_init(struct tls_session *session, struct key_state *ks)
+ {
++#ifdef ENABLE_DCA
++    struct key_ctx_bi *kcb = &ks->crypto_options.key_ctx_bi;
++    void *dca_crypto_ctx = kcb->encrypt.dca_crypto_ctx;
++#endif
+     update_time();
+ 
+     CLEAR(*ks);
+ 
++#ifdef ENABLE_DCA
++    kcb->encrypt.dca_crypto_ctx = dca_crypto_ctx;
++    kcb->decrypt.dca_crypto_ctx = dca_crypto_ctx;
++#endif
+     /*
+      * Build TLS object that reads/writes ciphertext
+      * to/from memory BIOs.
+@@ -986,6 +998,15 @@ key_state_init(struct tls_session *sessi
+ static void
+ key_state_free(struct key_state *ks, bool clear)
+ {
++#ifdef ENABLE_DCA
++    struct key_ctx_bi *kcb = &ks->crypto_options.key_ctx_bi;
++    void *dca_crypto_ctx = kcb->encrypt.dca_crypto_ctx;
++
++    if (dca_crypto_ctx)
++    {
++        dca_crypto_key_del(ks);
++    }
++#endif
+     ks->state = S_UNDEF;
+ 
+     key_state_ssl_free(&ks->ks_ssl);
+@@ -1028,6 +1049,10 @@ key_state_free(struct key_state *ks, boo
+     {
+         secure_memzero(ks, sizeof(*ks));
+     }
++#ifdef ENABLE_DCA
++    ks->crypto_options.key_ctx_bi.encrypt.dca_crypto_ctx = dca_crypto_ctx;
++    ks->crypto_options.key_ctx_bi.decrypt.dca_crypto_ctx = dca_crypto_ctx;
++#endif
+ }
+ 
+ /** @} name Functions for initialization and cleanup of key_state structures */
+@@ -1079,10 +1104,22 @@ static void
+ tls_session_init(struct tls_multi *multi, struct tls_session *session)
+ {
+     struct gc_arena gc = gc_new();
++#ifdef ENABLE_DCA
++    void *dca_crypto_ctx = session->key[KS_PRIMARY].crypto_options.key_ctx_bi.encrypt.dca_crypto_ctx;
++    int j;
++#endif
+ 
+     dmsg(D_TLS_DEBUG, "TLS: tls_session_init: entry");
+ 
+     CLEAR(*session);
++#ifdef ENABLE_DCA
++    for (j = 0; j < KS_SIZE; j++)
++    {
++        struct key_ctx_bi *kcb = &session->key[j].crypto_options.key_ctx_bi;
++        kcb->encrypt.dca_crypto_ctx = dca_crypto_ctx;
++        kcb->decrypt.dca_crypto_ctx = dca_crypto_ctx;
++    }
++#endif
+ 
+     /* Set options data to point to parent's option structure */
+     session->opt = &multi->opt;
+@@ -1178,7 +1215,7 @@ tls_session_free(struct tls_session *ses
+ static void
+ move_session(struct tls_multi *multi, int dest, int src, bool reinit_src)
+ {
+-    msg(D_TLS_DEBUG_LOW, "TLS: move_session: dest=%s src=%s reinit_src=%d",
++    msg (M_INFO, "TLS: move_session: dest=%s src=%s reinit_src=%d",
+         session_index_name(dest),
+         session_index_name(src),
+         reinit_src);
+@@ -2878,6 +2915,16 @@ tls_process(struct tls_multi *multi,
+                 }
+                 state_change = true;
+                 ks->state = S_ACTIVE;
++#ifdef ENABLE_DCA
++                if (ks->crypto_options.key_ctx_bi.encrypt.dca_crypto_ctx)
++                {
++                    if (dca_crypto_key_add(ks))
++                    {
++                        dmsg (D_DCA_ERRORS, "DCA Error: Couldn't add key, deleting tunnel");
++                        goto error;
++                    }
++                }
++#endif
+                 INCR_SUCCESS;
+ 
+                 /* Set outgoing address for data channel packets */
+--- a/src/openvpn/syshead.h
++++ b/src/openvpn/syshead.h
+@@ -179,7 +179,7 @@
+ #endif
+ 
+ #ifdef HAVE_SYS_POLL_H
+-#include <sys/poll.h>
++#include <poll.h>
+ #endif
+ 
+ #ifdef HAVE_SYS_EPOLL_H
+--- a/src/openvpn/push.c
++++ b/src/openvpn/push.c
+@@ -681,6 +681,16 @@ process_incoming_push_request(struct con
+             }
+             gc_free(&gc);
+         }
++#ifdef ENABLE_DCA
++	/*
++	 * At this point, client is connected to server and server
++	 * has replied PUSH request.
++	 */
++        if (c->c2.dca_ctx)
++        {
++            dca_tun_up(c);
++        }
++#endif
+     }
+     else
+     {

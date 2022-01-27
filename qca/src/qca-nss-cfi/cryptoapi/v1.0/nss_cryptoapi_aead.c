@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -300,7 +300,6 @@ int nss_cryptoapi_aead_aes_setkey(struct crypto_aead *aead, const u8 *key, unsig
 		nss_cfi_err("Bad Auth key_len(%d)\n", auth.key_len);
 		goto fail;
 	}
-
 
 	/*
 	 * When the specified length request can't be handled by hardware,
@@ -656,7 +655,7 @@ int nss_cryptoapi_validate_addr(struct nss_cryptoapi_addr *sg_addr)
 	 * Currently only in-place transformation is supported.
 	 */
 	if (sg_addr->src != sg_addr->dst) {
-		nss_cfi_err("src!=dst src: 0x%p, dst: 0x%p\n", sg_addr->src, sg_addr->dst);
+		nss_cfi_err("src!=dst src: 0x%px, dst: 0x%px\n", sg_addr->src, sg_addr->dst);
 		return -EINVAL;
 	}
 
@@ -664,7 +663,7 @@ int nss_cryptoapi_validate_addr(struct nss_cryptoapi_addr *sg_addr)
 	 * Assoc should include IV, should be before cipher.
 	 */
 	if (sg_addr->src < sg_addr->start) {
-		nss_cfi_err("Invalid src: 0x%p, iv: 0x%p, assoc: 0x%p\n", sg_addr->src, sg_addr->iv, sg_addr->assoc);
+		nss_cfi_err("Invalid src: 0x%px, iv: 0x%px, assoc: 0x%px\n", sg_addr->src, sg_addr->iv, sg_addr->assoc);
 		return -EINVAL;
 	}
 
@@ -771,7 +770,7 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
 		return NULL;
 	}
 
-	nss_cfi_dbg("src_vaddr: 0x%p, dst_vaddr: 0x%p, assoc_vaddr: 0x%p, iv: 0x%p\n",
+	nss_cfi_dbg("src_vaddr: 0x%px, dst_vaddr: 0x%px, assoc_vaddr: 0x%px, iv: 0x%px\n",
 			sg_addr.src, sg_addr.dst, sg_addr.assoc, req->iv);
 
 	info->params->cipher_skip = nss_cryptoapi_get_skip(sg_addr.src, sg_addr.start);
@@ -859,7 +858,6 @@ struct nss_crypto_buf *nss_cryptoapi_aead_transform(struct aead_request *req, st
 
 	return buf;
 }
-
 
 /*
  * nss_cryptoapi_aead_fallback()

@@ -22,7 +22,6 @@ ${CROSS}objcopy \
 	-R .comment \
 	-R .pdr \
 	-R .mdebug.abi32 \
-	-R .note.gnu.build-id \
 	-R .gnu.attributes \
 	-R .reginfo \
 	$ARGS \

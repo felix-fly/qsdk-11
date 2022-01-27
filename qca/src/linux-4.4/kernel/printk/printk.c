@@ -281,7 +281,8 @@ static u32 clear_idx;
 #define __LOG_BUF_LEN (1 << CONFIG_LOG_BUF_SHIFT)
 static char __log_buf[__LOG_BUF_LEN] __aligned(LOG_ALIGN);
 static char *log_buf = __log_buf;
-static u32 log_buf_len = __LOG_BUF_LEN;
+u32 log_buf_len = __LOG_BUF_LEN;
+EXPORT_SYMBOL(log_buf_len);
 
 /* Return log buffer address */
 char *log_buf_addr_get(void)
@@ -1920,7 +1921,7 @@ asmlinkage __visible int printk(const char *fmt, ...)
 EXPORT_SYMBOL(printk);
 
 #ifdef CONFIG_QCA_MINIDUMP
-void get_log_buf_info(uint64_t *plog_buf, uint64_t *plog_buf_len)
+void minidump_get_log_buf_info(uint64_t *plog_buf, uint64_t *plog_buf_len)
 {
        *plog_buf = (uint64_t)(uintptr_t)log_buf;
        *plog_buf_len = (uint64_t)__pa(&log_buf_len);

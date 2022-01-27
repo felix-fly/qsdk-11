@@ -16,6 +16,7 @@
  */
 #include "qcom-ipq807x-soc.dtsi"
 #include "qcom-ipq807x-hk-cpu.dtsi"
+#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 
 / {
 	#address-cells = <0x2>;
@@ -47,34 +48,54 @@
 	};
 };
 
+&spmi_bus {
+	pmic@0 {
+		compatible ="qcom,spmi-pmic";
+		reg = <0x0 SPMI_USID>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		pmm8074_gpios: gpios@c000 {
+			compatible = "qcom,pma8084-gpio";
+			reg = <0xc000 0xc00>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupts = <0 0xc0 0 IRQ_TYPE_NONE>,
+				     <0 0xc1 0 IRQ_TYPE_NONE>,
+				     <0 0xc2 0 IRQ_TYPE_NONE>,
+				     <0 0xc3 0 IRQ_TYPE_NONE>,
+				     <0 0xc4 0 IRQ_TYPE_NONE>,
+				     <0 0xc5 0 IRQ_TYPE_NONE>,
+				     <0 0xc6 0 IRQ_TYPE_NONE>,
+				     <0 0xc7 0 IRQ_TYPE_NONE>,
+				     <0 0xc8 0 IRQ_TYPE_NONE>,
+				     <0 0xc9 0 IRQ_TYPE_NONE>,
+				     <0 0xca 0 IRQ_TYPE_NONE>,
+				     <0 0xcb 0 IRQ_TYPE_NONE>;
+			pinctrl-0 = <&pmm8074_gpio>;
+			pinctrl-names = "default";
+
+			pmm8074_gpio: pmm8074_gpio {
+				pinconf {
+					pins = "gpio6";
+					function = PMIC_GPIO_FUNC_NORMAL;
+					bias-pull-up;
+					output-high;
+				};
+			};
+		};
+	};
+};
+
 &tlmm {
 	pinctrl-0 = <&pcie_sdx_gpio>;
 	pinctrl-names = "default";
-
 	pcie_sdx_gpio: pcie_sdx_gpio {
-		mdm2ap_status {
-			pins = "gpio25";
-			function = "gpio";
-			drive-strength = <8>;
-			bias-pull-down;
-		};
-		ap2mdm_status {
-			pins = "gpio26";
-			function = "gpio";
-			drive-strength = <8>;
-			bias-pull-down;
-		};
 		ap2mdm_err_ftl {
 			pins = "gpio27";
 			function = "gpio";
 			drive-strength = <8>;
 			bias-pull-down;
-		};
-		ap2mdm_gp_rst_n {
-			pins = "gpio29";
-			function = "gpio";
-			drive-strength = <8>;
-			output-high;
 		};
 		sdx_pon_gpio {
 			pins = "gpio30";
@@ -83,12 +104,20 @@
 			bias-pull-up;
 			output-high;
 		};
-		mdm2ap_err_ftl {
-			pins = "gpio33";
-			function = "gpio";
-			drive-strength = <8>;
-			bias-pull-down;
-		};
+	};
+
+	ap2mdm_status: ap2mdm_status {
+		pins = "gpio26";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+		output-high;
+	};
+
+	mdm2ap_e911_status: mdm2ap_e911_status {
+		pins = "gpio33";
+		drive-strength = <8>;
+		bias-pull-down;
 	};
 
 	pcie_wake_pins: pcie0_wake_gpio {
@@ -697,19 +726,23 @@
 				<&intc 0 421 0>, <&intc 0 422 0>, <&intc 0 423 0>,
 				<&intc 0 424 0>, <&intc 0 425 0>, <&intc 0 426 0>,
 				<&intc 0 427 0>, <&intc 0 428 0>, <&intc 0 429 0>,
-				<&intc 0 430 0>, <&intc 0 431 0>, <&tlmm 59 0>;
+				<&intc 0 430 0>, <&intc 0 431 0>, <&tlmm 59 0>,
+				<&tlmm 33 0>;
 
 	interrupt-names = "msi", "msi_0", "msi_1",
 			"msi_2", "msi_3", "msi_4",
 			"msi_5", "msi_6", "msi_7",
 			"msi_8", "msi_9", "msi_10",
 			"msi_11", "msi_12", "msi_13",
-			"msi_14", "msi_15", "wake_gpio";
+			"msi_14", "msi_15", "wake_gpio",
+			"mdm2ap_e911";
 
-	pinctrl-0 = <&pcie_wake_pins>;
+	pinctrl-0 = <&pcie_wake_pins &mdm2ap_e911_status>;
+	e911-gpio =  <&tlmm 33 GPIO_ACTIVE_HIGH>;
 	pinctrl-names = "default";
-	use_delay = <1>;
-
+	link_retries_count = <100>;
+	use_delay = <0>;
+	slot_id = <0>;
 };
 
 &pcie1 {
@@ -782,6 +815,10 @@
 	};
 };
 
+&watchdog {
+	mhi-wdt-panic-enable;
+};
+
 &pcie0_rp {
 
 	#address-cells = <5>;
@@ -795,6 +832,11 @@
 	mhi_0: qcom,mhi@0 {
 		reg = <0 0 0 0 0 >;
 
+		ap2mdm = <26>;
+		mdm2ap = <25>;
+
+		pinctrl-0 = <&ap2mdm_status>;
+		pinctrl-names = "default";
 		/* controller specific configuration */
 		qcom,iommu-dma = "disabled";
 
@@ -802,6 +844,7 @@
 		/* mhi bus specific settings */
 		mhi,max-channels = <110>;
 		mhi,timeout = <60000>;
+		mhi,ssr-negotiate;
 
 		mhi_channels: mhi_channels {
 			#address-cells = <1>;
@@ -827,6 +870,28 @@
 				mhi,data-type = <0>;
 				mhi,doorbell-mode = <2>;
 				mhi,ee = <0x4>;
+			};
+
+			mhi_chan@2 {
+				reg = <2>;
+				label = "SAHARA";
+				mhi,num-elements = <128>;
+				mhi,event-ring = <1>;
+				mhi,chan-dir = <1>;
+				mhi,data-type = <0>;
+				mhi,doorbell-mode = <2>;
+				mhi,ee = <0x2>;
+			};
+
+			mhi_chan@3 {
+				reg = <3>;
+				label = "SAHARA";
+				mhi,num-elements = <128>;
+				mhi,event-ring = <1>;
+				mhi,chan-dir = <2>;
+				mhi,data-type = <0>;
+				mhi,doorbell-mode = <2>;
+				mhi,ee = <0x2>;
 			};
 
 			mhi_chan@4 {
@@ -999,6 +1064,28 @@
 				mhi,lpm-notify;
 			};
 
+			mhi_chan@105 {
+				reg = <105>;
+				label = "RMNET_CTL";
+				mhi,num-elements = <128>;
+				mhi,event-ring = <10>;
+				mhi,chan-dir = <1>;
+				mhi,data-type = <1>;
+				mhi,doorbell-mode = <2>;
+				mhi,ee = <0x4>;
+			};
+
+			mhi_chan@106 {
+				reg = <106>;
+				label = "RMNET_CTL";
+				mhi,num-elements = <128>;
+				mhi,event-ring = <11>;
+				mhi,chan-dir = <2>;
+				mhi,data-type = <0>;
+				mhi,doorbell-mode = <2>;
+				mhi,ee = <0x4>;
+			};
+
 		};
 
 		mhi_events: mhi_events {
@@ -1104,27 +1191,23 @@
 			};
 
 			mhi_event@10 {
-				mhi,num-elements = <0>;
-				mhi,intmod = <0>;
-				mhi,msi = <0>;
+				mhi,num-elements = <1024>;
+				mhi,intmod = <1>;
+				mhi,msi = <8>;
 				mhi,chan = <105>;
-				mhi,priority = <1>;
-				mhi,brstmode = <3>;
+				mhi,priority = <0>;
+				mhi,brstmode = <2>;
 				mhi,hw-ev;
-				mhi,client-manage;
-				mhi,offload;
 			};
 
 			mhi_event@11 {
-				mhi,num-elements = <0>;
+				mhi,num-elements = <1024>;
 				mhi,intmod = <0>;
-				mhi,msi = <0>;
+				mhi,msi = <9>;
 				mhi,chan = <106>;
-				mhi,priority = <1>;
-				mhi,brstmode = <3>;
+				mhi,priority = <0>;
+				mhi,brstmode = <2>;
 				mhi,hw-ev;
-				mhi,client-manage;
-				mhi,offload;
 			};
 
 			mhi_event@12 {
@@ -1161,7 +1244,7 @@
 				mhi,chan = "IP_HW0";
 				mhi,interface-name = "rmnet_mhi";
 				mhi,mru = <0x4000>;
-				mhi,disable-chain-skb;
+				mhi,chain-skb;
 			};
 
 			mhi_rmnet@1 {
@@ -1181,7 +1264,7 @@
 
 			mhi_qrtr {
 				mhi,chan = "IPCR";
-				qcom,net-id = <3>;
+				qcom,net-id = <1>;
 			};
 		};
 

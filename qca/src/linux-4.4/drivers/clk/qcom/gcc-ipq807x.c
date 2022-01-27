@@ -5778,16 +5778,16 @@ static int gcc_ipq807x_probe(struct platform_device *pdev)
 	int ret, i;
 	struct regmap *regmap;
 	struct clk *clk;
-	const int *soc_version_major;
+	u32 soc_version_major;
 	struct device *dev = &pdev->dev;
 
 	if (of_device_is_compatible(pdev->dev.of_node, "qcom,gcc-ipq807x-v2"))
 		return qcom_cc_probe(pdev, &gcc_ipq807x_v2_desc);
 
 	soc_version_major = read_ipq_soc_version_major();
-	BUG_ON(!soc_version_major);
+	BUG_ON(soc_version_major <= 0);
 
-	if (*soc_version_major != 1) {
+	if (soc_version_major != 1) {
 		pr_info("Soc version is not 1, changing clock offsets\n");
 
 		v2fix_clk_offset(pcie0_axi_clk_src);

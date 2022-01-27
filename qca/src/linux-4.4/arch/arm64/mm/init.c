@@ -384,40 +384,9 @@ __setup("keepinitrd", keepinitrd_setup);
 
 #ifdef CONFIG_QCA_MINIDUMP
 /* Get base address of PGD*/
-void get_pgd_info(uint64_t *pt_start, uint64_t *pt_len)
+void minidump_get_pgd_info(uint64_t *pt_start, uint64_t *pt_len)
 {
 	*pt_start = (uintptr_t)swapper_pg_dir;
 	*pt_len = SZ_4K;
 }
-
-/* Get base address of PT and PMD.
-* pmd_offset() gives Page Middle Directory offset.
-* The value at this address corresponds to the base
-* address of the Page Table. pud_offset() gives
-* Page Upper Directory offset. The value at this address
-* corresponds to the base address of Page Middle Directory.
-*/
-
-int get_mmu_info(const void *vmalloc_addr,
-		unsigned long *pt_address, unsigned long *pmd_address)
-{
-	unsigned long addr = (unsigned long) vmalloc_addr;
-	struct page *page = NULL;
-	pgd_t *pgd = pgd_offset_k(addr);
-
-	if (!pgd_none(*pgd)) {
-		pud_t *pud = pud_offset(pgd, addr);
-		if (!pud_none(*pud)) {
-			pmd_t *pmd = pmd_offset(pud, addr);
-			if (!pmd_none(*pmd)) {
-				page = pmd_page(*(pmd));
-				*pmd_address = (unsigned long) pud_val(*pud) & (~(1024 - 1));
-				*pt_address = (unsigned long) pmd_val(*pmd) & (~(1024 - 1));
-				return 0;
-			}
-		}
-	}
-	return -1;
-}
 #endif
-

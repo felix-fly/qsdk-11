@@ -95,6 +95,12 @@ endif
 
 ifeq (, $(findstring HPPE, $(SUPPORT_CHIP)))
   SRC_LIST=
+ifneq (, $(filter MP, $(SUPPORT_CHIP)))
+  SRC_LIST=hppe_reg_access.c
+ifeq (TRUE, $(IN_UNIPHY))
+  SRC_LIST+=hppe_uniphy.c
+endif
+endif
 endif
 
 include $(PRJ_PATH)/make/components.mk

@@ -26,6 +26,9 @@
 #include "hyfi_hatbl.h"
 #include "hyfi_hdtbl.h"
 #include "hyfi_fdb.h"
+#ifdef HYFI_BRIDGE_EMESH_ENABLE
+#include <sp_api.h>
+#endif
 #include "hyfi_netlink.h"
 /* ref_port_ctrl.h and ref_fdb.h header file is  platform dependent code and this
    is not required for 3rd party platform. So avoided this header file inclusion
@@ -35,7 +38,6 @@
 #include "ref/ref_port_ctrl.h"
 #include "ref/ref_fdb.h"
 #endif
-
 static struct sock *hyfi_nl_sk = NULL;
 static struct sock *hyfi_nl_event_sk = NULL;
 
@@ -53,7 +55,7 @@ static void hyfi_netlink_receive(struct sk_buff *__skb)
 	struct net_bridge_port *br_port = NULL;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
-        if ((skb = skb_clone(__skb, GFP_KERNEL)) != NULL)
+        if ((skb = skb_clone(__skb, GFP_ATOMIC)) != NULL)
 #else
 	if ((skb = skb_get(__skb)) != NULL )
 #endif
@@ -524,6 +526,210 @@ static void hyfi_netlink_receive(struct sk_buff *__skb)
 			}
 				break;
 
+			case HYFI_SET_BRIDGE_TS_MODE: {
+				u32 *p = hymsgdata;
+				spin_lock_bh(&br->lock);
+				if (*p == 1)
+					br->TSEnabled = 1;
+				else
+					br->TSEnabled = 0;
+				spin_unlock_bh( &br->lock);
+				break;
+			}
+			case HYFI_SET_SP_RULE:{
+
+#ifdef HYFI_BRIDGE_EMESH_ENABLE
+				struct __sp_rule *msg_value = (struct __sp_rule *)hymsgdata;
+				struct sp_rule to_emesh_sp = {0};
+				int i = 0;
+
+				DEBUG_INFO(" \n *** Recieved rule *** \n");
+
+				to_emesh_sp.id = msg_value->id;
+				DEBUG_INFO("Rule id:  %08x \n", msg_value->id);
+
+				if (msg_value->add_delete_rule == 0)
+				{
+					to_emesh_sp.cmd = SP_MAPDB_ADD_REMOVE_FILTER_DELETE;
+					DEBUG_INFO("Deleting rule \n");
+				}
+				else if (msg_value->add_delete_rule == 1)
+				{
+					to_emesh_sp.cmd = SP_MAPDB_ADD_REMOVE_FILTER_ADD;
+					DEBUG_INFO("Adding rule \n");
+				}
+				else
+				{
+					DEBUG_INFO(" \nInvalid add/delete rule %d \n", msg_value->add_delete_rule);
+					break;
+				}
+
+				to_emesh_sp.rule_precedence = msg_value->rule_precedence;
+				DEBUG_INFO("Rule Precedence = 0x%x \n", to_emesh_sp.rule_precedence);
+
+				to_emesh_sp.inner.rule_output = msg_value->rule_output;
+				DEBUG_INFO("Rule Output = 0x%x \n", to_emesh_sp.inner.rule_output);
+
+				if (msg_value->rule_match_always_true)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_ALWAYS_TRUE;
+				DEBUG_INFO("Rule_match_always_true = 0x%x \n", msg_value->rule_match_always_true);
+
+				if (msg_value->matchup)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_UP;
+				DEBUG_INFO("matchup = 0x%x \n", msg_value->matchup);
+
+				if (msg_value->match_up_sense)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_UP_SENSE;
+				DEBUG_INFO("match_up_sense = 0x%x \n", msg_value->match_up_sense);
+
+				if (msg_value->match_source_mac)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SOURCE_MAC;
+				DEBUG_INFO("match_source_mac = 0x%x \n", msg_value->match_source_mac);
+
+				if (msg_value->match_source_mac_sense)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SOURCE_MAC_SENSE;
+				DEBUG_INFO("match_source_mac_sense = 0x%x \n", msg_value->match_source_mac_sense);
+
+				if (msg_value->match_dst_mac)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_MAC;
+				DEBUG_INFO("match_dst_mac = 0x%x \n", msg_value->match_dst_mac);
+
+				if (msg_value->match_dst_mac_sense)
+					to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_MAC_SENSE;
+				DEBUG_INFO("match_dst_mac_sense = 0x%x \n", msg_value->match_dst_mac_sense);
+
+				to_emesh_sp.inner.user_priority = msg_value->user_priority;
+				DEBUG_INFO("user_priority = 0x%x \n", msg_value->user_priority);
+
+				for (i = 0; i < ETH_ALEN; i++)
+				{
+					to_emesh_sp.inner.sa[i] = msg_value->sa[i];
+					to_emesh_sp.inner.da[i] = msg_value->da[i];
+				}
+
+				DEBUG_INFO("sa = %02x:%02x:%02x:%02x:%02x:%02x \n", msg_value->sa[0], msg_value->sa[1],
+						   msg_value->sa[2], msg_value->sa[3],
+						   msg_value->sa[4], msg_value->sa[5]);
+				DEBUG_INFO("da = %02x:%02x:%02x:%02x:%02x:%02x \n", msg_value->da[0], msg_value->da[1],
+						   msg_value->da[2], msg_value->da[3],
+						   msg_value->da[4], msg_value->da[5]);
+
+				if (msg_value->valid_qsp)
+				{
+					if (msg_value->match_source_ipv4)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_IPV4;
+					DEBUG_INFO("match_source_ipv4 = 0x%x \n", msg_value->match_source_ipv4);
+					if (msg_value->match_source_ipv4_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_IPV4_SENSE;
+					DEBUG_INFO("match_source_ipv4_sense = 0x%x \n", msg_value->match_source_ipv4_sense);
+					if (msg_value->match_dst_ipv4)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_IPV4;
+					DEBUG_INFO("match_dst_ipv4 = 0x%x \n", msg_value->match_dst_ipv4);
+					if (msg_value->match_dst_ipv4_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_IPV4_SENSE;
+					DEBUG_INFO("match_dst_ipv4_sense = 0x%x \n", msg_value->match_dst_ipv4_sense);
+
+					if (msg_value->match_source_ipv6)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_IPV6;
+					DEBUG_INFO("match_source_ipv6 = 0x%x \n", msg_value->match_source_ipv6);
+					if (msg_value->match_source_ipv6_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_IPV6_SENSE;
+					DEBUG_INFO("match_source_ipv6_sense = 0x%x \n", msg_value->match_source_ipv6_sense);
+					if (msg_value->match_dst_ipv6)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_IPV6;
+					DEBUG_INFO("match_dst_ipv6 = 0x%x \n", msg_value->match_dst_ipv6);
+					if (msg_value->match_dst_ipv6Sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_IPV6_SENSE;
+					DEBUG_INFO("match_dst_ipv6Sense = 0x%x \n", msg_value->match_dst_ipv6Sense);
+
+					if (msg_value->match_source_port)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_PORT;
+					DEBUG_INFO("match_source_port = 0x%x \n", msg_value->match_source_port);
+					if (msg_value->match_source_port_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_SRC_PORT_SENSE;
+					DEBUG_INFO("match_source_port_sense = 0x%x \n", msg_value->match_source_port_sense);
+					if (msg_value->match_dst_port)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_PORT;
+					DEBUG_INFO("match_dst_port = 0x%x \n", msg_value->match_dst_port);
+					if (msg_value->match_dst_port_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DST_PORT_SENSE;
+					DEBUG_INFO("match_dst_port_sense = 0x%x \n", msg_value->match_dst_port_sense);
+
+					if (msg_value->match_protocol_number)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_PROTOCOL;
+					DEBUG_INFO("match_protocol_number = 0x%x \n", msg_value->match_protocol_number);
+					if (msg_value->match_protocol_number_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_PROTOCOL_SENSE;
+					DEBUG_INFO("match_protocol_number_sense = 0x%x \n", msg_value->match_protocol_number_sense);
+					if (msg_value->match_vlan_id)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_VLAN_ID;
+					DEBUG_INFO("match_vlan_id = 0x%x \n", msg_value->match_vlan_id);
+					if (msg_value->match_vlan_id_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_VLAN_ID_SENSE;
+					DEBUG_INFO("match_vlan_id_sense = 0x%x \n", msg_value->match_vlan_id_sense);
+
+					if (msg_value->match_dscp)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DSCP;
+					DEBUG_INFO("match_dscp = 0x%x \n", msg_value->match_dscp);
+					if (msg_value->match_dscp_sense)
+						to_emesh_sp.inner.flags |= SP_RULE_FLAG_MATCH_DSCP_SENSE;
+					DEBUG_INFO("match_dscp_sense = 0x%x \n", msg_value->match_dscp_sense);
+
+					to_emesh_sp.inner.src_ipv4_addr = msg_value->src_ipv4_addr;
+					DEBUG_INFO("src_ipv4 = %d.%d.%d.%d \n", (msg_value->src_ipv4_addr & 0x000000FF),
+							   (msg_value->src_ipv4_addr & 0x0000FF00) >> 8,
+							   (msg_value->src_ipv4_addr & 0x00FF0000) >> 16,
+							   (msg_value->src_ipv4_addr & 0xFF000000) >> 24);
+
+					for (i = 0; i < 4; i++)
+					{
+						to_emesh_sp.inner.src_ipv6_addr[i] = msg_value->src_ipv6_addr[i];
+					}
+					DEBUG_INFO("src_ipv6 = %04x: \n", msg_value->src_ipv6_addr[0]);
+
+					to_emesh_sp.inner.dst_ipv4_addr = msg_value->dst_ipv4_addr;
+					DEBUG_INFO("dst_ipv4_addr = %d.%d.%d.%d \n", (msg_value->dst_ipv4_addr & 0x000000FF),
+							   (msg_value->dst_ipv4_addr & 0x0000FF00) >> 8,
+							   (msg_value->dst_ipv4_addr & 0x00FF0000) >> 16,
+							   (msg_value->dst_ipv4_addr & 0xFF000000) >> 24);
+
+					for (i = 0; i < 4; i++)
+					{
+						to_emesh_sp.inner.dst_ipv6_addr[i] = msg_value->dst_ipv6_addr[i];
+					}
+					DEBUG_INFO("dst_ipv6 = %04x: \n", msg_value->dst_ipv6_addr[0]);
+
+					to_emesh_sp.inner.src_port = msg_value->src_port;
+					DEBUG_INFO("src_port = 0x%x \n", msg_value->src_port);
+					to_emesh_sp.inner.dst_port = msg_value->dst_port;
+					DEBUG_INFO("dst_port = 0x%x \n", msg_value->dst_port);
+					to_emesh_sp.inner.protocol_number = msg_value->protocol_number;
+					DEBUG_INFO("protocol_number = 0x%x \n", msg_value->protocol_number);
+					to_emesh_sp.inner.vlan_id = msg_value->vlan_id;
+					DEBUG_INFO("vlan_id = 0x%x \n", msg_value->vlan_id);
+
+					to_emesh_sp.inner.dscp = msg_value->dscp;
+					DEBUG_INFO("dscp = 0x%x \n", msg_value->dscp);
+					to_emesh_sp.inner.service_interval = msg_value->service_interval;
+					DEBUG_INFO("service_interval = 0x%x \n", msg_value->service_interval);
+					to_emesh_sp.inner.burst_size = msg_value->burst_size;
+					DEBUG_INFO("burst_size = 0x%x \n", msg_value->burst_size);
+				}
+
+				sp_mapdb_rule_update(&to_emesh_sp);
+#endif
+
+				break;
+			}
+			case HYFI_FLUSH_SP_RULES:{
+
+#ifdef HYFI_BRIDGE_EMESH_ENABLE
+				DEBUG_INFO(" \n *** Recieved Flush SP rule. *** \n");
+				sp_mapdb_ruletable_flush();
+#endif
+
+				break;
+			}
 			default:
 				DEBUG_WARN("hyfi: Unknown message type 0x%x\n", msgtype);
 				hymsghdr->status = HYFI_STATUS_INVALID_PARAMETER;
@@ -586,6 +792,11 @@ void hyfi_netlink_event_send(struct hyfi_net_bridge *br,
 	case HYFI_EVENT_ADD_HA_ENTRY:
 		ha = (struct net_hatbl_entry *) event_data;
 		hae = (struct __hatbl_entry *) NLMSG_DATA( nlh );
+		if(!ha || !ha->dst || !ha->dst->dev) {
+			DEBUG_ERROR("hyfi: ADD_HA-entry is NULL\n");
+			send_msg = false;
+			break;
+		}
 		memcpy(hae->da, ha->da.addr, ETH_ALEN);
 		memcpy(hae->sa, ha->sa.addr, ETH_ALEN);
 		memcpy(hae->id, ha->id.addr, ETH_ALEN);
@@ -597,6 +808,11 @@ void hyfi_netlink_event_send(struct hyfi_net_bridge *br,
 	case HYFI_EVENT_DEL_HA_ENTRY:
 		ha = (struct net_hatbl_entry *) event_data;
 		hae = (struct __hatbl_entry *) NLMSG_DATA( nlh );
+		if(!ha || !ha->dst || !ha->dst->dev) {
+			DEBUG_ERROR("hyfi: DEL_HA-entry is NULL\n");
+			send_msg = false;
+			break;
+		}
 		memcpy(hae->da, ha->da.addr, ETH_ALEN);
 		memcpy(hae->sa, ha->sa.addr, ETH_ALEN);
 		memcpy(hae->id, ha->id.addr, ETH_ALEN);

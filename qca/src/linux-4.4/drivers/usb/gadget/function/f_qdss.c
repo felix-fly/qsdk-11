@@ -522,6 +522,9 @@ static void qdss_disable(struct usb_function *f)
 		return;
 	}
 
+	if (qdss->endless_req)
+		qdss->endless_req->length = 0; /* to avoid calling dma unmap */
+
 	qdss->usb_connected = 0;
 	spin_unlock_irqrestore(&qdss->lock, flags);
 	/*cancell all active xfers*/
@@ -852,7 +855,10 @@ void usb_qdss_close(struct usb_qdss_ch *ch)
 	pr_debug("usb_qdss_close\n");
 
 	spin_lock_irqsave(&qdss_lock, flags);
-	qdss->endless_req->length = 0; //to avoid calling dma unmap
+
+	if (qdss->endless_req)
+		qdss->endless_req->length = 0; /* to avoid calling dma unmap */
+
 	usb_ep_dequeue(qdss->port.data, qdss->endless_req);
 	usb_ep_free_request(qdss->port.data, qdss->endless_req);
 	qdss->endless_req = NULL;

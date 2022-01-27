@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,9 +17,13 @@
  * Add Data channels at the top half and the DCI channels at the
  * bottom half of this list.
  */
-#define DIAGFWD_MDM		0
-#define DIAGFWD_SMUX		1
-#define NUM_REMOTE_DATA_DEV	2
+enum {
+	DIAGFWD_MDM,
+	DIAGFWD_MDM2,
+	DIAGFWD_SMUX,
+	NUM_REMOTE_DATA_DEV
+};
+
 #define DIAGFWD_MDM_DCI		NUM_REMOTE_DATA_DEV
 #define NUM_REMOTE_DCI_DEV	(DIAGFWD_MDM_DCI - NUM_REMOTE_DATA_DEV + 1)
 #define NUM_REMOTE_DEV		(NUM_REMOTE_DATA_DEV + NUM_REMOTE_DCI_DEV)
@@ -33,6 +37,7 @@ struct diag_remote_dev_ops {
 	int (*queue_read)(int id);
 	int (*write)(int id, unsigned char *buf, int len, int ctxt);
 	int (*fwd_complete)(int id, unsigned char *buf, int len, int ctxt);
+	int (*remote_proc_check)(int);
 };
 
 struct diagfwd_bridge_info {
@@ -63,5 +68,6 @@ int diag_remote_dev_open(int id);
 void diag_remote_dev_close(int id);
 int diag_remote_dev_read_done(int id, unsigned char *buf, int len);
 int diag_remote_dev_write_done(int id, unsigned char *buf, int len, int ctxt);
-
+int diag_remote_init(void);
+void diag_remote_exit(void);
 #endif

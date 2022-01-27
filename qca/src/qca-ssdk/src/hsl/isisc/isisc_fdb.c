@@ -655,6 +655,7 @@ _isisc_fdb_del_by_mac(a_uint32_t dev_id, const fal_fdb_entry_t * entry)
     rv = _isisc_fdb_commit(dev_id, ARL_PURGE_ENTRY);
     return rv;
 }
+#endif
 
 static sw_error_t
 _isisc_fdb_find(a_uint32_t dev_id, fal_fdb_entry_t * entry)
@@ -666,7 +667,7 @@ _isisc_fdb_find(a_uint32_t dev_id, fal_fdb_entry_t * entry)
     rv = _isisc_fdb_get(dev_id, &option, entry, ARL_FIND_ENTRY);
     return rv;
 }
-#endif
+
 static sw_error_t
 _isisc_fdb_extend_next(a_uint32_t dev_id, fal_fdb_op_t * option,
                       fal_fdb_entry_t * entry)
@@ -1705,6 +1706,7 @@ isisc_fdb_del_by_mac(a_uint32_t dev_id, const fal_fdb_entry_t * entry)
     HSL_API_UNLOCK;
     return rv;
 }
+#endif
 
 /**
  * @brief Find a particular Fdb entry from device through mac address.
@@ -1725,7 +1727,7 @@ isisc_fdb_find(a_uint32_t dev_id, fal_fdb_entry_t * entry)
     HSL_API_UNLOCK;
     return rv;
 }
-#endif
+
 /**
  * @brief Get next Fdb entry from a particular device
  * @param[in] dev_id device id
@@ -2249,8 +2251,8 @@ isisc_fdb_init(a_uint32_t dev_id)
 #ifndef IN_FDB_MINI
         p_api->fdb_del_by_port = isisc_fdb_del_by_port;
         p_api->fdb_del_by_mac = isisc_fdb_del_by_mac;
-        p_api->fdb_find = isisc_fdb_find;
 #endif
+        p_api->fdb_find = isisc_fdb_find;
         p_api->port_learn_set = isisc_fdb_port_learn_set;
 #ifndef IN_FDB_MINI
         p_api->port_learn_get = isisc_fdb_port_learn_get;

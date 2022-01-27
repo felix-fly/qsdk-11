@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2019, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -1846,7 +1846,9 @@ extern "C" {
     SW_API_DEF(SW_API_POLICER_PORT_ENTRY_GET, fal_port_policer_entry_get), \
     SW_API_DEF(SW_API_POLICER_ACL_ENTRY_SET, fal_acl_policer_entry_set), \
     SW_API_DEF(SW_API_POLICER_ACL_ENTRY_GET,fal_acl_policer_entry_get), \
-    SW_API_DEF(SW_API_POLICER_GLOBAL_COUNTER_GET, fal_policer_global_counter_get),
+    SW_API_DEF(SW_API_POLICER_GLOBAL_COUNTER_GET, fal_policer_global_counter_get), \
+    SW_API_DEF(SW_API_POLICER_BYPASS_EN_SET, fal_policer_bypass_en_set), \
+    SW_API_DEF(SW_API_POLICER_BYPASS_EN_GET, fal_policer_bypass_en_get),
 
 #define POLICER_API_PARAM \
     SW_API_DESC(SW_API_POLICER_TIMESLOT_SET)  \
@@ -1859,7 +1861,9 @@ extern "C" {
     SW_API_DESC(SW_API_POLICER_PORT_ENTRY_GET) \
     SW_API_DESC(SW_API_POLICER_ACL_ENTRY_SET) \
     SW_API_DESC(SW_API_POLICER_ACL_ENTRY_GET) \
-    SW_API_DESC(SW_API_POLICER_GLOBAL_COUNTER_GET)
+    SW_API_DESC(SW_API_POLICER_GLOBAL_COUNTER_GET) \
+    SW_API_DESC(SW_API_POLICER_BYPASS_EN_SET) \
+    SW_API_DESC(SW_API_POLICER_BYPASS_EN_GET)
 
 #else
 #define POLICER_API

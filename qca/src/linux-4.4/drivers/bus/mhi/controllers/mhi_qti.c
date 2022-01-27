@@ -17,8 +17,49 @@
 #include <linux/mhi.h>
 #include <linux/msi.h>
 #include <linux/interrupt.h>
+#include <linux/notifier.h>
+#include <linux/io.h>
+#include <linux/gpio/consumer.h>
 #include "mhi_qti.h"
 #include "../core/mhi_internal.h"
+
+#define WDOG_TIMEOUT	30
+#define MHI_PANIC_TIMER_STEP	1000
+
+volatile int mhi_panic_timeout;
+
+int ap2mdm_gpio, mdm2ap_gpio;
+bool mhi_ssr_negotiate;
+
+void __iomem *wdt;
+
+static struct kobject *mhi_kobj;
+
+struct notifier_block *global_mhi_panic_notifier;
+
+static ssize_t sysfs_show(struct kobject *kobj, struct kobj_attribute *attr,
+			  char *buf);
+static ssize_t sysfs_store(struct kobject *kobj, struct kobj_attribute *attr,
+			   const char *buf, size_t count);
+
+static struct kobj_attribute mhi_attr =
+	__ATTR(mhi_panic_timeout, 0660, sysfs_show, sysfs_store);
+
+static ssize_t sysfs_show(struct kobject *kobj, struct kobj_attribute *attr,
+			  char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", mhi_panic_timeout);
+}
+
+static ssize_t sysfs_store(struct kobject *kobj, struct kobj_attribute *attr,
+			   const char *buf, size_t count)
+{
+	if (sscanf(buf, "%du", &mhi_panic_timeout) != 1) {
+		pr_err("failed to read timeout value from string\n");
+		return -EINVAL;
+	}
+	return count;
+}
 
 struct firmware_info {
 	unsigned int dev_id;
@@ -39,13 +80,14 @@ module_param_named(debug_mode, debug_mode, int, 0644);
 
 int mhi_debugfs_trigger_m0(void *data, u64 val)
 {
+#ifdef CONFIG_PM
 	struct mhi_controller *mhi_cntrl = data;
 	struct mhi_dev *mhi_dev = mhi_controller_get_devdata(mhi_cntrl);
 
 	MHI_LOG("Trigger M3 Exit\n");
 	pm_runtime_get(&mhi_dev->pci_dev->dev);
 	pm_runtime_put(&mhi_dev->pci_dev->dev);
-
+#endif
 	return 0;
 }
 DEFINE_SIMPLE_ATTRIBUTE(debugfs_trigger_m0_fops, NULL,
@@ -53,13 +95,14 @@ DEFINE_SIMPLE_ATTRIBUTE(debugfs_trigger_m0_fops, NULL,
 
 int mhi_debugfs_trigger_m3(void *data, u64 val)
 {
+#ifdef CONFIG_PM
 	struct mhi_controller *mhi_cntrl = data;
 	struct mhi_dev *mhi_dev = mhi_controller_get_devdata(mhi_cntrl);
 
 	MHI_LOG("Trigger M3 Entry\n");
 	pm_runtime_mark_last_busy(&mhi_dev->pci_dev->dev);
 	pm_request_autosuspend(&mhi_dev->pci_dev->dev);
-
+#endif
 	return 0;
 }
 DEFINE_SIMPLE_ATTRIBUTE(debugfs_trigger_m3_fops, NULL,
@@ -70,13 +113,16 @@ void mhi_deinit_pci_dev(struct mhi_controller *mhi_cntrl)
 	struct mhi_dev *mhi_dev = mhi_controller_get_devdata(mhi_cntrl);
 	struct pci_dev *pci_dev = mhi_dev->pci_dev;
 
+#ifdef CONFIG_PM
 	pm_runtime_mark_last_busy(&pci_dev->dev);
 	pm_runtime_dont_use_autosuspend(&pci_dev->dev);
 	pm_runtime_disable(&pci_dev->dev);
+#endif
 	pci_free_irq_vectors(pci_dev);
 	kfree(mhi_cntrl->irq);
 	mhi_cntrl->irq = NULL;
 	iounmap(mhi_cntrl->regs);
+	iounmap(wdt);
 	mhi_cntrl->regs = NULL;
 	pci_clear_master(pci_dev);
 	pci_release_region(pci_dev, mhi_dev->resn);
@@ -145,11 +191,11 @@ static int mhi_init_pci_dev(struct mhi_controller *mhi_cntrl)
 
 	dev_set_drvdata(&pci_dev->dev, mhi_cntrl);
 
+#ifdef CONFIG_PM
 	/* configure runtime pm */
 	pm_runtime_set_autosuspend_delay(&pci_dev->dev, MHI_RPM_SUSPEND_TMR_MS);
 	pm_runtime_use_autosuspend(&pci_dev->dev);
 	pm_suspend_ignore_children(&pci_dev->dev, true);
-
 	/*
 	 * pci framework will increment usage count (twice) before
 	 * calling local device driver probe function.
@@ -162,6 +208,7 @@ static int mhi_init_pci_dev(struct mhi_controller *mhi_cntrl)
 	 */
 	pm_runtime_mark_last_busy(&pci_dev->dev);
 	pm_runtime_put_noidle(&pci_dev->dev);
+#endif
 
 	return 0;
 
@@ -187,6 +234,7 @@ error_enable_device:
 	return ret;
 }
 
+#ifdef CONFIG_PM
 static int mhi_runtime_suspend(struct device *dev)
 {
 	int ret = 0;
@@ -310,11 +358,12 @@ int mhi_system_suspend(struct device *dev)
 	MHI_LOG("Exit\n");
 	return 0;
 }
+#endif
 
 /* checks if link is down */
-static int mhi_link_status(struct mhi_controller *mhi_cntrl, void *priv)
+static int mhi_link_status(struct mhi_controller *mhi_cntrl)
 {
-	struct mhi_dev *mhi_dev = priv;
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	u16 dev_id;
 	int ret;
 
@@ -325,9 +374,9 @@ static int mhi_link_status(struct mhi_controller *mhi_cntrl, void *priv)
 }
 
 /* disable PCIe L1 */
-static int mhi_lpm_disable(struct mhi_controller *mhi_cntrl, void *priv)
+static int mhi_lpm_disable(struct mhi_controller *mhi_cntrl)
 {
-	struct mhi_dev *mhi_dev = priv;
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	struct pci_dev *pci_dev = mhi_dev->pci_dev;
 	int lnkctl = pci_dev->pcie_cap + PCI_EXP_LNKCTL;
 	u8 val;
@@ -356,9 +405,9 @@ static int mhi_lpm_disable(struct mhi_controller *mhi_cntrl, void *priv)
 }
 
 /* enable PCIe L1 */
-static int mhi_lpm_enable(struct mhi_controller *mhi_cntrl, void *priv)
+static int mhi_lpm_enable(struct mhi_controller *mhi_cntrl)
 {
-	struct mhi_dev *mhi_dev = priv;
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	struct pci_dev *pci_dev = mhi_dev->pci_dev;
 	int lnkctl = pci_dev->pcie_cap + PCI_EXP_LNKCTL;
 	u8 val;
@@ -425,27 +474,29 @@ static int mhi_power_up(struct mhi_controller *mhi_cntrl)
 	return ret;
 }
 
-static int mhi_runtime_get(struct mhi_controller *mhi_cntrl, void *priv)
+#ifdef CONFIG_PM
+static int mhi_runtime_get(struct mhi_controller *mhi_cntrl)
 {
-	struct mhi_dev *mhi_dev = priv;
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	struct device *dev = &mhi_dev->pci_dev->dev;
 
 	return pm_runtime_get(dev);
 }
 
-static void mhi_runtime_put(struct mhi_controller *mhi_cntrl, void *priv)
+static void mhi_runtime_put(struct mhi_controller *mhi_cntrl)
 {
-	struct mhi_dev *mhi_dev = priv;
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	struct device *dev = &mhi_dev->pci_dev->dev;
 
 	pm_runtime_put_noidle(dev);
 }
+#endif
 
 static void mhi_status_cb(struct mhi_controller *mhi_cntrl,
-			  void *priv,
-			  enum MHI_CB reason)
+			  enum mhi_callback reason)
 {
-	struct mhi_dev *mhi_dev = priv;
+#ifdef CONFIG_PM
+	struct mhi_dev *mhi_dev = mhi_cntrl->priv_data;
 	struct device *dev = &mhi_dev->pci_dev->dev;
 
 	if (reason == MHI_CB_IDLE) {
@@ -453,10 +504,11 @@ static void mhi_status_cb(struct mhi_controller *mhi_cntrl,
 		pm_runtime_mark_last_busy(dev);
 		pm_request_autosuspend(dev);
 	}
+#endif
 }
 
 /* capture host SoC XO time in ticks */
-static u64 mhi_time_get(struct mhi_controller *mhi_cntrl, void *priv)
+static u64 mhi_time_get(struct mhi_controller *mhi_cntrl)
 {
 	return arch_counter_get_cntvct();
 }
@@ -517,7 +569,7 @@ static const struct attribute_group mhi_group = {
 	.attrs = mhi_attrs,
 };
 
-static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
+static struct mhi_controller *dt_register_mhi_controller(struct pci_dev *pci_dev)
 {
 	struct mhi_controller *mhi_cntrl;
 	struct mhi_dev *mhi_dev;
@@ -540,6 +592,7 @@ static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
 	mhi_cntrl->dev_id = pci_dev->device;
 	mhi_cntrl->bus = pci_dev->bus->number;
 	mhi_cntrl->slot = PCI_SLOT(pci_dev->devfn);
+	mhi_cntrl->dev = &pci_dev->dev;
 
 	use_bb = of_property_read_bool(of_node, "mhi,use-bb");
 
@@ -582,8 +635,10 @@ static struct mhi_controller *mhi_register_controller(struct pci_dev *pci_dev)
 
 	/* setup power management apis */
 	mhi_cntrl->status_cb = mhi_status_cb;
+#ifdef CONFIG_PM
 	mhi_cntrl->runtime_get = mhi_runtime_get;
 	mhi_cntrl->runtime_put = mhi_runtime_put;
+#endif
 	mhi_cntrl->link_status = mhi_link_status;
 
 	mhi_cntrl->lpm_disable = mhi_lpm_disable;
@@ -616,6 +671,76 @@ error_register:
 	return ERR_PTR(-EINVAL);
 }
 
+static int mhi_panic_handler(struct notifier_block *this,
+			     unsigned long event, void *ptr)
+{
+	int mdmreboot = 0, i;
+	struct gpio_desc *ap2mdm, *mdm2ap;
+	struct mhi_controller *mhi_cntrl = container_of(this,
+		       struct mhi_controller, mhi_panic_notifier);
+
+	ap2mdm = gpio_to_desc(ap2mdm_gpio);
+	if (IS_ERR(ap2mdm))
+		return PTR_ERR(ap2mdm);
+
+	mdm2ap = gpio_to_desc(mdm2ap_gpio);
+	if (IS_ERR(mdm2ap))
+		return PTR_ERR(mdm2ap);
+
+
+	/*
+	 * ap2mdm_status is set to 0 to indicate the SDX
+	 * that IPQ has crashed. Now the SDX has to take
+	 * dump.
+	 */
+	gpiod_set_value(ap2mdm, 0);
+
+	if (mhi_panic_timeout) {
+		if (mhi_panic_timeout > WDOG_TIMEOUT)
+			writel(0, wdt);
+
+		for (i = 0; i < mhi_panic_timeout; i++) {
+
+			/*
+			 * Waiting for the mdm2ap status to be 0
+			 * which indicates that SDX is rebooting and entering
+			 * the crashdump path.
+			 */
+			if (!mdmreboot && !gpiod_get_value(mdm2ap)) {
+				MHI_LOG("MDM is rebooting and entering the crashdump path\n");
+				mdmreboot = 1;
+			}
+
+
+			/*
+			 * Waiting for the mdm2ap status to be 1
+			 * which indicates that SDX has completed crashdump
+			 * collection and booted successfully.
+			 */
+			if (mdmreboot && gpiod_get_value(mdm2ap)) {
+				MHI_LOG("MDM has completed crashdump collection and booted successfully\n");
+				break;
+			}
+
+			mdelay(MHI_PANIC_TIMER_STEP);
+		}
+
+		if (mhi_panic_timeout > WDOG_TIMEOUT)
+			writel(1, wdt);
+	}
+
+	return NOTIFY_DONE;
+}
+
+void mhi_wdt_panic_handler(void)
+{
+	mhi_panic_handler(global_mhi_panic_notifier,
+			0, NULL);
+}
+EXPORT_SYMBOL(mhi_wdt_panic_handler);
+
+static int force_graceful = 0;
+
 int mhi_pci_probe(struct pci_dev *pci_dev,
 		  const struct pci_device_id *device_id)
 {
@@ -627,10 +752,15 @@ int mhi_pci_probe(struct pci_dev *pci_dev,
 	struct mhi_dev *mhi_dev;
 	int ret;
 
+	if (device_id->device == 0x0308) {
+		pr_emerg("MHI: SDX65 setting graceful woraround for mdm2gpio\n");
+		force_graceful = 1;
+	}
+
 	/* see if we already registered */
 	mhi_cntrl = mhi_bdf_to_controller(domain, bus, slot, dev_id);
 	if (!mhi_cntrl)
-		mhi_cntrl = mhi_register_controller(pci_dev);
+		mhi_cntrl = dt_register_mhi_controller(pci_dev);
 
 	if (IS_ERR(mhi_cntrl))
 		return PTR_ERR(mhi_cntrl);
@@ -654,8 +784,47 @@ int mhi_pci_probe(struct pci_dev *pci_dev,
 			goto error_power_up;
 	}
 
+#ifdef CONFIG_PM
 	pm_runtime_mark_last_busy(&pci_dev->dev);
 	pm_runtime_allow(&pci_dev->dev);
+#endif
+
+	mhi_ssr_negotiate = of_property_read_bool(mhi_cntrl->of_node, "mhi,ssr-negotiate");
+
+	if (mhi_ssr_negotiate) {
+		ret = of_property_read_u32(mhi_cntrl->of_node, "ap2mdm",
+						&ap2mdm_gpio);
+		if (ret != 0)
+			pr_err("AP2MDM GPIO not configured\n");
+
+		ret = of_property_read_u32(mhi_cntrl->of_node, "mdm2ap",
+						&mdm2ap_gpio);
+		if (ret != 0)
+			pr_err("MDM2AP GPIO not configured\n");
+
+		mhi_cntrl->mhi_panic_notifier.notifier_call = mhi_panic_handler;
+
+		global_mhi_panic_notifier = &(mhi_cntrl->mhi_panic_notifier);
+
+		ret = atomic_notifier_chain_register(&panic_notifier_list,
+				&mhi_cntrl->mhi_panic_notifier);
+		MHI_LOG("MHI panic notifier registered\n");
+
+		wdt = ioremap(0x0B017008, 4);
+
+		/* Creating a directory in /sys/kernel/ */
+		mhi_kobj = kobject_create_and_add("mhi", kernel_kobj);
+
+		if (mhi_kobj) {
+			/* Creating sysfs file for mhi_panic_timeout */
+			if (sysfs_create_file(mhi_kobj, &mhi_attr.attr)) {
+				MHI_ERR("Cannot create sysfs file for mhi_panic_timeout\n");
+				kobject_put(mhi_kobj);
+			}
+		} else {
+			MHI_ERR("Unable to create mhi sysfs entry\n");
+		}
+	}
 
 	MHI_LOG("Return successful\n");
 
@@ -677,6 +846,8 @@ void mhi_pci_device_removed(struct pci_dev *pci_dev)
 	u32 bus = pci_dev->bus->number;
 	u32 dev_id = pci_dev->device;
 	u32 slot = PCI_SLOT(pci_dev->devfn);
+	struct gpio_desc *mdm2ap;
+	bool graceful = 0;
 
 	mhi_cntrl = mhi_bdf_to_controller(domain, bus, slot, dev_id);
 
@@ -684,16 +855,19 @@ void mhi_pci_device_removed(struct pci_dev *pci_dev)
 
 		struct mhi_dev *mhi_dev = mhi_controller_get_devdata(mhi_cntrl);
 
+#ifdef CONFIG_PM
 		pm_stay_awake(&mhi_cntrl->mhi_dev->dev);
 
 		/* if link is in drv suspend, wake it up */
 		pm_runtime_get_sync(&pci_dev->dev);
-
+#endif
 		mutex_lock(&mhi_cntrl->pm_mutex);
 		if (!mhi_dev->powered_on) {
 			MHI_LOG("Not in active state\n");
 			mutex_unlock(&mhi_cntrl->pm_mutex);
+#ifdef CONFIG_PM
 			pm_runtime_put_noidle(&pci_dev->dev);
+#endif
 			return;
 		}
 		mhi_dev->powered_on = false;
@@ -701,8 +875,18 @@ void mhi_pci_device_removed(struct pci_dev *pci_dev)
 
 		pm_runtime_put_noidle(&pci_dev->dev);
 
+		if (mhi_ssr_negotiate) {
+			mdm2ap = gpio_to_desc(mdm2ap_gpio);
+			if (IS_ERR(mdm2ap))
+				MHI_ERR("Unable to acquire mdm2ap_gpio");
+
+			graceful = gpiod_get_value(mdm2ap);
+			if (force_graceful)
+				graceful = 1;
+		}
+
 		MHI_LOG("Triggering shutdown process\n");
-		mhi_power_down(mhi_cntrl, false);
+		mhi_power_down(mhi_cntrl, graceful);
 
 		/* turn the link off */
 		mhi_deinit_pci_dev(mhi_cntrl);
@@ -710,27 +894,32 @@ void mhi_pci_device_removed(struct pci_dev *pci_dev)
 
 		mhi_arch_pcie_deinit(mhi_cntrl);
 
+#ifdef CONFIG_PM
 		pm_relax(&mhi_cntrl->mhi_dev->dev);
+#endif
+		kobject_put(mhi_kobj);
 
 		mhi_unregister_mhi_controller(mhi_cntrl);
 	}
 }
 
+#ifdef CONFIG_PM
 static const struct dev_pm_ops pm_ops = {
 	SET_RUNTIME_PM_OPS(mhi_runtime_suspend,
 			   mhi_runtime_resume,
 			   mhi_runtime_idle)
 	SET_SYSTEM_SLEEP_PM_OPS(mhi_system_suspend, mhi_system_resume)
 };
+#endif
 
 static struct pci_device_id mhi_pcie_device_id[] = {
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0300)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0301)},
-	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0302)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0303)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0304)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0305)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0306)},
+	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, 0x0308)},
 	{PCI_DEVICE(MHI_PCIE_VENDOR_ID, MHI_PCIE_DEBUG_ID)},
 	{0},
 };
@@ -741,7 +930,9 @@ static struct pci_driver mhi_pcie_driver = {
 	.probe = mhi_pci_probe,
 	.remove = mhi_pci_device_removed,
 	.driver = {
+#ifdef CONFIG_PM
 		.pm = &pm_ops
+#endif
 	}
 };
 

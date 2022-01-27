@@ -118,6 +118,7 @@ struct mhi_netbuf {
 
 static struct mhi_driver mhi_netdev_driver;
 static void mhi_netdev_create_debugfs(struct mhi_netdev *mhi_netdev);
+static u32   mhi_netdev_mru_overide;
 
 static __be16 mhi_netdev_ip_type_trans(u8 data)
 {
@@ -647,8 +648,6 @@ static void mhi_netdev_push_skb(struct mhi_netdev *mhi_netdev,
 				mhi_result->bytes_xferd, mhi_netdev->mru);
 		skb->dev = mhi_netdev->ndev;
 		skb->protocol = mhi_netdev_ip_type_trans(*(u8 *)mhi_buf->buf);
-		if (skb_linearize(skb))
-			return;
 	} else {
 		skb_add_rx_frag(skb, 0, mhi_buf->page, ETH_HLEN,
 				mhi_result->bytes_xferd - ETH_HLEN,
@@ -719,7 +718,7 @@ static void mhi_netdev_xfer_dl_cb(struct mhi_device *mhi_dev,
 	}
 }
 
-static void mhi_netdev_status_cb(struct mhi_device *mhi_dev, enum MHI_CB mhi_cb)
+static void mhi_netdev_status_cb(struct mhi_device *mhi_dev, enum mhi_callback mhi_cb)
 {
 	struct mhi_netdev *mhi_netdev = mhi_device_get_devdata(mhi_dev);
 
@@ -809,6 +808,21 @@ static void mhi_netdev_clone_dev(struct mhi_netdev *mhi_netdev,
 	mhi_netdev->chain = parent->chain;
 }
 
+/* Called during parsing early boot params to check
+ * if MRU is different from DT
+ */
+static int __init config_mru(char *str)
+{
+	u32 mru;
+	 if (get_option(&str, &mru)) {
+		mhi_netdev_mru_overide = mru;
+        }
+        return 0;
+}
+
+early_param("mhi_netdev_mru_overide", config_mru);
+
+
 static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 			    const struct mhi_device_id *id)
 {
@@ -834,6 +848,10 @@ static int mhi_netdev_probe(struct mhi_device *mhi_dev,
 	ret = of_property_read_u32(of_node, "mhi,mru", &mhi_netdev->mru);
 	if (ret)
 		return -ENODEV;
+
+        /*Check if MRU  being set at bootargs */
+	if((!strcmp(id->chan , "IP_HW0" )) && mhi_netdev_mru_overide)
+		mhi_netdev->mru = mhi_netdev_mru_overide;
 
 	/* MRU must be multiplication of page size */
 	mhi_netdev->order = __ilog2_u32(mhi_netdev->mru / PAGE_SIZE);

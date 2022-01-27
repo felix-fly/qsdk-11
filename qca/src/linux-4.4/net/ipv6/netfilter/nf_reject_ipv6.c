@@ -135,7 +135,7 @@ void nf_send_reset6(struct net *net, struct sk_buff *oldskb, int hook)
 	struct sk_buff *nskb;
 	struct tcphdr _otcph;
 	const struct tcphdr *otcph;
-	unsigned int otcplen, hh_len;
+	unsigned int otcplen;
 	const struct ipv6hdr *oip6h = ipv6_hdr(oldskb);
 	struct ipv6hdr *ip6h;
 	struct dst_entry *dst = NULL;
@@ -157,6 +157,17 @@ void nf_send_reset6(struct net *net, struct sk_buff *oldskb, int hook)
 	fl6.daddr = oip6h->saddr;
 	fl6.fl6_sport = otcph->dest;
 	fl6.fl6_dport = otcph->source;
+
+	/* For forwarding packet, the skb->skb_iif is the incoming device's
+	 * ifindex, but it is 0 for local out skb, use dst->dev's ifindex
+	 * instead.
+	 */
+	if (oldskb->skb_iif != 0)
+		fl6.flowi6_oif = oldskb->skb_iif;
+	else
+		fl6.flowi6_oif = l3mdev_master_ifindex(skb_dst(oldskb)->dev);
+
+	fl6.flowi6_mark = IP6_REPLY_MARK(net, oldskb->mark);
 	security_skb_classify_flow(oldskb, flowi6_to_flowi(&fl6));
 	dst = ip6_route_output(net, NULL, &fl6);
 	if (dst == NULL || dst->error) {
@@ -167,8 +178,7 @@ void nf_send_reset6(struct net *net, struct sk_buff *oldskb, int hook)
 	if (IS_ERR(dst))
 		return;
 
-	hh_len = (dst->dev->hard_header_len + 15)&~15;
-	nskb = alloc_skb(hh_len + 15 + dst->header_len + sizeof(struct ipv6hdr)
+	nskb = alloc_skb(LL_MAX_HEADER + sizeof(struct ipv6hdr)
 			 + sizeof(struct tcphdr) + dst->trailer_len,
 			 GFP_ATOMIC);
 
@@ -180,7 +190,9 @@ void nf_send_reset6(struct net *net, struct sk_buff *oldskb, int hook)
 
 	skb_dst_set(nskb, dst);
 
-	skb_reserve(nskb, hh_len + dst->header_len);
+	nskb->mark = fl6.flowi6_mark;
+
+	skb_reserve(nskb, LL_MAX_HEADER);
 	ip6h = nf_reject_ip6hdr_put(nskb, oldskb, IPPROTO_TCP,
 				    ip6_dst_hoplimit(dst));
 	nf_reject_ip6_tcphdr_put(nskb, oldskb, otcph, otcplen);

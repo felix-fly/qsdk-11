@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010, 2015-2018, 2020 The Linux Foundation. All rights reserved.
  * Copyright (C) 2015 Linaro Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -585,18 +585,19 @@ int __qcom_scm_mem_prot_assign(struct device *dev, struct sg_table *table,
 			       struct dest_vm_and_perm_info *dest_vm_copy,
 			       size_t dest_vm_copy_size,
 			       struct mem_prot_info *sg_table_copy,
-			       size_t sg_table_copy_size,
 			       u32 *resp, size_t resp_size)
 {
 	int ret = 0;
-	int batch_start, batch_end;
-	u64 batch_size;
+	unsigned int entries_size;
+	unsigned int batch_start = 0;
+	unsigned int batches_processed;
+	struct scatterlist *curr_sgl = table->sgl;
+	struct scatterlist *next_sgl = NULL;
 
 	if (is_scm_armv8()) {
 		struct scm_desc desc = {0};
 
 		desc.args[0] = virt_to_phys(sg_table_copy);
-		desc.args[1] = sg_table_copy_size;
 		desc.args[2] = virt_to_phys(source_vm_copy);
 		desc.args[3] = source_vm_copy_size;
 		desc.args[4] = virt_to_phys(dest_vm_copy);
@@ -608,37 +609,21 @@ int __qcom_scm_mem_prot_assign(struct device *dev, struct sg_table *table,
 
 		dmac_flush_range(source_vm_copy,
 				 (void *)source_vm_copy + source_vm_copy_size);
-		dmac_flush_range(sg_table_copy,
-				 (void *)sg_table_copy + sg_table_copy_size);
 		dmac_flush_range(dest_vm_copy,
 				 (void *)dest_vm_copy + dest_vm_copy_size);
 
 		batch_start = 0;
 		while (batch_start < table->nents) {
 			/* Ensure no size zero batches */
-			batch_size = sg_table_copy[batch_start].size;
-			batch_end = batch_start + 1;
-			while (1) {
-				u64 size;
+			batches_processed = get_batches_from_sgl(sg_table_copy,
+								 curr_sgl, &next_sgl);
+			curr_sgl = next_sgl;
+			entries_size = batches_processed * sizeof(*sg_table_copy);
+			dmac_flush_range(sg_table_copy,
+					 (void *)sg_table_copy + entries_size);
 
-				if (batch_end >= table->nents)
-					break;
-				if (batch_end - batch_start
-						>= BATCH_MAX_SECTIONS)
-					break;
-
-				size = sg_table_copy[batch_end].size;
-				if (size + batch_size >= BATCH_MAX_SIZE)
-					break;
-
-				batch_size += size;
-				batch_end++;
-			}
-
-			desc.args[0] =
-				virt_to_phys(&sg_table_copy[batch_start]);
-			desc.args[1] = (batch_end - batch_start) *
-					sizeof(sg_table_copy[0]);
+			desc.args[0] = virt_to_phys(sg_table_copy);
+			desc.args[1] = entries_size;
 
 			ret = qcom_scm_call2(SCM_SIP_FNID(SCM_SVC_MP,
 						MEM_PROT_ASSIGN_ID), &desc);
@@ -649,7 +634,7 @@ int __qcom_scm_mem_prot_assign(struct device *dev, struct sg_table *table,
 					__func__, ret);
 				break;
 			}
-			batch_start = batch_end;
+			batch_start += batches_processed;
 		}
 		return ret;
 	}
@@ -741,6 +726,30 @@ void __qcom_scm_cpu_power_down(u32 flags)
 {
 	qcom_scm_call_atomic1(QCOM_SCM_SVC_BOOT, QCOM_SCM_CMD_TERMINATE_PC,
 			flags & QCOM_SCM_FLUSH_FLAG_MASK);
+}
+
+int __qcom_scm_qseecom_remove_xpu(struct device *dev)
+{
+	int ret = 0;
+
+	if (is_scm_armv8()) {
+		uint32_t smc_id = 0;
+		struct scm_desc desc = {0};
+		ret = __qcom_remove_xpu_scm_call_available(dev, TZ_SVC_APP_MGR,
+						TZ_ARMv8_CMD_REMOVE_XPU);
+		if (ret <= 0)
+			return -ENOTSUPP;
+
+		smc_id = TZ_SYSCALL_CREATE_SMC_ID(TZ_OWNER_QSEE_OS,
+						 TZ_SVC_APP_MGR,
+						 TZ_ARMv8_CMD_REMOVE_XPU);
+
+		ret = qcom_scm_call2(smc_id, &desc);
+
+	} else
+		 return -ENOTSUPP;
+
+	return ret;
 }
 
 int __qcom_scm_qseecom_notify(struct device *dev,
@@ -916,16 +925,82 @@ int __qcom_scm_tz_register_log_buf(struct device *dev,
 	return ret;
 }
 
+int __qcom_scm_aes(struct device *dev,
+			struct scm_cmd_buf_t *scm_cmd_buf,
+			size_t buf_size, u32 cmd_id)
+{
+	int ret = 0;
+
+	if (is_scm_armv8()) {
+		__le32 scm_ret;
+		struct scm_desc desc = {0};
+
+		desc.arginfo = SCM_ARGS(2, SCM_RW, SCM_VAL);
+
+		desc.args[0] = (u64)scm_cmd_buf->req_addr;
+		desc.args[1] = scm_cmd_buf->req_size;
+
+		ret = qcom_scm_call2(SCM_SIP_FNID(TZ_SVC_CRYPTO, cmd_id),
+		                    &desc);
+		scm_ret = desc.ret[0];
+		if (!ret)
+			return le32_to_cpu(scm_ret);
+	} else
+		return -ENOTSUPP;
+
+	return ret;
+}
+
 int __qcom_scm_tls_hardening(struct device *dev,
 			    struct scm_cmd_buf_t *scm_cmd_buf,
 			    size_t buf_size, u32 cmd_id)
 {
 	int ret = 0;
 
-	cmd_id = TZ_SYSCALL_CREATE_CMD_ID(TZ_SVC_CRYPTO, cmd_id);
+	if (is_scm_armv8()) {
+		__le32 scm_ret;
+		struct scm_desc desc = {0};
 
-	ret = qcom_scm_call(dev, TZ_SVC_CRYPTO, cmd_id, (void *)scm_cmd_buf,
-			   buf_size, NULL, 0);
+		desc.arginfo = SCM_ARGS(4, SCM_RW, SCM_VAL, SCM_RW, SCM_VAL);
+
+		desc.args[0] = (u64)scm_cmd_buf->req_addr;
+		desc.args[1] = scm_cmd_buf->req_size;
+		desc.args[2] = (u64)scm_cmd_buf->resp_addr;
+		desc.args[3] = scm_cmd_buf->resp_size;
+
+		ret = qcom_scm_call2(SCM_SIP_FNID(TZ_SVC_CRYPTO, cmd_id),
+				     &desc);
+		scm_ret = desc.ret[0];
+		if (!ret)
+			return le32_to_cpu(scm_ret);
+	} else {
+		cmd_id = TZ_SYSCALL_CREATE_CMD_ID(TZ_SVC_CRYPTO, cmd_id);
+
+		ret = qcom_scm_call(dev, TZ_SVC_CRYPTO, cmd_id,
+				    (void *)scm_cmd_buf, buf_size, NULL, 0);
+	}
+
+	return ret;
+}
+
+int __qcom_remove_xpu_scm_call_available(struct device *dev, u32 svc_id, u32 cmd_id)
+{
+	int ret;
+
+	if (is_scm_armv8()) {
+		__le32 scm_ret;
+		struct scm_desc desc = {0};
+
+		desc.args[0] = SCM_QSEEOS_FNID(svc_id, cmd_id);
+		desc.arginfo = SCM_ARGS(1);
+		ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_INFO,
+					QCOM_IS_CALL_AVAIL_CMD), &desc);
+		scm_ret = desc.ret[0];
+
+		if (!ret)
+			return le32_to_cpu(scm_ret);
+	} else
+		return -ENOTSUPP;
 
 	return ret;
 }
@@ -962,6 +1037,25 @@ int __qcom_scm_is_call_available(struct device *dev, u32 svc_id, u32 cmd_id)
 	return ret;
 }
 
+
+int __qti_is_smc_id_available(struct device *dev, u32 smc_id)
+{
+	int ret;
+	__le32 scm_ret;
+	struct scm_desc desc = {0};
+
+	desc.args[0] = smc_id;
+	desc.arginfo = SCM_ARGS(1);
+	ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_INFO,
+				QCOM_IS_CALL_AVAIL_CMD), &desc);
+	scm_ret = desc.ret[0];
+
+	if (!ret)
+		return le32_to_cpu(scm_ret);
+
+	return ret;
+}
+
 int __qcom_qfprom_show_authenticate(struct device *dev, char *buf)
 {
 	int ret;
@@ -994,6 +1088,24 @@ int __qcom_qfprom_show_authenticate(struct device *dev, char *buf)
 		if (!ret)
 			return le32_to_cpu(scm_ret);
 	}
+
+	return ret;
+}
+
+int __qti_scm_tz_log_is_encrypted(struct device *dev)
+{
+	int ret;
+
+	__le32 scm_ret;
+	struct scm_desc desc = {0};
+
+	desc.arginfo = SCM_ARGS(0);
+
+	ret = qcom_scm_call2(QTI_TZ_LOG_ENCR_ALLOWED_ID, &desc);
+	scm_ret = desc.ret[0];
+
+	if (!ret)
+		return le32_to_cpu(scm_ret);
 
 	return ret;
 }
@@ -1442,15 +1554,110 @@ static int __qcom_scm_dload_v8(struct device *dev, void *cmd_buf)
 
 	enable = cmd_buf ? *((unsigned int *)cmd_buf) : 0;
 	desc.args[0] = TCSR_BOOT_MISC_REG;
+
 	if (enable == SET_MAGIC_WARMRESET)
 		desc.args[1] = DLOAD_MODE_ENABLE_WARMRESET;
 	else if (enable == ABNORMAL_MAGIC)
 		desc.args[1] = DLOAD_MODE_DISABLE_ABNORMALRESET;
 	else
 		desc.args[1] = enable ? DLOAD_MODE_ENABLE : DLOAD_MODE_DISABLE;
+
 	desc.arginfo = SCM_ARGS(2, SCM_VAL, SCM_VAL);
 	ret = qcom_scm_call2(SCM_SIP_FNID(SCM_SVC_IO_ACCESS,
 					SCM_IO_WRITE), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+static int __qcom_scm_wcss_boot_v8(struct device *dev, void *cmd_buf)
+{
+	struct scm_desc desc = {0};
+	int ret;
+	unsigned int enable;
+
+	enable = cmd_buf ? *((unsigned int *)cmd_buf) : 0;
+	desc.args[0] = TCSR_Q6SS_BOOT_TRIG_REG;
+	desc.args[1] = enable;
+
+	desc.arginfo = SCM_ARGS(2, SCM_VAL, SCM_VAL);
+	ret = qcom_scm_call2(SCM_SIP_FNID(SCM_SVC_IO_ACCESS,
+					SCM_IO_WRITE), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+static int __qcom_scm_pdseg_memcpy_v2_v8(struct device *dev, u32 peripheral,
+					int phno, dma_addr_t dma, int seg_cnt)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = peripheral;
+	desc.args[1] = phno;
+	desc.args[2] = dma;
+	desc.args[3] = seg_cnt;
+
+	desc.arginfo = SCM_ARGS(4, SCM_VAL, SCM_VAL, SCM_RW, SCM_VAL);
+
+	ret = qcom_scm_call2(SCM_SIP_FNID(PD_LOAD_SVC_ID,
+				PD_LOAD_V2_CMD_ID), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+static int __qcom_scm_pdseg_memcpy_v8(struct device *dev, u32 peripheral,
+					int phno, dma_addr_t dma, size_t size)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = peripheral;
+	desc.args[1] = phno;
+	desc.args[2] = dma;
+	desc.args[3] = size;
+
+	desc.arginfo = SCM_ARGS(4, SCM_VAL, SCM_VAL, SCM_RW, SCM_VAL);
+	ret = qcom_scm_call2(SCM_SIP_FNID(PD_LOAD_SVC_ID,
+				PD_LOAD_CMD_ID), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+static int __qcom_scm_int_radio_powerup_v8(struct device *dev, u32 peripheral)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = peripheral;
+
+	desc.arginfo = SCM_ARGS(1, SCM_VAL);
+	ret = qcom_scm_call2(SCM_SIP_FNID(PD_LOAD_SVC_ID,
+				INT_RAD_PWR_UP_CMD_ID), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+static int __qcom_scm_int_radio_powerdown_v8(struct device *dev,
+						u32 peripheral)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = peripheral;
+
+	desc.arginfo = SCM_ARGS(1, SCM_VAL);
+	ret = qcom_scm_call2(SCM_SIP_FNID(PD_LOAD_SVC_ID,
+				INT_RAD_PWR_DN_CMD_ID), &desc);
 	if (ret)
 		return ret;
 
@@ -1483,6 +1690,59 @@ int __qcom_scm_dload(struct device *dev, u32 svc_id, u32 cmd_id, void *cmd_buf)
 		ret = qcom_scm_call(dev, svc_id, cmd_id, NULL, 0, NULL, 0);
 
 	return ret;
+}
+
+int __qcom_scm_wcss_boot(struct device *dev, u32 svc_id, u32 cmd_id,
+				void *cmd_buf)
+{
+	long ret;
+
+	if (is_scm_armv8())
+		return __qcom_scm_wcss_boot_v8(dev, cmd_buf);
+
+	if (cmd_buf)
+		ret = qcom_scm_call(dev, svc_id, cmd_id, cmd_buf,
+				sizeof(cmd_buf), NULL, 0);
+	else
+		ret = qcom_scm_call(dev, svc_id, cmd_id, NULL, 0, NULL, 0);
+
+	return ret;
+}
+
+int __qcom_scm_pdseg_memcpy_v2(struct device *dev, u32 peripheral,
+				int phno, dma_addr_t dma, int seg_cnt)
+{
+	if (is_scm_armv8())
+		return __qcom_scm_pdseg_memcpy_v2_v8(dev, peripheral,
+						phno, dma, seg_cnt);
+	else
+		return -ENOTSUPP;
+}
+
+int __qcom_scm_pdseg_memcpy(struct device *dev, u32 peripheral,
+				int phno, dma_addr_t dma, size_t size)
+{
+	if (is_scm_armv8())
+		return __qcom_scm_pdseg_memcpy_v8(dev, peripheral,
+							phno, dma, size);
+	else
+		return -ENOTSUPP;
+}
+
+int __qcom_scm_int_radio_powerup(struct device *dev, u32 peripheral)
+{
+	if (is_scm_armv8())
+		return __qcom_scm_int_radio_powerup_v8(dev, peripheral);
+	else
+		return -ENOTSUPP;
+}
+
+int __qcom_scm_int_radio_powerdown(struct device *dev, u32 peripheral)
+{
+	if (is_scm_armv8())
+		return __qcom_scm_int_radio_powerdown_v8(dev, peripheral);
+	else
+		return -ENOTSUPP;
 }
 
 static int __qcom_scm_sdi_v8(struct device *dev)
@@ -1544,6 +1804,23 @@ int __qcom_scm_pinmux_write(u32 svc_id, u32 cmd_id, u32 arg1, u32 arg2)
 	ret = qcom_scm_call_atomic2(svc_id, cmd_id, arg1, arg2);
 
 	return ret;
+}
+
+int __qcom_scm_tcsr_reg_write(struct device *dev, u32 arg1, u32 arg2)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = arg1;
+	desc.args[1] = arg2;
+
+	desc.arginfo = SCM_ARGS(2, SCM_VAL, SCM_VAL);
+	ret = qcom_scm_call2(SCM_SIP_FNID(SCM_SVC_IO_ACCESS,
+					SCM_IO_WRITE), &desc);
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
 }
 
 int __qcom_scm_usb_mode_write(u32 svc_id, u32 cmd_id, u32 arg1, u32 arg2)
@@ -1666,6 +1943,43 @@ int __qcom_scm_tz_log(struct device *dev, u32 svc_id, u32 cmd_id,
 	return ret;
 }
 
+static int __qti_scm_tz_encrypted_log_v8(struct device *dev, u32 log_buf, u32 buf_size, u32 log_id)
+{
+	struct scm_desc desc = {0};
+	int ret;
+
+	desc.args[0] = log_buf;
+	desc.args[1] = buf_size;
+	desc.args[2] = log_id;
+	desc.arginfo = SCM_ARGS(3, SCM_RW, SCM_VAL, SCM_VAL);
+
+	ret = qcom_scm_call2(QTI_TZ_REQ_ENCR_LOG_BUFFER_ID, &desc);
+
+	if (ret)
+		return ret;
+
+	return le32_to_cpu(desc.ret[0]);
+}
+
+int __qti_scm_tz_log_encrypted(struct device *dev, void *ker_buf, u32 buf_len, u32 log_id)
+{
+	int ret;
+	dma_addr_t log_buf;
+
+	log_buf = dma_map_single(dev, ker_buf, buf_len,
+					DMA_FROM_DEVICE);
+	ret = dma_mapping_error(dev, log_buf);
+
+	if (ret != 0) {
+		pr_err("DMA Mapping Error : %d\n", ret);
+		return -EINVAL;
+	}
+	ret = __qti_scm_tz_encrypted_log_v8(dev, log_buf, buf_len, log_id);
+	dma_unmap_single(dev, log_buf, buf_len, DMA_FROM_DEVICE);
+
+	return ret;
+}
+
 int __qcom_los_scm_call(struct device *dev, u32 svc_id, u32 cmd_id,
 					void *cmd_buf, size_t size)
 {
@@ -1680,24 +1994,50 @@ int __qcom_fuseipq_scm_call(struct device *dev, u32 svc_id, u32 cmd_id,
 			    void *cmd_buf, size_t size)
 {
 	int ret;
-	struct scm_desc desc = {0};
-	uint64_t *status;
+	uint32_t *status;
+	struct fuse_blow *fuse_blow = cmd_buf;
 
 	if (is_scm_armv8()) {
 
-		desc.arginfo = SCM_ARGS(1, SCM_RO);
-		desc.args[0] = *((unsigned int *)cmd_buf);
+		struct scm_desc desc = {0};
+		desc.args[0] = fuse_blow->address;
+		if (fuse_blow->size) {
+			desc.args[1] = fuse_blow->size;
+			desc.arginfo = SCM_ARGS(2, SCM_RO, SCM_VAL);
+		} else
+			desc.arginfo = SCM_ARGS(1, SCM_RO);
 
 		ret = qcom_scm_call2(SCM_SIP_FNID(svc_id, cmd_id), &desc);
-		status = (uint64_t *)(*(((uint32_t *)cmd_buf) + 1));
+		status = (uint32_t *)fuse_blow->status;
+
 		*status = desc.ret[0];
+
+		if (!ret)
+			return le32_to_cpu(desc.ret[0]);
 
 	} else {
 
-		return -ENOTSUPP;
+		dma_addr_t statusphys;
+
+		status = (uint32_t *)(((uint32_t *)cmd_buf) + 1);
+		statusphys = dma_map_single(dev, status, sizeof(unsigned long),
+						DMA_FROM_DEVICE);
+		ret = dma_mapping_error(dev, statusphys);
+		if (ret != 0) {
+			pr_err("DMA Mapping Error : %d\n", ret);
+			return -EINVAL;
+		}
+
+		*status = statusphys;
+
+		ret = qcom_scm_call(dev, svc_id, cmd_id, cmd_buf,
+					size, NULL, 0);
+		dma_unmap_single(dev, statusphys,  sizeof(unsigned long),
+						DMA_FROM_DEVICE);
+
 	}
 
-	return ret ? : le32_to_cpu(desc.ret[0]);
+	return ret;
 }
 
 int __qcom_scm_lock_subsys_mem(struct device *dev, u32 subsys_id,
@@ -1737,5 +2077,88 @@ int __qcom_scm_unlock_subsys_mem(struct device *dev, u32 subsys_id,
 	ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_PIL,
 				QCOM_SCM_CMD_PIL_CLEAR_PROTECT_MEM_SUBSYS_ID),
 				&desc);
+	return ret ? : le32_to_cpu(desc.ret[0]);
+}
+
+int __qcom_scm_set_resettype(struct device *dev, u32 reset_type)
+{
+	__le32 out;
+	__le32 in;
+	int ret;
+	struct scm_desc desc = {0};
+
+	if (!is_scm_armv8()) {
+		in = cpu_to_le32(reset_type);
+		ret = qcom_scm_call(dev, QCOM_SCM_SVC_BOOT,
+			    QCOM_SCM_SVC_RESETTYPE_CMD,
+			    &in, sizeof(in),
+			    &out, sizeof(out));
+	} else {
+		desc.args[0] = reset_type;
+		desc.arginfo = SCM_ARGS(1);
+		ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_BOOT,
+				QCOM_SCM_SVC_RESETTYPE_CMD), &desc);
+		out = desc.ret[0];
+	}
+	return ret ? : le32_to_cpu(out);
+}
+
+int __qcom_scm_get_smmustate(struct device *dev)
+{
+	__le32 out;
+	__le32 in;
+	int ret;
+	struct scm_desc desc = {0};
+	struct qcom_scm_cmd_ids *ids = dev_get_drvdata(dev);
+
+	if (!is_scm_armv8()) {
+		in = cpu_to_le32(-1);
+		ret = qcom_scm_call(dev, QCOM_SCM_SVC_BOOT,
+					ids->smmu_state_cmd_id, NULL, 0, &out,
+					sizeof(out));
+	} else {
+		desc.arginfo = SCM_ARGS(0);
+		ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_BOOT,
+							ids->smmu_state_cmd_id),
+							&desc);
+		out = desc.ret[0];
+	}
+	return ret ? -1 : le32_to_cpu(out);
+}
+
+int __qcom_scm_load_otp(struct device *dev, u32 peripheral)
+{
+	__le32 out;
+	__le32 in;
+	int ret;
+	struct scm_desc desc = {0};
+
+	if (!is_scm_armv8()) {
+		in = cpu_to_le32(peripheral);
+		ret = qcom_scm_call(dev, QCOM_SCM_SVC_OTP, QCOM_SCM_CMD_OTP,
+			    &in, sizeof(in),
+			    &out, sizeof(out));
+	} else {
+		desc.args[0] = peripheral;
+		desc.arginfo = SCM_ARGS(1);
+		ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_OTP,
+						  QCOM_SCM_CMD_OTP), &desc);
+
+		out = desc.ret[0];
+	}
+	return ret ? : le32_to_cpu(out);
+}
+
+int __qcom_scm_pil_cfg(struct device *dev, u32 peripheral, u32 arg)
+{
+	int ret;
+	struct scm_desc desc = {0};
+
+	desc.args[0] = peripheral;
+	desc.args[1] = arg;
+	desc.arginfo = SCM_ARGS(2);
+	ret = qcom_scm_call2(SCM_SIP_FNID(QCOM_SCM_SVC_XO_TCXO,
+					  QCOM_SCM_CMD_XO_TCXO), &desc);
+
 	return ret ? : le32_to_cpu(desc.ret[0]);
 }

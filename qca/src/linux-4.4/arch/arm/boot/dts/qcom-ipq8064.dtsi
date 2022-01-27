@@ -547,7 +547,7 @@
 		scm {
 			compatible = "qcom,scm-ipq806x";
 		};
-		qfprom {
+		qfprom_sec {
 			compatible = "qcom,qfprom-sec";
 			img-addr = <0x44000000>;
 			img-size = <0x600000>;

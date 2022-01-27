@@ -1,6 +1,6 @@
 --- a/hostapd/ctrl_iface.c
 +++ b/hostapd/ctrl_iface.c
-@@ -2823,6 +2823,25 @@ static int hostapd_ctrl_iface_signal_mon
+@@ -2822,6 +2822,25 @@ static int hostapd_ctrl_iface_signal_mon
  	return -1;
  }
  
@@ -26,7 +26,7 @@
  
  static int hostapd_ctrl_driver_flags(struct hostapd_iface *iface, char *buf,
  				     size_t buflen)
-@@ -3395,6 +3414,9 @@ static int hostapd_ctrl_iface_receive_pr
+@@ -3392,6 +3411,9 @@ static int hostapd_ctrl_iface_receive_pr
  	} else if (os_strncmp(buf, "SIGNAL_MONITOR", 14) == 0) {
  		if (hostapd_ctrl_iface_signal_monitor(hapd, buf + 14))
  			reply_len = -1;
@@ -38,7 +38,7 @@
  			hapd, buf + 15, reply, reply_size);
 --- a/hostapd/hostapd_cli.c
 +++ b/hostapd/hostapd_cli.c
-@@ -1511,6 +1511,12 @@ static int hostapd_cli_cmd_reload_wpa_ps
+@@ -1509,6 +1509,12 @@ static int hostapd_cli_cmd_reload_wpa_ps
  }
  
  
@@ -51,7 +51,7 @@
  struct hostapd_cli_cmd {
  	const char *cmd;
  	int (*handler)(struct wpa_ctrl *ctrl, int argc, char *argv[]);
-@@ -1686,6 +1692,9 @@ static const struct hostapd_cli_cmd host
+@@ -1682,6 +1688,9 @@ static const struct hostapd_cli_cmd host
  	  "<addr> = poll a STA to check connectivity with a QoS null frame" },
  	{ "signal_monitor", hostapd_cli_cmd_signal_monitor, NULL,
  	  "= set signal monitor parameters" },
@@ -63,7 +63,7 @@
  	{ "reload_wpa_psk", hostapd_cli_cmd_reload_wpa_psk, NULL,
 --- a/src/drivers/driver.h
 +++ b/src/drivers/driver.h
-@@ -4209,6 +4209,20 @@ struct wpa_driver_ops {
+@@ -4262,6 +4262,20 @@ struct wpa_driver_ops {
  	 */
  	int (*get_peer_inactive_time)(void *priv, const u8 *addr);
  
@@ -86,7 +86,7 @@
  	 * @priv: Private driver interface data
 --- a/src/drivers/driver_nl80211.c
 +++ b/src/drivers/driver_nl80211.c
-@@ -7849,6 +7849,29 @@ static int nl80211_signal_monitor(void *
+@@ -7919,6 +7919,29 @@ static int nl80211_signal_monitor(void *
  	return send_and_recv_msgs(drv, msg, NULL, NULL);
  }
  
@@ -116,7 +116,7 @@
  
  static int get_channel_width(struct nl_msg *msg, void *arg)
  {
-@@ -11108,6 +11131,7 @@ const struct wpa_driver_ops wpa_driver_n
+@@ -11201,6 +11224,7 @@ const struct wpa_driver_ops wpa_driver_n
  	.deinit_p2p_cli = wpa_driver_nl80211_deinit_p2p_cli,
  	.resume = wpa_driver_nl80211_resume,
  	.signal_monitor = nl80211_signal_monitor,
@@ -211,7 +211,7 @@
  
 --- a/src/drivers/nl80211_copy.h
 +++ b/src/drivers/nl80211_copy.h
-@@ -4567,6 +4567,17 @@ enum nl80211_ps_state {
+@@ -4626,6 +4626,17 @@ enum nl80211_ps_state {
   *	loss event
   * @NL80211_ATTR_CQM_RSSI_LEVEL: the RSSI value in dBm that triggered the
   *	RSSI threshold event.
@@ -229,7 +229,7 @@
   * @__NL80211_ATTR_CQM_AFTER_LAST: internal
   * @NL80211_ATTR_CQM_MAX: highest key attribute
   */
-@@ -4581,7 +4592,10 @@ enum nl80211_attr_cqm {
+@@ -4640,7 +4651,10 @@ enum nl80211_attr_cqm {
  	NL80211_ATTR_CQM_TXE_INTVL,
  	NL80211_ATTR_CQM_BEACON_LOSS_EVENT,
  	NL80211_ATTR_CQM_RSSI_LEVEL,
@@ -241,7 +241,7 @@
  	/* keep last */
  	__NL80211_ATTR_CQM_AFTER_LAST,
  	NL80211_ATTR_CQM_MAX = __NL80211_ATTR_CQM_AFTER_LAST - 1
-@@ -4595,13 +4609,17 @@ enum nl80211_attr_cqm {
+@@ -4654,13 +4668,17 @@ enum nl80211_attr_cqm {
   *      configured threshold
   * @NL80211_CQM_RSSI_BEACON_LOSS_EVENT: (reserved, never sent)
   */

@@ -78,6 +78,7 @@ define Package/nand-utils/install
 		$(PKG_INSTALL_DIR)/usr/sbin/{nandwrite,nanddump,nandtest} $(1)/usr/sbin/
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/mkfs.jffs2 $(1)/usr/sbin/
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/flash_eraseall $(1)/usr/sbin/
+	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/flash_erase $(1)/usr/sbin/
 endef
 
 

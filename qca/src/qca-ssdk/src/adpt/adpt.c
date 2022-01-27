@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -20,6 +20,10 @@
 #if defined(IN_SFP)
 #include "adpt_sfp.h"
 #endif
+#if defined(MP)
+#include "adpt_mp.h"
+#endif
+#include "hsl_phy.h"
 
 adpt_api_t *g_adpt_api[SW_MAX_NR_DEV] = {NULL};
 
@@ -32,7 +36,12 @@ adpt_api_t *adpt_api_ptr_get(a_uint32_t dev_id)
 
 	return g_adpt_api[dev_id];
 }
-
+#if defined (SCOMPHY)
+a_uint32_t adapt_scomphy_revision_get(a_uint32_t dev_id)
+{
+	return g_chip_ver[dev_id].chip_revision;
+}
+#endif
 #if defined(HPPE)
 a_uint32_t adpt_hppe_chip_revision_get(a_uint32_t dev_id)
 {
@@ -319,7 +328,7 @@ sw_error_t adpt_init(a_uint32_t dev_id, ssdk_init_cfg *cfg)
 
 	switch (cfg->chip_type)
 	{
-		#if defined(HPPE)
+#if defined(HPPE)
 		case CHIP_HPPE:
 			g_adpt_api[dev_id] = aos_mem_alloc(sizeof(adpt_api_t));
 			if(g_adpt_api[dev_id] == NULL)
@@ -430,13 +439,48 @@ sw_error_t adpt_init(a_uint32_t dev_id, ssdk_init_cfg *cfg)
 			rv = adpt_hppe_module_func_register(dev_id, FAL_MODULE_SFP);
 			SW_RTN_ON_ERROR(rv);
 
-#ifdef HAWKEYE_CHIP
 			/* uniphy */
 			rv = adpt_hppe_uniphy_init(dev_id);
 			SW_RTN_ON_ERROR(rv);
+
+			break;
+#endif
+#if defined (SCOMPHY)
+		case CHIP_SCOMPHY:
+			g_chip_ver[dev_id].chip_type = cfg->chip_type;
+			g_chip_ver[dev_id].chip_revision = cfg->phy_id;
+#if defined (MP)
+			if(cfg->phy_id == MP_GEPHY)
+			{
+				g_adpt_api[dev_id] = aos_mem_alloc(sizeof(adpt_api_t));
+				if(g_adpt_api[dev_id] == NULL)
+				{
+					SSDK_ERROR("malloc fail for adpt api\n");
+					return SW_FAIL;
+				}
+				aos_mem_zero(g_adpt_api[dev_id], sizeof(adpt_api_t));
+				rv = adpt_mp_intr_init(dev_id);
+				SW_RTN_ON_ERROR(rv);
+#if defined (IN_MIB)
+				rv = adpt_mp_mib_init(dev_id);
+				SW_RTN_ON_ERROR(rv);
+#endif
+#if defined (IN_PORTCONTROL)
+				rv = adpt_mp_portctrl_init(dev_id);
+				SW_RTN_ON_ERROR(rv);
+#endif
+#if defined (IN_UNIPHY)
+				rv = adpt_mp_uniphy_init(dev_id);
+				SW_RTN_ON_ERROR(rv);
+#endif
+#if defined (IN_LED)
+				rv = adpt_mp_led_init(dev_id);
+				SW_RTN_ON_ERROR(rv);
+#endif
+			}
 #endif
 			break;
-			#endif
+#endif
 		default:
 			break;
 	}

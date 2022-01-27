@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -441,6 +441,7 @@
 			qcom,shaping-enabled;
 			qcom,tun6rd-enabled;
 			qcom,tunipip6-enabled;
+			qcom,match-enabled;
 			qcom,wlanredirect-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 		};
@@ -481,6 +482,7 @@
 		};
 
 		gmac1: ethernet@37200000 {
+			status = "ok";
 			device_type = "network";
 			compatible = "qcom,nss-gmac";
 			reg = <0x37200000 0x200000>;
@@ -496,9 +498,15 @@
 			qcom,socver = <0>;
 			local-mac-address = [000000000000];
 			mdiobus = <&mdio0>;
+
+			fixed-link {
+				speed = <1000>;
+				full-duplex;
+			};
 		};
 
 		gmac2: ethernet@37400000 {
+			status = "ok";
 			device_type = "network";
 			compatible = "qcom,nss-gmac";
 			reg = <0x37400000 0x200000>;
@@ -514,6 +522,11 @@
 			qcom,socver = <0>;
 			local-mac-address = [000000000000];
 			mdiobus = <&mdio0>;
+
+			fixed-link {
+				speed = <1000>;
+				full-duplex;
+			};
 		};
 
 		crypto1: crypto@38000000 {

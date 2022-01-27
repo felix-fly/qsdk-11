@@ -19,7 +19,7 @@
 
 static inline void *__aos_mem_alloc(aos_size_t size)
 {
-    return (kmalloc(size, GFP_KERNEL));
+    return (kmalloc(size, GFP_KERNEL | __GFP_ZERO));
 }
 
 static inline void __aos_mem_free(void *buf)

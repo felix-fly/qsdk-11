@@ -371,8 +371,10 @@
 			qcom,shaping-enabled;
 			qcom,tun6rd-enabled;
 			qcom,tunipip6-enabled;
+			qcom,vxlan-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,wlanredirect-enabled;
+			qcom,mirror-enabled;
 		};
 
 		nss1: nss@40800000 {

@@ -92,12 +92,14 @@ ap-hk01-c2|\
 ap-hk01-c3|\
 ap-hk01-c4|\
 ap-hk01-c5|\
-ap-hk05|\
+ap-hk01-c6|\
 ap-hk06|\
 ap-hk07|\
-ap-hk08|\
 ap-hk09|\
-ap-hk10|\
+ap-hk10-c1|\
+ap-hk10-c2|\
+ap-hk11-c1|\
+ap-hk12|\
 ap-ac01|\
 ap-ac02|\
 ap-oak02|\
@@ -107,26 +109,59 @@ db-hk02)
 	ucidef_add_switch "switch0"
 	ucidef_set_interfaces_lan_wan "eth1 eth2 eth3 eth4 eth5" "eth0"
 	;;
+ap-hk14|\
 ap-ac03|\
 ap-ac04)
 	ucidef_add_switch "switch0"
 	ucidef_set_interfaces_lan_wan "eth1 eth2 eth3 eth4" "eth0"
 	;;
+ap-hk08|\
 ap-hk02)
 	ucidef_add_switch "switch0"
 	ucidef_set_interfaces_lan_wan "eth1 eth2" "eth0"
 	;;
 ap-cp01-c1|\
 ap-cp01-c2|\
+ap-cp01-c3|\
+ap-cp01-c4|\
+ap-cp01-c5|\
 db-cp01)
 	ucidef_add_switch "switch0"
 	ucidef_set_interfaces_lan_wan "eth1 eth2 eth3 eth4" "eth0"
 	;;
+ap-cp03-c1)
+       ucidef_add_switch "switch0"
+       ucidef_set_interfaces_lan_wan "eth1 eth2 eth3" "eth0"
+       ;;
 ap-cp02-c1|\
-ap-cp03-c1|\
-db-cp02)
+db-cp02 |\
+ap-mp02.1 |\
+db-mp02.1 |\
+ap-mp03.3 |\
+ap-mp03.3-c2 |\
+ap-mp03.3-c3 |\
+ap-mp03.3-c4 |\
+ap-mp03.3-c5 |\
+ap-mp03.4-c1 |\
+ap-mp03.4-c2 |\
+ap-mp03.5-c1 |\
+ap-mp03.5-c2 |\
+ap-mp03.6-c1 |\
+ap-mp03.6-c2 |\
+db-mp03.3 |\
+db-mp03.3-c2 |\
+tb-mp04)
 	ucidef_add_switch "switch0"
 	ucidef_set_interfaces_lan_wan "eth1" "eth0"
+	;;
+ap-mp03.1 |\
+ap-mp03.1-c2 |\
+ap-mp03.1-c3 |\
+db-mp03.1 |\
+db-mp03.1-c2)
+	ucidef_add_switch "switch0"
+	ucidef_set_interfaces_lan_wan "eth1" "eth0"
+	ucidef_add_switch "switch1" "1" "0"
 	;;
 *)
 	echo "Unsupported hardware. Network interfaces not intialized"

@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -15,6 +15,7 @@
  */
 
 #include "nss_tx_rx_common.h"
+#include "nss_gre_redir_mark_strings.h"
 #include "nss_gre_redir_mark_stats.h"
 #include "nss_gre_redir_mark_log.h"
 #define NSS_GRE_REDIR_MARK_TX_TIMEOUT 3000 /* 3 Seconds */
@@ -27,16 +28,6 @@ static struct {
 	struct completion complete;
 	int response;
 } nss_gre_redir_mark_pvt;
-
-/*
- * Spinlock to update GRE redir mark stats.
- */
-static DEFINE_SPINLOCK(nss_gre_redir_mark_stats_lock);
-
-/*
- * Global GRE redir mark stats structure.
- */
-static struct nss_gre_redir_mark_stats gre_mark_stats;
 
 /*
  * nss_gre_redir_mark_msg_sync_callback()
@@ -54,54 +45,6 @@ static void nss_gre_redir_mark_msg_sync_callback(void *app_data, struct nss_gre_
 }
 
 /*
- * nss_gre_redir_mark_stats_sync()
- *	Update GRE redir mark stats.
- */
-static void nss_gre_redir_mark_stats_sync(struct nss_ctx_instance *nss_ctx, int if_num, struct nss_gre_redir_mark_stats_sync_msg *ngss)
-{
-	struct net_device *dev;
-	dev = nss_cmn_get_interface_dev(nss_ctx, if_num);
-	if (!dev) {
-		nss_warning("%p: Unable to find net device for the interface %d\n", nss_ctx, if_num);
-		return;
-	}
-
-	if (if_num != NSS_GRE_REDIR_MARK_INTERFACE) {
-		nss_warning("%p: Unknown type for interface %d\n", nss_ctx, if_num);
-		return;
-	}
-
-	/*
-	 * Update the stats in exclusive mode to prevent the read from the process
-	 * context through debug fs.
-	 */
-	spin_lock_bh(&nss_gre_redir_mark_stats_lock);
-
-	/*
-	 * Update the common node stats
-	 */
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_TX_PKTS] += ngss->node_stats.tx_packets;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_TX_BYTES] += ngss->node_stats.tx_bytes;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_RX_PKTS] += ngss->node_stats.rx_packets;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_RX_BYTES] += ngss->node_stats.rx_bytes;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_RX_DROPS] += nss_cmn_rx_dropped_sum(&(ngss->node_stats));
-
-	/*
-	 * Update the GRE redir mark specific stats
-	 */
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_HLOS_MAGIC_FAILED] += ngss->hlos_magic_fail;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_INV_DST_IF_DROPS] += ngss->invalid_dst_drop;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_DST_IF_ENQUEUE] += ngss->dst_enqueue_success;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_DST_IF_ENQUEUE_DROPS] += ngss->dst_enqueue_drop;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_INV_APPID] += ngss->inv_appid;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_HEADROOM_UNAVAILABLE] += ngss->headroom_unavail;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_TX_COMPLETION_SUCCESS] += ngss->tx_completion_success;
-	gre_mark_stats.stats[NSS_GRE_REDIR_MARK_STATS_TX_COMPLETION_DROPS] += ngss->tx_completion_drop;
-
-	spin_unlock_bh(&nss_gre_redir_mark_stats_lock);
-}
-
-/*
  * nss_gre_redir_mark_handler()
  *	Handle NSS to HLOS messages for GRE redir mark
  */
@@ -116,12 +59,12 @@ static void nss_gre_redir_mark_handler(struct nss_ctx_instance *nss_ctx, struct 
 	 * Is this a valid request/response packet?
 	 */
 	if (ncm->type >= NSS_GRE_REDIR_MARK_MSG_MAX) {
-		nss_warning("%p: received invalid message %d for GRE redir mark interface", nss_ctx, ncm->type);
+		nss_warning("%px: received invalid message %d for GRE redir mark interface", nss_ctx, ncm->type);
 		return;
 	}
 
 	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_gre_redir_mark_msg)) {
-		nss_warning("%p: length of message is greater than required: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
+		nss_warning("%px: length of message is greater than required: %d", nss_ctx, nss_cmn_get_msg_len(ncm));
 		return;
 	}
 
@@ -137,6 +80,7 @@ static void nss_gre_redir_mark_handler(struct nss_ctx_instance *nss_ctx, struct 
 
 	if (ncm->type == NSS_GRE_REDIR_MARK_STATS_SYNC_MSG) {
 		nss_gre_redir_mark_stats_sync(nss_ctx, ncm->interface, &ngrm->msg.stats_sync);
+		nss_gre_redir_mark_stats_notify(nss_ctx, ncm->interface);
 	}
 
 	/*
@@ -145,7 +89,7 @@ static void nss_gre_redir_mark_handler(struct nss_ctx_instance *nss_ctx, struct 
 	 * interface.
 	 */
 	if (ncm->response == NSS_CMN_RESPONSE_NOTIFY) {
-		ncm->cb = (nss_ptr_t)nss_top_main.if_rx_msg_callback[ncm->interface];
+		ncm->cb = (nss_ptr_t)nss_core_get_msg_handler(nss_ctx, ncm->interface);
 		ncm->app_data = (nss_ptr_t)nss_ctx->subsys_dp_register[ncm->interface].ndev;
 	}
 
@@ -159,28 +103,6 @@ static void nss_gre_redir_mark_handler(struct nss_ctx_instance *nss_ctx, struct 
 
 	cb((void *)ncm->app_data, ncm);
 }
-
-/*
- * nss_gre_redir_mark_get_stats()
- *	Get gre_redir tunnel stats.
- */
-bool nss_gre_redir_mark_get_stats(void *stats_mem)
-{
-	struct nss_gre_redir_mark_stats *stats = (struct nss_gre_redir_mark_stats *)stats_mem;
-	if (!stats) {
-		nss_warning("No memory to copy GRE redir mark stats");
-		return false;
-	}
-
-	/*
-	 * Copy the GRE redir mark stats in the memory.
-	 */
-	spin_lock_bh(&nss_gre_redir_mark_stats_lock);
-	memcpy(stats, &gre_mark_stats, sizeof(struct nss_gre_redir_mark_stats));
-	spin_unlock_bh(&nss_gre_redir_mark_stats_lock);
-	return true;
-}
-EXPORT_SYMBOL(nss_gre_redir_mark_get_stats);
 
 /*
  * nss_gre_redir_mark_reg_cb()
@@ -202,7 +124,7 @@ nss_tx_status_t nss_gre_redir_mark_reg_cb(int ifnum,
 
         vap_type = nss_dynamic_interface_get_type(nss_ctx, ngrcm->nss_if_num);
         if ((vap_type != NSS_DYNAMIC_INTERFACE_TYPE_VAP)) {
-                nss_warning("%p: Incorrect type for vap interface type = %u", nss_ctx, vap_type);
+                nss_warning("%px: Incorrect type for vap interface type = %u", nss_ctx, vap_type);
                 return NSS_TX_FAILURE_BAD_PARAM;
         }
 
@@ -214,7 +136,7 @@ nss_tx_status_t nss_gre_redir_mark_reg_cb(int ifnum,
 
         status = nss_gre_redir_mark_tx_msg_sync(nss_ctx, &config);
         if (status != NSS_TX_SUCCESS) {
-                nss_warning("%p: Unable to register callback from GRE redir mark interface %d\n", nss_ctx, ifnum);
+                nss_warning("%px: Unable to register callback from GRE redir mark interface %d\n", nss_ctx, ifnum);
         }
 
         return status;
@@ -238,12 +160,12 @@ nss_tx_status_t nss_gre_redir_mark_tx_msg(struct nss_ctx_instance *nss_ctx, stru
 	 * interface should be of type of redir mark
 	 */
 	if (ncm->interface != NSS_GRE_REDIR_MARK_INTERFACE) {
-		nss_warning("%p: tx request for another interface: %d", nss_ctx, ncm->interface);
+		nss_warning("%px: tx request for another interface: %d", nss_ctx, ncm->interface);
 		return NSS_TX_FAILURE;
 	}
 
 	if (ncm->type >= NSS_GRE_REDIR_MARK_MSG_MAX) {
-		nss_warning("%p: message type out of range: %d", nss_ctx, ncm->type);
+		nss_warning("%px: message type out of range: %d", nss_ctx, ncm->type);
 		return NSS_TX_FAILURE;
 	}
 
@@ -268,14 +190,14 @@ nss_tx_status_t nss_gre_redir_mark_tx_msg_sync(struct nss_ctx_instance *nss_ctx,
 	ngrm->cm.app_data = (nss_ptr_t)NULL;
 	status = nss_gre_redir_mark_tx_msg(nss_ctx, ngrm);
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: GRE redir mark tx_msg failed\n", nss_ctx);
+		nss_warning("%px: GRE redir mark tx_msg failed\n", nss_ctx);
 		up(&nss_gre_redir_mark_pvt.sem);
 		return status;
 	}
 
 	ret = wait_for_completion_timeout(&nss_gre_redir_mark_pvt.complete, msecs_to_jiffies(NSS_GRE_REDIR_MARK_TX_TIMEOUT));
 	if (!ret) {
-		nss_warning("%p: GRE redir mark message tx sync failed due to timeout\n", nss_ctx);
+		nss_warning("%px: GRE redir mark message tx sync failed due to timeout\n", nss_ctx);
 		nss_gre_redir_mark_pvt.response = NSS_TX_FAILURE;
 	}
 
@@ -291,13 +213,13 @@ EXPORT_SYMBOL(nss_gre_redir_mark_tx_msg_sync);
  */
 nss_tx_status_t nss_gre_redir_mark_tx_buf(struct nss_ctx_instance *nss_ctx, struct sk_buff *os_buf, uint32_t if_num)
 {
-	nss_trace("%p: GRE redir mark If Tx packet, interface id:%d, data=%p", nss_ctx, if_num, os_buf->data);
+	nss_trace("%px: GRE redir mark If Tx packet, interface id:%d, data=%px", nss_ctx, if_num, os_buf->data);
 
 	/*
 	 * We expect Tx packets to the GRE redir mark interface only.
 	 */
 	if (if_num != NSS_GRE_REDIR_MARK_INTERFACE) {
-		nss_warning("%p: Invalid interface:%d for GRE redir mark packets\n", nss_ctx, if_num);
+		nss_warning("%px: Invalid interface:%d for GRE redir mark packets\n", nss_ctx, if_num);
 		return NSS_TX_FAILURE_BAD_PARAM;
 	}
 
@@ -323,6 +245,7 @@ bool nss_gre_redir_mark_unregister_if(uint32_t if_num)
 {
 	struct nss_ctx_instance *nss_ctx __maybe_unused = (struct nss_ctx_instance *)&nss_top_main.nss[nss_top_main.gre_redir_handler_id];
 	struct net_device *dev;
+	uint32_t status;
 
 	nss_assert(nss_ctx);
 	nss_assert(if_num == NSS_GRE_REDIR_MARK_INTERFACE);
@@ -332,7 +255,14 @@ bool nss_gre_redir_mark_unregister_if(uint32_t if_num)
 	BUG_ON(!dev);
 
 	nss_core_unregister_subsys_dp(nss_ctx, if_num);
-	nss_top_main.if_rx_msg_callback[if_num] = NULL;
+	status = nss_core_unregister_msg_handler(nss_ctx, if_num);
+	if (status != NSS_CORE_STATUS_SUCCESS) {
+		nss_warning("%px: Not able to unregister handler for gre_redir_mark interface %d with NSS core\n",
+				nss_ctx, if_num);
+		return false;
+	}
+
+	nss_ctx->nss_rx_interface_handlers[if_num].msg_cb = NULL;
 	return true;
 }
 EXPORT_SYMBOL(nss_gre_redir_mark_unregister_if);
@@ -346,6 +276,7 @@ struct nss_ctx_instance *nss_gre_redir_mark_register_if(struct net_device *netde
 		uint32_t features)
 {
 	struct nss_ctx_instance *nss_ctx = (struct nss_ctx_instance *)&nss_top_main.nss[nss_top_main.gre_redir_handler_id];
+	uint32_t status;
 
 	nss_assert(nss_ctx);
 	nss_assert(if_num == NSS_GRE_REDIR_MARK_INTERFACE);
@@ -354,7 +285,13 @@ struct nss_ctx_instance *nss_gre_redir_mark_register_if(struct net_device *netde
 	 * Registering the interface with network data path.
 	 */
 	nss_core_register_subsys_dp(nss_ctx, if_num, cb_func_data, NULL, NULL, netdev, features);
-	nss_top_main.if_rx_msg_callback[if_num] = cb_func_msg;
+	status = nss_core_register_msg_handler(nss_ctx, NSS_GRE_REDIR_MARK_INTERFACE, cb_func_msg);
+	if (status != NSS_CORE_STATUS_SUCCESS) {
+		nss_warning("%px: Not able to register handler for gre_redir_mark interface %d with NSS core\n",
+				nss_ctx, if_num);
+		return NULL;
+	}
+
 	return nss_ctx;
 }
 EXPORT_SYMBOL(nss_gre_redir_mark_register_if);
@@ -385,10 +322,11 @@ void nss_gre_redir_mark_register_handler(void)
 	 */
 	gre_redir_mark_dentry = nss_gre_redir_mark_stats_dentry_create();
 	if (!gre_redir_mark_dentry) {
-		nss_warning("%p: Not able to create debugfs entry\n", nss_ctx);
+		nss_warning("%px: Not able to create debugfs entry\n", nss_ctx);
 		return;
 	}
 
+	nss_gre_redir_mark_strings_dentry_create();
 	sema_init(&nss_gre_redir_mark_pvt.sem, 1);
 	init_completion(&nss_gre_redir_mark_pvt.complete);
 
@@ -397,7 +335,7 @@ void nss_gre_redir_mark_register_handler(void)
 	if (status != NSS_CORE_STATUS_SUCCESS) {
 		debugfs_remove_recursive(gre_redir_mark_dentry);
 		gre_redir_mark_dentry = NULL;
-		nss_warning("%p: Not able to register handler for GRE redir mark with NSS core\n", nss_ctx);
+		nss_warning("%px: Not able to register handler for GRE redir mark with NSS core\n", nss_ctx);
 		return;
 	}
 }

@@ -57,6 +57,9 @@ define Package/pm-utils/install
 	$(INSTALL_DIR) $(1)/etc/pm/power.d
 	$(INSTALL_BIN) ./files/ipq-power-save.sh $(1)/etc/pm/power.d
 	$(INSTALL_BIN) ./files/cold_boot.sh $(1)/etc/pm/power.d
+
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/powerctl $(1)/etc/init.d
 endef
 
 $(eval $(call BuildPackage,pm-utils))

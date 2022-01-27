@@ -266,7 +266,7 @@ void skbuff_debugobj_print_skb_list(const struct sk_buff *skb_list,
 				    const char *list_title, int cpu)
 {
 	int count;
-	const struct sk_buff *skb_i;
+	struct sk_buff *skb_i = (struct sk_buff *)skb_list;
 	u32 sum_i, sum_now;
 	int obj_state;
 
@@ -275,12 +275,11 @@ void skbuff_debugobj_print_skb_list(const struct sk_buff *skb_list,
 		put_cpu();
 	}
 	pr_emerg("skb_debug: start skb list '%s' [CPU#%d]\n", list_title, cpu);
-	skb_i = skb_list;
 	count = 0;
 	if (skb_list) {
 		do {
 			obj_state =
-				debug_object_get_state((struct sk_buff *)skb_i);
+				debug_object_get_state(skb_i);
 			if (obj_state < ODEBUG_STATE_NOTAVAILABLE) {
 				sum_i = skb_i->sum;
 				sum_now = skbuff_debugobj_sum(skb_i);

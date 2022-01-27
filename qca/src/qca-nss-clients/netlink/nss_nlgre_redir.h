@@ -1,5 +1,5 @@
 /*
- **************************************************************************
+ ***************************************************************************
  * Copyright (c) 2014-2015,2019, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -14,37 +14,41 @@
  **************************************************************************
  */
 
-/*
- * nss_nlgre_redir.h
- *	NSS Netlink gre_redir API definitions
- */
-#ifndef __NSS_NLGRE_REDIR_H
-#define __NSS_NLGRE_REDIR_H
+#define NSS_NLGRE_REDIR_MODE_MAX_SZ 16		/**< Max size of mode value */
 
 /*
- * nss_nlgre_redir_get_ifnum()
- * 	Get the interface number corresponding to netdev
+ * nss_nlgre_redir_tun_type
+ * 	Different tunnel types supported in gre_redir
  */
-int nss_nlgre_redir_get_ifnum(struct net_device* dev, enum nss_dynamic_interface_type type);
+enum nss_nlgre_redir_tun_type {
+	NSS_NLGRE_REDIR_TUN_TYPE_UNKNOWN,		/**< Unknown tunnel type */
+	NSS_NLGRE_REDIR_TUN_TYPE_TUN,			/**< Raw mode 802.11 frames traffic*/
+	NSS_NLGRE_REDIR_TUN_TYPE_DTUN,			/**< For 802.3 frames traffic */
+	NSS_NLGRE_REDIR_TUN_TYPE_SPLIT,			/**< For split mode */
+	NSS_NLGRE_REDIR_TUN_TYPE_MAX			/**< Max number of tun type supported */
+};
 
 /*
- * nss_nlgre_redir_init()
- * 	To initialize the gre_redir module
+ * nss_nlgre_redir_map_interface()
+ * 	Interface map message.
  */
-bool nss_nlgre_redir_init(void);
+int nss_nlgre_redir_map_interface(struct nss_nlgre_redir_map *map_params);
 
 /*
- * nss_nlgre_redir_exit()
- * 	Exit the gre_redir module
+ * nss_nlgre_redir_set_next_hop()
+ * 	Sets next hop as gre-redir for wifi.
  */
-bool nss_nlgre_redir_exit(void);
+int nss_nlgre_redir_set_next_hop(struct nss_nlgre_redir_set_next *setnext_params);
 
-#if defined(CONFIG_NSS_NLGRE_REDIR)
-#define NSS_NLGRE_REDIR_INIT nss_nlgre_redir_init
-#define NSS_NLGRE_REDIR_EXIT nss_nlgre_redir_exit
-#else
-#define NSS_NLGRE_REDIR_INIT 0
-#define NSS_NLGRE_REDIR_EXIT 0
-#endif /* !CONFIG_NSS_NLGRE_REDIR */
+/*
+ * nss_nlgre_redir_create_tun()
+ * 	Unregisters and deallocs dynamic interfaces.
+ */
+int nss_nlgre_redir_create_tun(struct nss_nlgre_redir_create_tun *create_params);
 
-#endif /* __NSS_NLGRE_REDIR_H */
+/*
+ * nss_nlgre_redir_destroy_tun()
+ * 	Destroy tunnel in tunnel mode.
+ */
+int nss_nlgre_redir_destroy_tun(struct net_device *dev);
+

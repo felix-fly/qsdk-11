@@ -146,7 +146,7 @@ proto_map_setup() {
 	  else
 	    network_get_device ifname "lan"
 	    for portset in $(eval "echo \$RULE_${k}_PORTSETS"); do
-              for proto in icmp tcp udp; do
+              for proto in icmp tcp udp gre; do
 	        json_add_object ""
 	          json_add_string type nat
 	          json_add_string target SNAT
@@ -210,7 +210,7 @@ proto_map_setup() {
 
 proto_map_teardown() {
 	local cfg="$1"
-	ifdown "${cfg}"
+
 	echo 0 > /sys/module/nf_nat_ftp/parameters/psid
 	echo 0 > /sys/module/nf_nat_ftp/parameters/psid_len
 	echo 0 > /sys/module/nf_nat_ftp/parameters/offset

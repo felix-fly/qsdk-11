@@ -364,7 +364,9 @@
 			qcom,pptp-enabled;
 			qcom,tunipip6-enabled;
 			qcom,shaping-enabled;
+			qcom,vxlan-enabled;
 			qcom,wlan-dataplane-offload-enabled;
+			qcom,mirror-enabled;
 		};
 
 		nss1: nss@40800000 {

@@ -218,6 +218,20 @@ config CRYPTO_TEST
 	help
 	  Quick & dirty crypto test module.
 
+config CRYPTO_NO_ZERO_LEN_HASH
+	bool "Disable 0-data lenght hash test cases"
+	default y
+	depends on CRYPTO_TEST
+	help
+	  Do not support 0-len hash test cases
+
+config CRYPTO_DISABLE_AES192_TEST
+	bool "Disable testcases with 192 key length"
+	default y
+	depends on CRYPTO_TEST
+	help
+	  Disable testcases with 192 key length
+
 config CRYPTO_ABLK_HELPER
 	tristate
 	select CRYPTO_CRYPTD

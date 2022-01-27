@@ -39,10 +39,13 @@ else
   include toolchain/Makefile
 
 $(toolchain/stamp-install): $(tools/stamp-install)
-$(target/stamp-compile): $(toolchain/stamp-install) $(tools/stamp-install) $(BUILD_DIR)/.prepared
+$(target/stamp-compile): $(toolchain/stamp-install) $(tools/stamp-install) $(BUILD_DIR)/.prepared compile_kernel-headers
 $(package/stamp-compile): $(target/stamp-compile) $(package/stamp-cleanup)
 $(package/stamp-install): $(package/stamp-compile)
 $(target/stamp-install): $(package/stamp-compile) $(package/stamp-install)
+
+compile_kernel-headers: $(tools/stamp-install) $(toolchain/stamp-install)
+	make toolchain/kernel-headers/compile
 
 printdb:
 	@true
@@ -58,6 +61,7 @@ endif
 
 clean: FORCE clean_kernel
 	 rm -rf $(BUILD_DIR) $(STAGING_DIR) $(BIN_DIR) $(BUILD_LOG_DIR)
+	 make toolchain/kernel-headers/clean
 
 dirclean: clean
 	rm -rf $(STAGING_DIR_HOST) $(TOOLCHAIN_DIR) $(BUILD_DIR_HOST) $(BUILD_DIR_TOOLCHAIN)

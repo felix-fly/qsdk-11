@@ -84,6 +84,8 @@ struct netns_xfrm {
 	struct work_struct	flow_cache_gc_work;
 	struct work_struct	flow_cache_flush_work;
 	struct mutex		flow_flush_sem;
+	spinlock_t xfrm_event_lock;
+	struct list_head event_notifier_list;
 };
 
 #endif

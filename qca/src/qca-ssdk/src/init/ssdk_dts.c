@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -17,6 +17,7 @@
 #include <linux/of.h>
 #include <linux/of_net.h>
 #include <linux/of_mdio.h>
+#include <linux/of_gpio.h>
 #endif
 #include <linux/etherdevice.h>
 #include <linux/clk.h>
@@ -27,26 +28,13 @@
 #include "hsl_phy.h"
 
 static ssdk_dt_global_t ssdk_dt_global = {0};
-
+#ifdef HPPE
+#ifdef IN_QOS
 a_uint8_t ssdk_tm_tick_mode_get(a_uint32_t dev_id)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
 	return cfg->tm_tick_mode;
-}
-
-a_uint8_t ssdk_bm_tick_mode_get(a_uint32_t dev_id)
-{
-	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
-
-	return cfg->bm_tick_mode;
-}
-
-a_uint16_t ssdk_ucast_queue_start_get(a_uint32_t dev_id, a_uint32_t port)
-{
-	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
-
-	return cfg->scheduler_cfg.pool[port].ucastq_start;
 }
 
 ssdk_dt_scheduler_cfg* ssdk_bootup_shceduler_cfg_get(a_uint32_t dev_id)
@@ -55,7 +43,24 @@ ssdk_dt_scheduler_cfg* ssdk_bootup_shceduler_cfg_get(a_uint32_t dev_id)
 
 	return &cfg->scheduler_cfg;
 }
+#endif
+#endif
+#ifdef IN_BM
+a_uint8_t ssdk_bm_tick_mode_get(a_uint32_t dev_id)
+{
+	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
+	return cfg->bm_tick_mode;
+}
+#endif
+#ifdef IN_QM
+a_uint16_t ssdk_ucast_queue_start_get(a_uint32_t dev_id, a_uint32_t port)
+{
+	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
+
+	return cfg->scheduler_cfg.pool[port].ucastq_start;
+}
+#endif
 a_uint32_t ssdk_intf_mac_num_get(void)
 {
 	return ssdk_dt_global.num_intf_mac;
@@ -120,6 +125,22 @@ a_uint32_t ssdk_wan_bmp_get(a_uint32_t dev_id)
 	return cfg->port_cfg.wan_bmp;
 }
 
+sw_error_t ssdk_lan_bmp_set(a_uint32_t dev_id, a_uint32_t lan_bmp)
+{
+	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
+	cfg->port_cfg.lan_bmp = lan_bmp;
+
+	return SW_OK;
+}
+
+sw_error_t ssdk_wan_bmp_set(a_uint32_t dev_id, a_uint32_t wan_bmp)
+{
+	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
+	cfg->port_cfg.wan_bmp = wan_bmp;
+
+	return SW_OK;
+}
+
 a_uint32_t ssdk_inner_bmp_get(a_uint32_t dev_id)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
@@ -129,9 +150,39 @@ a_uint32_t ssdk_inner_bmp_get(a_uint32_t dev_id)
 
 ssdk_port_phyinfo* ssdk_port_phyinfo_get(a_uint32_t dev_id, a_uint32_t port_id)
 {
-	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
+	a_uint32_t i;
+	ssdk_port_phyinfo *phyinfo_tmp = NULL;
+	ssdk_dt_cfg *cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
-	return &cfg->port_phyinfo[port_id-1];
+	for (i = 0; i < cfg->phyinfo_num; i++) {
+		if (port_id == cfg->port_phyinfo[i].port_id) {
+			phyinfo_tmp = &cfg->port_phyinfo[i];
+			break;
+		} else if (!(cfg->port_phyinfo[i].phy_features & PHY_F_INIT) &&
+				phyinfo_tmp == NULL) {
+			phyinfo_tmp = &cfg->port_phyinfo[i];
+		}
+	}
+
+	return phyinfo_tmp;
+}
+
+a_bool_t ssdk_port_feature_get(a_uint32_t dev_id, a_uint32_t port_id, phy_features_t feature)
+{
+	ssdk_port_phyinfo *phyinfo = ssdk_port_phyinfo_get(dev_id, port_id);
+	if (phyinfo && (phyinfo->phy_features & feature)) {
+		return A_TRUE;
+	}
+	return A_FALSE;
+}
+
+a_uint32_t ssdk_port_force_speed_get(a_uint32_t dev_id, a_uint32_t port_id)
+{
+	ssdk_port_phyinfo *phyinfo = ssdk_port_phyinfo_get(dev_id, port_id);
+	if (phyinfo && (phyinfo->phy_features & PHY_F_FORCE)) {
+		return phyinfo->port_speed;
+	}
+	return FAL_SPEED_BUTT;
 }
 
 struct mii_bus *
@@ -141,7 +192,8 @@ ssdk_dts_miibus_get(a_uint32_t dev_id, a_uint32_t phy_addr)
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
 	for (i = 0; i < cfg->phyinfo_num; i++) {
-		if (phy_addr == cfg->port_phyinfo[i].phy_addr)
+		if (phy_addr == cfg->port_phyinfo[i].phy_addr ||
+			phy_addr == cfg->port_phyinfo[i].phy_addr+1)
 			return cfg->port_phyinfo[i].miibus;
 	}
 
@@ -154,21 +206,22 @@ hsl_reg_mode ssdk_switch_reg_access_mode_get(a_uint32_t dev_id)
 
 	return cfg->switch_reg_access_mode;
 }
-
+#ifdef IN_UNIPHY
 hsl_reg_mode ssdk_uniphy_reg_access_mode_get(a_uint32_t dev_id)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
 	return cfg->uniphy_reg_access_mode;
 }
-
+#endif
+#ifdef DESS
 hsl_reg_mode ssdk_psgmii_reg_access_mode_get(a_uint32_t dev_id)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
 
 	return cfg->psgmii_reg_access_mode;
 }
-
+#endif
 void ssdk_switch_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
@@ -176,7 +229,7 @@ void ssdk_switch_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 	info->base_addr = cfg->switchreg_base_addr;
 	info->size = cfg->switchreg_size;
 }
-
+#ifdef DESS
 void ssdk_psgmii_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
@@ -184,7 +237,8 @@ void ssdk_psgmii_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 	info->base_addr = cfg->psgmiireg_base_addr;
 	info->size = cfg->psgmiireg_size;
 }
-
+#endif
+#ifdef IN_UNIPHY
 void ssdk_uniphy_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
@@ -192,7 +246,7 @@ void ssdk_uniphy_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info)
 	info->base_addr = cfg->uniphyreg_base_addr;
 	info->size = cfg->uniphyreg_size;
 }
-
+#endif
 a_bool_t ssdk_ess_switch_flag_get(a_uint32_t dev_id)
 {
 	ssdk_dt_cfg* cfg = ssdk_dt_global.ssdk_dt_switch_nodes[dev_id];
@@ -263,7 +317,7 @@ static void ssdk_dt_parse_mac_mode(a_uint32_t dev_id,
 
 	return;
 }
-
+#ifdef IN_UNIPHY
 static void ssdk_dt_parse_uniphy(a_uint32_t dev_id)
 {
 	struct device_node *uniphy_node = NULL;
@@ -296,7 +350,9 @@ static void ssdk_dt_parse_uniphy(a_uint32_t dev_id)
 
 	return;
 }
-
+#endif
+#ifdef HPPE
+#ifdef IN_QOS
 static void ssdk_dt_parse_l1_scheduler_cfg(
 	struct device_node *port_node,
 	a_uint32_t port_id, a_uint32_t dev_id)
@@ -499,16 +555,23 @@ static void ssdk_dt_parse_scheduler_cfg(a_uint32_t dev_id, struct device_node *s
 		ssdk_dt_parse_l0_scheduler_cfg(child, port_id, dev_id);
 	}
 }
-
-static sw_error_t ssdk_dt_parse_phy_info(struct device_node *switch_node, a_uint32_t dev_id)
+#endif
+#endif
+static sw_error_t ssdk_dt_parse_phy_info(struct device_node *switch_node, a_uint32_t dev_id,
+		ssdk_init_cfg *cfg)
 {
 	struct device_node *phy_info_node, *port_node;
+
 	ssdk_port_phyinfo *port_phyinfo;
-	a_uint32_t port_id, phy_addr, phy_i2c_addr;
-	a_bool_t phy_c45, phy_combo, phy_i2c;
-	const char *mac_type = NULL;
+	a_uint8_t forced_duplex;
+	a_uint32_t port_id, phy_addr, phy_i2c_addr, forced_speed, len;
+	const __be32 *paddr;
+	a_bool_t phy_c45, phy_combo, phy_i2c, phy_forced;
+	const char *mac_type = NULL, *media_type = NULL;
 	sw_error_t rv = SW_OK;
 	struct device_node *mdio_node;
+	int phy_reset_gpio = 0;
+	phy_dac_t phy_dac = {0};
 
 	phy_info_node = of_get_child_by_name(switch_node, "qcom,port_phyinfo");
 	if (!phy_info_node) {
@@ -517,17 +580,39 @@ static sw_error_t ssdk_dt_parse_phy_info(struct device_node *switch_node, a_uint
 	}
 
 	for_each_available_child_of_node(phy_info_node, port_node) {
-		if (of_property_read_u32(port_node, "port_id", &port_id) ||
-				of_property_read_u32(port_node, "phy_address", &phy_addr))
+		if (of_property_read_u32(port_node, "port_id", &port_id))
 			return SW_BAD_VALUE;
+
+		/* initialize phy_addr in case of undefined dts field */
+		phy_addr = 0xff;
+		of_property_read_u32(port_node, "phy_address", &phy_addr);
+
+		if (!cfg->port_cfg.wan_bmp) {
+			cfg->port_cfg.wan_bmp = BIT(port_id);
+		} else {
+			cfg->port_cfg.lan_bmp |= BIT(port_id);
+		}
+
+		if (!of_property_read_u32(port_node, "forced-speed", &forced_speed) &&
+			!of_property_read_u8(port_node, "forced-duplex", &forced_duplex)) {
+			phy_forced = A_TRUE;
+		} else {
+			phy_forced = A_FALSE;
+		}
+		paddr = of_get_property(port_node, "phy_dac", &len);
+		if(paddr)
+		{
+			phy_dac.mdac = be32_to_cpup(paddr);
+			phy_dac.edac = be32_to_cpup(paddr+1);
+			hsl_port_phy_dac_set(dev_id, port_id, phy_dac);
+		}
 
 		phy_c45 = of_property_read_bool(port_node,
 				"ethernet-phy-ieee802.3-c45");
 		phy_combo = of_property_read_bool(port_node,
 				"ethernet-phy-combo");
 		mdio_node = of_parse_phandle(port_node, "mdiobus", 0);
-		phy_i2c = of_property_read_bool(port_node,
-				"phy-i2c-mode");
+		phy_i2c = of_property_read_bool(port_node, "phy-i2c-mode");
 
 		if (phy_i2c) {
 			SSDK_INFO("[PORT %d] phy-i2c-mode\n", port_id);
@@ -564,6 +649,12 @@ static sw_error_t ssdk_dt_parse_phy_info(struct device_node *switch_node, a_uint
 				port_phyinfo->phy_features |= PHY_F_I2C;
 			}
 
+			if (phy_forced) {
+				port_phyinfo->phy_features |= PHY_F_FORCE;
+				port_phyinfo->port_speed = forced_speed;
+				port_phyinfo->port_duplex = forced_duplex;
+			}
+
 			if (!of_property_read_string(port_node, "port_mac_sel", &mac_type))
 			{
 				SSDK_INFO("[PORT %d] port_mac_sel = %s\n", port_id, mac_type);
@@ -575,15 +666,36 @@ static sw_error_t ssdk_dt_parse_phy_info(struct device_node *switch_node, a_uint
 				}
 			}
 
+			if (!of_property_read_string(port_node, "media-type", &media_type)) {
+				if (!strncmp("sfp", media_type, strlen(media_type))) {
+					port_phyinfo->phy_features |= PHY_F_SFP;
+					SSDK_INFO("[PORT %d] media type is %s\n", port_id, media_type);
+				}
+			}
+
+			port_phyinfo->phy_features |= PHY_F_INIT;
+
 			if (mdio_node)
+			{
 				port_phyinfo->miibus = of_mdio_find_bus(mdio_node);
+				phy_reset_gpio = of_get_named_gpio(mdio_node, "phy-reset-gpio",
+					SSDK_PHY_RESET_GPIO_INDEX);
+				if(phy_reset_gpio > 0)
+				{
+					SSDK_INFO("port%d's phy-reset-gpio is GPIO%d\n", port_id,
+						phy_reset_gpio);
+					hsl_port_phy_reset_gpio_set(dev_id, port_id,
+						(a_uint32_t)phy_reset_gpio);
+				}
+			}
 		}
 	}
 
 	return rv;
 }
 
-static void ssdk_dt_parse_mdio(a_uint32_t dev_id, struct device_node *switch_node)
+static void ssdk_dt_parse_mdio(a_uint32_t dev_id, struct device_node *switch_node,
+		ssdk_init_cfg *cfg)
 {
 	struct device_node *mdio_node = NULL;
 	struct device_node *child = NULL;
@@ -593,7 +705,7 @@ static void ssdk_dt_parse_mdio(a_uint32_t dev_id, struct device_node *switch_nod
 	const __be32 *c45_phy;
 
 	/* prefer to get phy info from ess-switch node */
-	if (SW_OK == ssdk_dt_parse_phy_info(switch_node, dev_id))
+	if (SW_OK == ssdk_dt_parse_phy_info(switch_node, dev_id, cfg))
 		return;
 
 	mdio_node = of_find_node_by_name(NULL, "mdio");
@@ -623,6 +735,14 @@ static void ssdk_dt_parse_mdio(a_uint32_t dev_id, struct device_node *switch_nod
 				if (c45_phy) {
 					port_phyinfo->phy_features |= PHY_F_CLAUSE45;
 				}
+
+				port_phyinfo->phy_features |= PHY_F_INIT;
+			}
+
+			if (!cfg->port_cfg.wan_bmp) {
+				cfg->port_cfg.wan_bmp = BIT(i);
+			} else {
+				cfg->port_cfg.lan_bmp |= BIT(i);
 			}
 
 			i++;
@@ -642,8 +762,10 @@ static void ssdk_dt_parse_port_bmp(a_uint32_t dev_id,
 	if (of_property_read_u32(switch_node, "switch_cpu_bmp", &cfg->port_cfg.cpu_bmp)
 		|| of_property_read_u32(switch_node, "switch_lan_bmp", &cfg->port_cfg.lan_bmp)
 		|| of_property_read_u32(switch_node, "switch_wan_bmp", &cfg->port_cfg.wan_bmp)) {
-		SSDK_ERROR("port_bmp doesn't exist!\n");
-		return;
+		SSDK_INFO("port_bmp doesn't exist!\n");
+		/*
+		 * the bmp maybe initialized already, so just keep ongoing.
+		 */
 	}
 
 	if (!of_property_read_u32(switch_node, "switch_inner_bmp", &cfg->port_cfg.inner_bmp)) {
@@ -660,7 +782,7 @@ static void ssdk_dt_parse_port_bmp(a_uint32_t dev_id,
 
 	return;
 }
-
+#ifdef HPPE
 static void ssdk_dt_parse_intf_mac(void)
 {
 	struct device_node *dp_node = NULL;
@@ -675,7 +797,11 @@ static void ssdk_dt_parse_intf_mac(void)
 			continue;
 		}
 		maddr = (a_uint8_t *)of_get_mac_address(dp_node);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		if (maddr && is_valid_ether_addr(maddr)) {
+#else
+		if (!IS_ERR(maddr) && is_valid_ether_addr(maddr)) {
+#endif
 			ssdk_dt_global.num_intf_mac++;
 			ether_addr_copy(ssdk_dt_global.intf_mac[dp-1].uc, maddr);
 			SSDK_INFO("%s MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -685,7 +811,8 @@ static void ssdk_dt_parse_intf_mac(void)
 	}
 	return;
 }
-
+#endif
+#ifdef DESS
 static void ssdk_dt_parse_psgmii(ssdk_dt_cfg *ssdk_dt_priv)
 {
 
@@ -720,7 +847,7 @@ static void ssdk_dt_parse_psgmii(ssdk_dt_cfg *ssdk_dt_priv)
 
 	return;
 }
-
+#endif
 static sw_error_t ssdk_dt_parse_access_mode(struct device_node *switch_node,
 		ssdk_dt_cfg *ssdk_dt_priv)
 {
@@ -757,7 +884,8 @@ static sw_error_t ssdk_dt_parse_access_mode(struct device_node *switch_node,
 	return SW_OK;
 
 }
-
+#if (defined(DESS) || defined(MP))
+#ifdef IN_LED
 static void ssdk_dt_parse_led(struct device_node *switch_node,
 		ssdk_init_cfg *cfg)
 {
@@ -769,8 +897,10 @@ static void ssdk_dt_parse_led(struct device_node *switch_node,
 	for_each_available_child_of_node(switch_node, child) {
 
 		led_source = of_get_property(child, "source", &len);
-		if (led_source)
-			cfg->led_source_cfg[i].led_source_id = be32_to_cpup(led_source);
+		if (!led_source) {
+			continue;
+		}
+		cfg->led_source_cfg[i].led_source_id = be32_to_cpup(led_source);
 		led_number = of_get_property(child, "led", &len);
 		if (led_number)
 			cfg->led_source_cfg[i].led_num = be32_to_cpup(led_number);
@@ -789,8 +919,10 @@ static void ssdk_dt_parse_led(struct device_node *switch_node,
 			cfg->led_source_cfg[i].led_pattern.map = LED_MAP_10M_SPEED;
 			if (!strcmp(led_str, "100M"))
 			cfg->led_source_cfg[i].led_pattern.map = LED_MAP_100M_SPEED;
-			if (!strcmp(led_str, "100M"))
+			if (!strcmp(led_str, "1000M"))
 			cfg->led_source_cfg[i].led_pattern.map = LED_MAP_1000M_SPEED;
+			if (!strcmp(led_str, "2500M"))
+			cfg->led_source_cfg[i].led_pattern.map = LED_MAP_2500M_SPEED;
 			if (!strcmp(led_str, "all"))
 			cfg->led_source_cfg[i].led_pattern.map = LED_MAP_ALL_SPEED;
 		}
@@ -804,6 +936,15 @@ static void ssdk_dt_parse_led(struct device_node *switch_node,
 			if (!strcmp(led_str, "auto"))
 			cfg->led_source_cfg[i].led_pattern.freq = LED_BLINK_TXRX;
 		}
+		if (!of_property_read_string(child, "active", (const char **)&led_str)) {
+			if (!strcmp(led_str, "high"))
+			cfg->led_source_cfg[i].led_pattern.map |= BIT(LED_ACTIVE_HIGH);
+		}
+		if (!of_property_read_string(child, "blink_en", (const char **)&led_str)) {
+			if (!strcmp(led_str, "disable"))
+			cfg->led_source_cfg[i].led_pattern.map &= ~(BIT(RX_TRAFFIC_BLINK_EN)|
+				BIT(TX_TRAFFIC_BLINK_EN));
+		}
 		i++;
 	}
 	cfg->led_source_num = i;
@@ -811,7 +952,8 @@ static void ssdk_dt_parse_led(struct device_node *switch_node,
 
 	return;
 }
-
+#endif
+#endif
 static sw_error_t ssdk_dt_get_switch_node(struct device_node **switch_node,
 		a_uint32_t num)
 {
@@ -849,7 +991,7 @@ sw_error_t ssdk_dt_parse(ssdk_init_cfg *cfg, a_uint32_t num, a_uint32_t *dev_id)
 	sw_error_t rv = SW_OK;
 	struct device_node *switch_node = NULL;
 	ssdk_dt_cfg *ssdk_dt_priv = NULL;
-	a_uint32_t len = 0, mode = 0;
+	a_uint32_t len = 0;
 	const __be32 *device_id;
 
 	rv = ssdk_dt_get_switch_node(&switch_node, num);
@@ -868,32 +1010,59 @@ sw_error_t ssdk_dt_parse(ssdk_init_cfg *cfg, a_uint32_t num, a_uint32_t *dev_id)
 	ssdk_dt_priv->ess_clk= ERR_PTR(-ENOENT);
 	ssdk_dt_priv->cmnblk_clk = ERR_PTR(-ENOENT);
 
+	if(of_property_read_bool(switch_node,"qcom,emulation")){
+		ssdk_dt_priv->is_emulation = A_TRUE;
+		SSDK_INFO("RUMI emulation\n");
+	}
 	/* parse common dts info */
 	rv = ssdk_dt_parse_access_mode(switch_node, ssdk_dt_priv);
 	SW_RTN_ON_ERROR(rv);
 	ssdk_dt_parse_mac_mode(*dev_id, switch_node, cfg);
-	ssdk_dt_parse_mdio(*dev_id, switch_node);
+	ssdk_dt_parse_mdio(*dev_id, switch_node, cfg);
 	ssdk_dt_parse_port_bmp(*dev_id, switch_node, cfg);
 
 	if (of_device_is_compatible(switch_node, "qcom,ess-switch")) {
 		/* DESS chip */
+#ifdef DESS
+#ifdef IN_LED
 		ssdk_dt_parse_led(switch_node, cfg);
+#endif
 		ssdk_dt_parse_psgmii(ssdk_dt_priv);
 
 		ssdk_dt_priv->ess_clk = of_clk_get_by_name(switch_node, "ess_clk");
 		if (IS_ERR(ssdk_dt_priv->ess_clk))
 			SSDK_INFO("ess_clk doesn't exist!\n");
+#endif
 	}
 	else if (of_device_is_compatible(switch_node, "qcom,ess-switch-ipq807x") ||
 		 of_device_is_compatible(switch_node, "qcom,ess-switch-ipq60xx")) {
 		/* HPPE chip */
+#ifdef HPPE
+		a_uint32_t mode = 0;
+#ifdef IN_UNIPHY
 		ssdk_dt_parse_uniphy(*dev_id);
+#endif
+#ifdef IN_QOS
 		ssdk_dt_parse_scheduler_cfg(*dev_id, switch_node);
+#endif
 		ssdk_dt_parse_intf_mac();
 
 		ssdk_dt_priv->cmnblk_clk = of_clk_get_by_name(switch_node, "cmn_ahb_clk");
 		if (!of_property_read_u32(switch_node, "tm_tick_mode", &mode))
 			ssdk_dt_priv->tm_tick_mode = mode;
+#endif
+	}
+	else if (of_device_is_compatible(switch_node, "qcom,ess-switch-ipq50xx")) {
+#ifdef MP
+		ssdk_dt_priv->emu_chip_ver = MP_GEPHY;
+#ifdef IN_UNIPHY
+		ssdk_dt_parse_uniphy(*dev_id);
+#endif
+#ifdef IN_LED
+		ssdk_dt_parse_led(switch_node, cfg);
+#endif
+		ssdk_dt_priv->cmnblk_clk = of_clk_get_by_name(switch_node, "cmn_ahb_clk");
+#endif
 	}
 	else if (of_device_is_compatible(switch_node, "qcom,ess-switch-qca83xx")) {
 		/* s17/s17c chip */
@@ -1025,5 +1194,14 @@ void ssdk_switch_device_num_exit(void)
 a_uint32_t ssdk_switch_device_num_get(void)
 {
 	return ssdk_dt_global.num_devices;
+}
+
+a_bool_t ssdk_is_emulation(a_uint32_t dev_id)
+{
+	return ssdk_dt_global.ssdk_dt_switch_nodes[dev_id]->is_emulation;
+}
+a_uint32_t ssdk_emu_chip_ver_get(a_uint32_t dev_id)
+{
+	return ssdk_dt_global.ssdk_dt_switch_nodes[dev_id]->emu_chip_ver;
 }
 

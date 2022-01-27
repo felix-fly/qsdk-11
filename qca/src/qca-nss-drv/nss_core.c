@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -25,12 +25,18 @@
 #include <linux/of.h>
 #include <nss_hal.h>
 #include <net/dst.h>
+#ifdef CONFIG_BRIDGE_NETFILTER
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(5, 0, 0))
+#include <net/netfilter/br_netfilter.h>
+#else
+#include <linux/netfilter_bridge.h>
+#endif
+#endif
 #include <linux/etherdevice.h>
 #include "nss_tx_rx_common.h"
 #include "nss_data_plane.h"
 
 #define NSS_CORE_JUMBO_LINEAR_BUF_SIZE 128
-
 
 #if (NSS_SKB_REUSE_SUPPORT == 1)
 /*
@@ -38,14 +44,15 @@
  * following kernel versions. Before enabling the driver in new kernels,
  * the skb recycle code must be checked against Linux skb handling.
  *
- * Tested on: 3.4, 3.10, 3.14, 3.18 and 4.4.
+ * Tested on: 3.4, 3.10, 3.14, 3.18, 4.4 and 5.4
  */
 #if (!( \
 (((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)))) || \
 (((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)))) || \
 (((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 11, 0)))) || \
 (((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)))) || \
-(((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))))))
+(((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)))) || \
+(((LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0))))))
 #error "Check skb recycle code in this file to match Linux version"
 #endif
 
@@ -165,6 +172,54 @@ int nss_core_get_paged_mode(void)
 }
 
 /*
+ * nss_core_register_msg_handler()
+ *	Register a msg callback per interface number. One per interface.
+ */
+uint32_t nss_core_register_msg_handler(struct nss_ctx_instance *nss_ctx, uint32_t interface, nss_if_rx_msg_callback_t msg_cb)
+{
+	nss_assert(msg_cb != NULL);
+
+	/*
+	 * Validate interface id
+	 */
+	if (interface >= NSS_MAX_NET_INTERFACES) {
+		nss_warning("Error - Interface %d not Supported\n", interface);
+		return NSS_CORE_STATUS_FAILURE;
+	}
+
+	/*
+	 * Check if already registered
+	 */
+	if (nss_ctx->nss_rx_interface_handlers[interface].msg_cb) {
+		nss_warning("Error - Duplicate Interface CB Registered for interface %d\n", interface);
+		return NSS_CORE_STATUS_FAILURE;
+	}
+
+	nss_ctx->nss_rx_interface_handlers[interface].msg_cb = msg_cb;
+
+	return NSS_CORE_STATUS_SUCCESS;
+}
+
+/*
+ * nss_core_unregister_msg_handler()
+ *	Unregister a msg callback per interface number.
+ */
+uint32_t nss_core_unregister_msg_handler(struct nss_ctx_instance *nss_ctx, uint32_t interface)
+{
+	/*
+	 * Validate interface id
+	 */
+	if (interface >= NSS_MAX_NET_INTERFACES) {
+		nss_warning("Error - Interface %d not Supported\n", interface);
+		return NSS_CORE_STATUS_FAILURE;
+	}
+
+	nss_ctx->nss_rx_interface_handlers[interface].msg_cb = NULL;
+
+	return NSS_CORE_STATUS_SUCCESS;
+}
+
+/*
  * nss_core_register_handler()
 
 --	Register a callback per interface code. Only one per interface.
@@ -184,17 +239,21 @@ uint32_t nss_core_register_handler(struct nss_ctx_instance *nss_ctx, uint32_t in
 	/*
 	 * Check if already registered
 	 */
-	if (nss_ctx->nss_rx_interface_handlers[nss_ctx->id][interface].cb != NULL) {
+	if (nss_ctx->nss_rx_interface_handlers[interface].cb != NULL) {
 		nss_warning("Error - Duplicate Interface CB Registered for interface %d\n", interface);
 		return NSS_CORE_STATUS_FAILURE;
 	}
 
-	nss_ctx->nss_rx_interface_handlers[nss_ctx->id][interface].cb = cb;
-	nss_ctx->nss_rx_interface_handlers[nss_ctx->id][interface].app_data = app_data;
+	nss_ctx->nss_rx_interface_handlers[interface].cb = cb;
+	nss_ctx->nss_rx_interface_handlers[interface].app_data = app_data;
 
 	return NSS_CORE_STATUS_SUCCESS;
 }
 
+/*
+ * nss_core_unregister_handler()
+ *	Unegister a callback per interface code.
+ */
 uint32_t nss_core_unregister_handler(struct nss_ctx_instance *nss_ctx, uint32_t interface)
 {
 	/*
@@ -205,8 +264,8 @@ uint32_t nss_core_unregister_handler(struct nss_ctx_instance *nss_ctx, uint32_t 
 		return NSS_CORE_STATUS_FAILURE;
 	}
 
-	nss_ctx->nss_rx_interface_handlers[nss_ctx->id][interface].cb = NULL;
-	nss_ctx->nss_rx_interface_handlers[nss_ctx->id][interface].app_data = NULL;
+	nss_ctx->nss_rx_interface_handlers[interface].cb = NULL;
+	nss_ctx->nss_rx_interface_handlers[interface].app_data = NULL;
 
 	return NSS_CORE_STATUS_SUCCESS;
 }
@@ -322,7 +381,7 @@ void nss_core_handle_nss_status_pkt(struct nss_ctx_instance *nss_ctx, struct sk_
 	 * Check for version number
 	 */
 	if (ncm->version != expected_version) {
-		nss_warning("%p: Message %d for interface %d received with invalid version %d, expected version %d",
+		nss_warning("%px: Message %d for interface %d received with invalid version %d, expected version %d",
 							nss_ctx, ncm->type, nss_if, ncm->version, expected_version);
 		return;
 	}
@@ -331,7 +390,7 @@ void nss_core_handle_nss_status_pkt(struct nss_ctx_instance *nss_ctx, struct sk_
 	 * Validate message size
 	 */
 	if (ncm->len > nbuf->len) {
-		nss_warning("%p: Message %d for interface %d received with invalid length %d, expected length %d",
+		nss_warning("%px: Message %d for interface %d received with invalid length %d, expected length %d",
 							nss_ctx, ncm->type, nss_if, nbuf->len, ncm->len);
 		return;
 	}
@@ -340,22 +399,22 @@ void nss_core_handle_nss_status_pkt(struct nss_ctx_instance *nss_ctx, struct sk_
 	 * Check for validity of interface number
 	 */
 	if (nss_if >= NSS_MAX_NET_INTERFACES) {
-		nss_warning("%p: Message %d received with invalid interface number %d", nss_ctx, ncm->type, nss_if);
+		nss_warning("%px: Message %d received with invalid interface number %d", nss_ctx, ncm->type, nss_if);
 		return;
 	}
 
-	cb = nss_ctx->nss_rx_interface_handlers[nss_ctx->id][nss_if].cb;
-	app_data = nss_ctx->nss_rx_interface_handlers[nss_ctx->id][nss_if].app_data;
+	cb = nss_ctx->nss_rx_interface_handlers[nss_if].cb;
+	app_data = nss_ctx->nss_rx_interface_handlers[nss_if].app_data;
 
 	if (!cb) {
-		nss_warning("%p: Callback not registered for interface %d", nss_ctx, nss_if);
+		nss_warning("%px: Callback not registered for interface %d", nss_ctx, nss_if);
 		return;
 	}
 
 	cb(nss_ctx, ncm, app_data);
 
 	if (ncm->interface != nss_if) {
-		nss_warning("%p: Invalid NSS I/F %d expected %d", nss_ctx, ncm->interface, nss_if);
+		nss_warning("%px: Invalid NSS I/F %d expected %d", nss_ctx, ncm->interface, nss_if);
 	}
 
 	return;
@@ -405,16 +464,16 @@ static uint32_t nss_soc_mem_info(void)
 
 	ppp = (__be32 *)of_get_property(node, "#address-cells", NULL);
 	addr_cells = ppp ? be32_to_cpup(ppp) : 2;
-	nss_info("%p addr cells %d\n", ppp, addr_cells);
+	nss_info("%px addr cells %d\n", ppp, addr_cells);
 	ppp = (__be32 *)of_get_property(node, "#size-cells", NULL);
 	size_cells = ppp ? be32_to_cpup(ppp) : 2;
-	nss_info("%p size cells %d\n", ppp, size_cells);
+	nss_info("%px size cells %d\n", ppp, size_cells);
 
 	for_each_child_of_node(node, snode) {
 		/*
 		 * compare (snode->full_name, "/reserved-memory/nss@40000000") may be safer
 		 */
-		nss_info("%p snode %s fn %s\n", snode, snode->name, snode->full_name);
+		nss_info("%px snode %s fn %s\n", snode, snode->name, snode->full_name);
 		if (strcmp(snode->name, "nss") == 0)
 			break;
 	}
@@ -447,7 +506,12 @@ static void nss_get_ddr_info(struct nss_mmu_ddr_info *mmu, char *name)
 	struct device_node *node;
 
 	si_meminfo(&vals);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 	cached = global_page_state(NR_FILE_PAGES);
+#else
+	cached = global_node_page_state(NR_FILE_PAGES);
+#endif
+
 	avail_ddr = (vals.totalram + cached + vals.sharedram) * vals.mem_unit;
 	mmu->num_active_cores = nss_top_main.num_nss;
 
@@ -506,7 +570,7 @@ case3:
 			}
 		}
 		of_node_put(node);
-		nss_info_always("incorrect memory info %p items %d\n",
+		nss_info_always("incorrect memory info %px items %d\n",
 			ppp, n_items);
 	}
 
@@ -536,7 +600,7 @@ static void nss_send_ddr_info(struct nss_ctx_instance *nss_own)
 	struct nss_n2h_msg nnm;
 	struct nss_cmn_msg *ncm = &nnm.cm;
 	uint32_t ret;
-	nss_info("%p: send DDR info\n", nss_own);
+	nss_info("%px: send DDR info\n", nss_own);
 
 	nss_cmn_msg_init(ncm, NSS_N2H_INTERFACE, NSS_TX_DDR_INFO_VIA_N2H_CFG,
 			sizeof(struct nss_mmu_ddr_info), NULL, NULL);
@@ -546,7 +610,7 @@ static void nss_send_ddr_info(struct nss_ctx_instance *nss_own)
 
 	ret = nss_core_send_cmd(nss_own, &nnm, sizeof(nnm), NSS_NBUF_PAYLOAD_SIZE);
 	if (ret != NSS_TX_SUCCESS) {
-		nss_info_always("%p: Failed to send DDR info for core %d\n", nss_own, nss_own->id);
+		nss_info_always("%px: Failed to send DDR info for core %d\n", nss_own, nss_own->id);
 	}
 }
 
@@ -590,7 +654,7 @@ static inline uint16_t nss_core_cause_to_queue(uint16_t cause)
 static inline void nss_dump_desc(struct nss_ctx_instance *nss_ctx, struct n2h_descriptor *desc)
 {
 	printk("bad descriptor dump for nss core = %d\n", nss_ctx->id);
-	printk("\topaque = %p\n", (void *)desc->opaque);
+	printk("\topaque = %px\n", (void *)desc->opaque);
 	printk("\tinterface = %d\n", desc->interface_num);
 	printk("\tbuffer_type = %d\n", desc->buffer_type);
 	printk("\tbit_flags = %x\n", desc->bit_flags);
@@ -603,12 +667,11 @@ static inline void nss_dump_desc(struct nss_ctx_instance *nss_ctx, struct n2h_de
 
 /*
  * nss_core_skb_needs_linearize()
- *	Looks at if this skb needs to be linearized of not.
+ *	Looks at if this skb needs to be linearized or not.
  */
 static inline int nss_core_skb_needs_linearize(struct sk_buff *skb, uint32_t features)
 {
-	return skb_is_nonlinear(skb) &&
-			((skb_has_frag_list(skb) &&
+	return ((skb_has_frag_list(skb) &&
 				!(features & NETIF_F_FRAGLIST)) ||
 			(skb_shinfo(skb)->nr_frags &&
 				!(features & NETIF_F_SG)));
@@ -683,10 +746,9 @@ static inline void nss_core_handle_virt_if_pkt(struct nss_ctx_instance *nss_ctx,
 	struct net_device *ndev = NULL;
 
 	uint32_t xmit_ret;
-
 	uint16_t queue_offset = 0;
 
-	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_RX_VIRTUAL]);
+	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_RX_VIRTUAL]);
 
 	/*
 	 * Checksum is already done by NSS for packets forwarded to virtual interfaces
@@ -698,7 +760,7 @@ static inline void nss_core_handle_virt_if_pkt(struct nss_ctx_instance *nss_ctx,
 	 */
 	ndev = subsys_dp_reg->ndev;
 	if (unlikely(!ndev)) {
-		nss_warning("%p: Received packet for unregistered virtual interface %d",
+		nss_warning("%px: Received packet for unregistered virtual interface %d",
 			nss_ctx, interface_num);
 
 		/*
@@ -716,24 +778,32 @@ static inline void nss_core_handle_virt_if_pkt(struct nss_ctx_instance *nss_ctx,
 	 */
 	dev_hold(ndev);
 	nbuf->dev = ndev;
+
 	/*
 	 * Linearize the skb if needed
+	 *
+	 * Mixing up non linear check with in nss_core_skb_needs_linearize causes
+	 * unencessary performance impact because of netif_skb_features() API call unconditionally
+	 * Hence moved skb_is_nonlinear call outside.
 	 */
-	 if (nss_core_skb_needs_linearize(nbuf, (uint32_t)netif_skb_features(nbuf)) && __skb_linearize(nbuf)) {
-		/*
-		 * We needed to linearize, but __skb_linearize() failed. Therefore
-		 * we free the nbuf.
-		 */
-		dev_put(ndev);
-		dev_kfree_skb_any(nbuf);
-		return;
+	 if (unlikely(skb_is_nonlinear(nbuf))) {
+		if (nss_core_skb_needs_linearize(nbuf, (uint32_t)netif_skb_features(nbuf)) &&
+				__skb_linearize(nbuf)) {
+			/*
+			 * We needed to linearize, but __skb_linearize() failed. Therefore
+			 * we free the nbuf.
+			 */
+			dev_put(ndev);
+			dev_kfree_skb_any(nbuf);
+			return;
+		}
 	}
 
 	/*
 	 * Check to see if there is a xmit callback is registered
 	 * in this path. The callback will decide the queue mapping.
 	 */
-	if (subsys_dp_reg->xmit_cb) {
+	if (unlikely((subsys_dp_reg->xmit_cb))) {
 		skb_set_queue_mapping(nbuf, 0);
 		subsys_dp_reg->xmit_cb(ndev, nbuf);
 		dev_put(ndev);
@@ -744,7 +814,11 @@ static inline void nss_core_handle_virt_if_pkt(struct nss_ctx_instance *nss_ctx,
 	 * Mimic Linux behavior to allow multi-queue netdev choose which queue to use
 	 */
 	if (ndev->netdev_ops->ndo_select_queue) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 		queue_offset = ndev->netdev_ops->ndo_select_queue(ndev, nbuf, NULL, NULL);
+#else
+		queue_offset = ndev->netdev_ops->ndo_select_queue(ndev, nbuf, NULL);
+#endif
 	}
 
 	skb_set_queue_mapping(nbuf, queue_offset);
@@ -757,7 +831,7 @@ static inline void nss_core_handle_virt_if_pkt(struct nss_ctx_instance *nss_ctx,
 	xmit_ret = ndev->netdev_ops->ndo_start_xmit(nbuf, ndev);
 	if (unlikely(xmit_ret == NETDEV_TX_BUSY)) {
 		dev_kfree_skb_any(nbuf);
-		nss_info("%p: Congestion at virtual interface %d, %p", nss_ctx, interface_num, ndev);
+		nss_info("%px: Congestion at virtual interface %d, %px", nss_ctx, interface_num, ndev);
 	}
 	dev_put(ndev);
 }
@@ -778,7 +852,7 @@ static inline void nss_core_handle_buffer_pkt(struct nss_ctx_instance *nss_ctx,
 	nss_phys_if_rx_callback_t cb;
 	uint16_t queue_offset = qid - NSS_IF_N2H_DATA_QUEUE_0;
 
-	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_RX_PACKET]);
+	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_RX_PACKET]);
 
 	/*
 	 * Check if NSS was able to obtain checksum
@@ -819,9 +893,11 @@ static inline void nss_core_handle_buffer_pkt(struct nss_ctx_instance *nss_ctx,
 		/*
 		 * linearize or free if requested.
 		 */
-		if (nss_core_skb_needs_linearize(nbuf, ndev->features) && __skb_linearize(nbuf)) {
-			dev_kfree_skb_any(nbuf);
-			return;
+	 	if (unlikely(skb_is_nonlinear(nbuf))) {
+			if (nss_core_skb_needs_linearize(nbuf, ndev->features) && __skb_linearize(nbuf)) {
+				dev_kfree_skb_any(nbuf);
+				return;
+			}
 		}
 
 		/*
@@ -861,7 +937,7 @@ static inline void nss_core_handle_ext_buffer_pkt(struct nss_ctx_instance *nss_c
 	struct net_device *ndev = NULL;
 	nss_phys_if_rx_ext_data_callback_t ext_cb;
 
-	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_RX_PACKET]);
+	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_RX_EXT_PACKET]);
 
 	/*
 	 * Check if NSS was able to obtain checksum
@@ -874,12 +950,15 @@ static inline void nss_core_handle_ext_buffer_pkt(struct nss_ctx_instance *nss_c
 	ndev = subsys_dp_reg->ndev;
 	ext_cb = subsys_dp_reg->ext_cb;
 	if (likely(ext_cb) && likely(ndev)) {
-		if (nss_core_skb_needs_linearize(nbuf, ndev->features) && __skb_linearize(nbuf)) {
-			/*
-			 * We needed to linearize, but __skb_linearize() failed. So free the nbuf.
-			 */
-			dev_kfree_skb_any(nbuf);
-			return;
+
+	 	if (unlikely(skb_is_nonlinear(nbuf))) {
+			if (nss_core_skb_needs_linearize(nbuf, ndev->features) && __skb_linearize(nbuf)) {
+				/*
+			 	* We needed to linearize, but __skb_linearize() failed. So free the nbuf.
+			 	*/
+				dev_kfree_skb_any(nbuf);
+				return;
+			}
 		}
 
 		ext_cb(ndev, (void *)nbuf, napi);
@@ -900,10 +979,12 @@ static inline void nss_core_rx_pbuf(struct nss_ctx_instance *nss_ctx, struct n2h
 	struct nss_shaper_bounce_registrant *reg = NULL;
 	int32_t status;
 
-	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 
 	if (interface_num >= NSS_MAX_NET_INTERFACES) {
-		nss_warning("%p: Invalid interface_num: %d", nss_ctx, interface_num);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_INVALID_INTERFACE]);
+		nss_warning("%px: Invalid interface_num: %d", nss_ctx, interface_num);
+		dev_kfree_skb_any(nbuf);
 		return;
 	}
 
@@ -911,7 +992,9 @@ static inline void nss_core_rx_pbuf(struct nss_ctx_instance *nss_ctx, struct n2h
 	 * Check if core_id value is valid.
 	 */
 	if (core_id > nss_top_main.num_nss) {
-		nss_warning("%p: Invalid core id: %d", nss_ctx, core_id);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_INVALID_CORE_ID]);
+		nss_warning("%px: Invalid core id: %d", nss_ctx, core_id);
+		dev_kfree_skb_any(nbuf);
 		return;
 	}
 
@@ -946,13 +1029,13 @@ static inline void nss_core_rx_pbuf(struct nss_ctx_instance *nss_ctx, struct n2h
 		break;
 
 	case N2H_BUFFER_STATUS:
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_STATUS]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_STATUS]);
 		nss_core_handle_nss_status_pkt(nss_ctx, nbuf);
 		dev_kfree_skb_any(nbuf);
 		break;
 
 	case N2H_BUFFER_CRYPTO_RESP:
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_CRYPTO_RESP]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_CRYPTO_RESP]);
 		nss_core_handle_crypto_pkt(nss_ctx, interface_num, nbuf, napi);
 		break;
 
@@ -965,18 +1048,35 @@ static inline void nss_core_rx_pbuf(struct nss_ctx_instance *nss_ctx, struct n2h
 		 * They are again marked with H2N_BUFFER_RATE_TEST buffer type so NSS can process
 		 * and count the test packets properly.
 		 */
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_STATUS]);
-		status = nss_core_send_buffer(nss_ctx, 0, nbuf, NSS_IF_H2N_DATA_QUEUE, H2N_BUFFER_RATE_TEST, 0);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_STATUS]);
+		status = nss_core_send_buffer(nss_ctx, 0, nbuf, NSS_IF_H2N_DATA_QUEUE, H2N_BUFFER_RATE_TEST, H2N_BIT_FLAG_BUFFER_REUSABLE);
 		if (unlikely(status != NSS_CORE_STATUS_SUCCESS)) {
 			dev_kfree_skb_any(nbuf);
-			nss_warning("%p: Unable to enqueue\n", nss_ctx);
+			nss_warning("%px: Unable to enqueue\n", nss_ctx);
 		}
 		nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
 		break;
 
 	default:
-		nss_warning("%p: Invalid buffer type %d received from NSS", nss_ctx, buffer_type);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_INVALID_BUFFER_TYPE]);
+		nss_warning("%px: Invalid buffer type %d received from NSS", nss_ctx, buffer_type);
+		dev_kfree_skb_any(nbuf);
 	}
+}
+
+/*
+ * nss_core_set_skb_classify()
+ *	Set skb field to avoid ingress shaping.
+ */
+static inline void nss_core_set_skb_classify(struct sk_buff *nbuf)
+{
+#ifdef CONFIG_NET_CLS_ACT
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
+		nbuf->tc_verd = SET_TC_NCLS_NSS(nbuf->tc_verd);
+#else
+		skb_set_tc_classify_offload(nbuf);
+#endif
+#endif
 }
 
 /*
@@ -1007,7 +1107,7 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		 * Free the old head as the frag list is corrupt.
 		 */
 		if (unlikely(jumbo_start)) {
-			nss_warning("%p: received a full frame before a last", jumbo_start);
+			nss_warning("%px: received a full frame before a last", jumbo_start);
 			dev_kfree_skb_any(jumbo_start);
 			*jumbo_start_ptr = NULL;
 		}
@@ -1032,16 +1132,17 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		 * ingress shaped flag set.
 		 */
 		if (unlikely(desc->bit_flags & N2H_BIT_FLAG_INGRESS_SHAPED)) {
-			nbuf->tc_verd = SET_TC_NCLS_NSS(nbuf->tc_verd);
+			nss_core_set_skb_classify(nbuf);
 		}
 #endif
+
 		goto pull;
 	}
 
 	/*
 	 * Track Number of Fragments processed. First && Last is not true fragment
 	 */
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_FRAG_SEG_PROCESSED]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_FRAG_SEG_PROCESSED]);
 
 	/*
 	 * NSS sent us an SG chain.
@@ -1054,7 +1155,7 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		 * Free the old head as the frag list is corrupt.
 		 */
 		if (unlikely(jumbo_start)) {
-			nss_warning("%p: received the second head before a last", jumbo_start);
+			nss_warning("%px: received the second head before a last", jumbo_start);
 			dev_kfree_skb_any(jumbo_start);
 		}
 
@@ -1072,7 +1173,7 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		 * ingress shaped flag set.
 		 */
 		if (unlikely(desc->bit_flags & N2H_BIT_FLAG_INGRESS_SHAPED)) {
-			nbuf->tc_verd = SET_TC_NCLS_NSS(nbuf->tc_verd);
+			nss_core_set_skb_classify(nbuf);
 		}
 #endif
 
@@ -1087,7 +1188,7 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		return false;
 	}
 
-	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 
 	/*
 	 * We've received a middle or a last segment.
@@ -1097,7 +1198,7 @@ static inline bool nss_core_handle_nr_frag_skb(struct nss_ctx_instance *nss_ctx,
 		/*
 		 * Middle before first! Free the middle.
 		 */
-		nss_warning("%p: saw a middle skb before head", nbuf);
+		nss_warning("%px: saw a middle skb before head", nbuf);
 		dev_kfree_skb_any(nbuf);
 		return false;
 	}
@@ -1135,7 +1236,7 @@ pull:
 	if (buffer_type != N2H_BUFFER_STATUS) {
 		if (!pskb_may_pull(nbuf, ETH_HLEN)) {
 			dev_kfree_skb(nbuf);
-			nss_warning("%p: could not pull eth header", nbuf);
+			nss_warning("%px: could not pull eth header", nbuf);
 			return false;
 		}
 	}
@@ -1161,7 +1262,10 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 	nbuf->data = nbuf->head + desc->payload_offs;
 	nbuf->len = desc->payload_len;
 	skb_set_tail_pointer(nbuf, nbuf->len);
-	dma_unmap_single(nss_ctx->dev, (desc->buffer + desc->payload_offs), desc->payload_len, DMA_FROM_DEVICE);
+
+	dma_unmap_single(nss_ctx->dev, (desc->buffer + desc->payload_offs), desc->payload_len,
+			 DMA_FROM_DEVICE);
+
 	prefetch((void *)(nbuf->data));
 
 	if (likely(bit_flags & N2H_BIT_FLAG_FIRST_SEGMENT) && likely(bit_flags & N2H_BIT_FLAG_LAST_SEGMENT)) {
@@ -1171,7 +1275,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		 * Free the old head as the frag list is corrupt.
 		 */
 		if (unlikely(head)) {
-			nss_warning("%p: received a full frame before a last", head);
+			nss_warning("%px: received a full frame before a last", head);
 			dev_kfree_skb_any(head);
 			*head_ptr = NULL;
 		}
@@ -1184,7 +1288,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		 * ingress shaped flag set.
 		 */
 		if (unlikely(desc->bit_flags & N2H_BIT_FLAG_INGRESS_SHAPED)) {
-			nbuf->tc_verd = SET_TC_NCLS_NSS(nbuf->tc_verd);
+			nss_core_set_skb_classify(nbuf);
 		}
 #endif
 
@@ -1193,14 +1297,14 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		 * NSS should playaround with data area and should not
 		 * touch HEADROOM area
 		 */
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_SIMPLE]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_SIMPLE]);
 		return true;
 	}
 
 	/*
 	 * Track number of skb chain processed. First && Last is not true segment.
 	 */
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_CHAIN_SEG_PROCESSED]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_CHAIN_SEG_PROCESSED]);
 
 	/*
 	 * NSS sent us an SG chain.
@@ -1213,8 +1317,8 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		 * Free the old head as the frag list is corrupt.
 		 */
 		if (unlikely(head)) {
-			nss_warning("%p: received the second head before a last", head);
-			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+			nss_warning("%px: received the second head before a last", head);
+			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 			dev_kfree_skb_any(head);
 		}
 
@@ -1225,8 +1329,8 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 			/*
 			 * We don't support chain in a chain.
 			 */
-			nss_warning("%p: skb already has a fraglist", nbuf);
-			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+			nss_warning("%px: skb already has a fraglist", nbuf);
+			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 			dev_kfree_skb_any(nbuf);
 			return false;
 		}
@@ -1242,7 +1346,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		 * ingress shaped flag set.
 		 */
 		if (unlikely(desc->bit_flags & N2H_BIT_FLAG_INGRESS_SHAPED)) {
-			nbuf->tc_verd = SET_TC_NCLS_NSS(nbuf->tc_verd);
+			nss_core_set_skb_classify(nbuf);
 		}
 #endif
 
@@ -1254,7 +1358,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		return false;
 	}
 
-	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+	NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 
 	/*
 	 * We've received a middle segment.
@@ -1265,7 +1369,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 		/*
 		 * Middle before first! Free the middle.
 		 */
-		nss_warning("%p: saw a middle skb before head", nbuf);
+		nss_warning("%px: saw a middle skb before head", nbuf);
 		dev_kfree_skb_any(nbuf);
 
 		return false;
@@ -1308,7 +1412,7 @@ static inline bool nss_core_handle_linear_skb(struct nss_ctx_instance *nss_ctx, 
 	*nbuf_ptr = head;
 	*head_ptr = NULL;
 	*tail_ptr = NULL;
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_SKB_FRAGLIST]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_SKB_FRAGLIST]);
 	return true;
 }
 
@@ -1358,15 +1462,15 @@ static inline void nss_core_handle_empty_buffers(struct nss_ctx_instance *nss_ct
 			 * Invalid opaque pointer
 			 */
 			nss_dump_desc(nss_ctx, desc);
-			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_BAD_DESCRIPTOR]);
+			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_BAD_DESCRIPTOR]);
 			goto next;
 		}
 
 		dma_unmap_single(nss_ctx->dev, (desc->buffer + desc->payload_offs), desc->payload_len, DMA_TO_DEVICE);
 		dev_kfree_skb_any(nbuf);
 
-		NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_EMPTY]);
+		NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_EMPTY]);
 
 next:
 		hlos_index = (hlos_index + 1) & (mask);
@@ -1494,7 +1598,7 @@ static int32_t nss_core_handle_cause_queue(struct int_ctx_instance *int_ctx, uin
 			 * Invalid opaque pointer
 			 */
 			nss_dump_desc(nss_ctx, desc);
-			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_BAD_DESCRIPTOR]);
+			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_BAD_DESCRIPTOR]);
 			goto next;
 		}
 
@@ -1525,10 +1629,10 @@ static int32_t nss_core_handle_cause_queue(struct int_ctx_instance *int_ctx, uin
 			 * a linear skb chain. If so we need to free.
 			 */
 			if (unlikely(n2h_desc_ring->head)) {
-				nss_warning("%p: we should not have an incomplete paged skb while"
-								" constructing a linear skb %p", nbuf, n2h_desc_ring->head);
+				nss_warning("%px: we should not have an incomplete paged skb while"
+								" constructing a linear skb %px", nbuf, n2h_desc_ring->head);
 
-				NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+				NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 				dev_kfree_skb_any(n2h_desc_ring->head);
 				n2h_desc_ring->head = NULL;
 			}
@@ -1536,7 +1640,7 @@ static int32_t nss_core_handle_cause_queue(struct int_ctx_instance *int_ctx, uin
 			if (!nss_core_handle_nr_frag_skb(nss_ctx, &nbuf, &n2h_desc_ring->jumbo_start, desc, buffer_type)) {
 				goto next;
 			}
-			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_RX_NR_FRAGS]);
+			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_RX_NR_FRAGS]);
 			goto consume;
 		}
 
@@ -1545,10 +1649,10 @@ static int32_t nss_core_handle_cause_queue(struct int_ctx_instance *int_ctx, uin
 		 * a paged skb. If so we need to free the paged_skb and handle the linear skb.
 		 */
 		if (unlikely(n2h_desc_ring->jumbo_start)) {
-			nss_warning("%p: we should not have an incomplete linear skb while"
-							" constructing a paged skb %p", nbuf, n2h_desc_ring->jumbo_start);
+			nss_warning("%px: we should not have an incomplete linear skb while"
+							" constructing a paged skb %px", nbuf, n2h_desc_ring->jumbo_start);
 
-			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+			NSS_PKT_STATS_DEC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 			dev_kfree_skb_any(n2h_desc_ring->jumbo_start);
 			n2h_desc_ring->jumbo_start = NULL;
 		}
@@ -1600,7 +1704,9 @@ static void nss_core_init_nss(struct nss_ctx_instance *nss_ctx, struct nss_if_me
 	 */
 	nss_assert(if_map->magic == DEV_MAGIC);
 
+#ifdef NSS_DRV_C2C_ENABLE
 	nss_ctx->c2c_start = nss_ctx->meminfo_ctx.c2c_start_dma;
+#endif
 
 	nss_top = nss_ctx->nss_top;
 	spin_lock_bh(&nss_top->lock);
@@ -1625,9 +1731,11 @@ static void nss_core_init_nss(struct nss_ctx_instance *nss_ctx, struct nss_if_me
 		 * connections supported by the accelerator.
 		 */
 		nss_ipv4_conn_cfg = max_ipv4_conn;
+#ifdef NSS_DRV_IPV6_ENABLE
 		nss_ipv6_conn_cfg = max_ipv6_conn;
-		nss_ipv4_update_conn_count(max_ipv4_conn);
 		nss_ipv6_update_conn_count(max_ipv6_conn);
+#endif
+		nss_ipv4_update_conn_count(max_ipv4_conn);
 
 #ifdef NSS_MEM_PROFILE_LOW
 		/*
@@ -1637,7 +1745,7 @@ static void nss_core_init_nss(struct nss_ctx_instance *nss_ctx, struct nss_if_me
 		 */
 		ret = nss_n2h_cfg_empty_pool_size(nss_ctx, NSS_LOW_MEM_EMPTY_POOL_BUF_SZ);
 		if (ret != NSS_TX_SUCCESS) {
-			nss_warning("%p: Failed to update empty buffer pool config\n", nss_ctx);
+			nss_warning("%px: Failed to update empty buffer pool config\n", nss_ctx);
 		}
 #endif
 	} else {
@@ -1675,7 +1783,7 @@ static void nss_core_alloc_paged_buffers(struct nss_ctx_instance *nss_ctx, struc
 			 * ERR:
 			 */
 			NSS_PKT_STATS_INC(&nss_top->stats_drv[alloc_fail_count]);
-			nss_warning("%p: Could not obtain empty paged buffer", nss_ctx);
+			nss_warning("%px: Could not obtain empty paged buffer", nss_ctx);
 			break;
 		}
 
@@ -1686,7 +1794,7 @@ static void nss_core_alloc_paged_buffers(struct nss_ctx_instance *nss_ctx, struc
 			 */
 			dev_kfree_skb_any(nbuf);
 			NSS_PKT_STATS_INC(&nss_top->stats_drv[alloc_fail_count]);
-			nss_warning("%p: Could not obtain empty page", nss_ctx);
+			nss_warning("%px: Could not obtain empty page", nss_ctx);
 			break;
 		}
 
@@ -1709,14 +1817,14 @@ static void nss_core_alloc_paged_buffers(struct nss_ctx_instance *nss_ctx, struc
 			 * ERR:
 			 */
 			dev_kfree_skb_any(nbuf);
-			nss_warning("%p: DMA mapping failed for empty buffer", nss_ctx);
+			nss_warning("%px: DMA mapping failed for empty buffer", nss_ctx);
 			break;
 		}
 		/*
 		 * We are holding this skb in NSS FW, let kmemleak know about it
 		 */
 		kmemleak_not_leak(nbuf);
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 		desc->opaque = (nss_ptr_t)nbuf;
 		desc->buffer = buffer;
 		desc->buffer_type = buffer_type;
@@ -1766,8 +1874,8 @@ static void nss_core_alloc_jumbo_mru_buffers(struct nss_ctx_instance *nss_ctx, s
 			/*
 			 * ERR:
 			 */
-			NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_NBUF_ALLOC_FAILS]);
-			nss_warning("%p: Could not obtain empty jumbo mru buffer", nss_ctx);
+			NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_NBUF_ALLOC_FAILS]);
+			nss_warning("%px: Could not obtain empty jumbo mru buffer", nss_ctx);
 			break;
 		}
 
@@ -1782,7 +1890,7 @@ static void nss_core_alloc_jumbo_mru_buffers(struct nss_ctx_instance *nss_ctx, s
 			 * ERR:
 			 */
 			dev_kfree_skb_any(nbuf);
-			nss_warning("%p: DMA mapping failed for empty buffer", nss_ctx);
+			nss_warning("%px: DMA mapping failed for empty buffer", nss_ctx);
 			break;
 		}
 
@@ -1790,7 +1898,7 @@ static void nss_core_alloc_jumbo_mru_buffers(struct nss_ctx_instance *nss_ctx, s
 		 * We are holding this skb in NSS FW, let kmemleak know about it
 		 */
 		kmemleak_not_leak(nbuf);
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 		desc->opaque = (nss_ptr_t)nbuf;
 		desc->buffer = buffer;
 		desc->buffer_type = H2N_BUFFER_EMPTY;
@@ -1815,7 +1923,7 @@ static void nss_core_alloc_jumbo_mru_buffers(struct nss_ctx_instance *nss_ctx, s
 	NSS_CORE_DMA_CACHE_MAINT(&if_map->h2n_hlos_index[NSS_IF_H2N_EMPTY_BUFFER_QUEUE], sizeof(uint32_t), DMA_TO_DEVICE);
 	NSS_CORE_DSB();
 
-	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_TX_EMPTY]);
+	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_TX_EMPTY]);
 }
 
 /*
@@ -1842,8 +1950,8 @@ static void nss_core_alloc_max_avail_size_buffers(struct nss_ctx_instance *nss_c
 			/*
 			 * ERR:
 			 */
-			NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_NBUF_ALLOC_FAILS]);
-			nss_warning("%p: Could not obtain empty buffer", nss_ctx);
+			NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_NBUF_ALLOC_FAILS]);
+			nss_warning("%px: Could not obtain empty buffer", nss_ctx);
 			break;
 		}
 
@@ -1857,7 +1965,7 @@ static void nss_core_alloc_max_avail_size_buffers(struct nss_ctx_instance *nss_c
 			 * ERR:
 			 */
 			dev_kfree_skb_any(nbuf);
-			nss_warning("%p: DMA mapping failed for empty buffer", nss_ctx);
+			nss_warning("%px: DMA mapping failed for empty buffer", nss_ctx);
 			break;
 		}
 
@@ -1865,7 +1973,7 @@ static void nss_core_alloc_max_avail_size_buffers(struct nss_ctx_instance *nss_c
 		 * We are holding this skb in NSS FW, let kmemleak know about it
 		 */
 		kmemleak_not_leak(nbuf);
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 
 		desc->opaque = (nss_ptr_t)nbuf;
 		desc->buffer = buffer;
@@ -1904,7 +2012,7 @@ static void nss_core_alloc_max_avail_size_buffers(struct nss_ctx_instance *nss_c
 	NSS_CORE_DMA_CACHE_MAINT(&if_map->h2n_hlos_index[NSS_IF_H2N_EMPTY_BUFFER_QUEUE], sizeof(uint32_t), DMA_TO_DEVICE);
 	NSS_CORE_DSB();
 
-	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_STATS_DRV_TX_EMPTY]);
+	NSS_PKT_STATS_INC(&nss_top->stats_drv[NSS_DRV_STATS_TX_EMPTY]);
 }
 
 /*
@@ -1934,7 +2042,7 @@ static inline void nss_core_handle_empty_buffer_sos(struct nss_ctx_instance *nss
 	mask = size - 1;
 	count = ((nss_index - hlos_index - 1) + size) & (mask);
 
-	nss_trace("%p: Adding %d buffers to empty queue\n", nss_ctx, count);
+	nss_trace("%px: Adding %d buffers to empty queue\n", nss_ctx, count);
 
 	/*
 	 * Fill empty buffer queue with buffers leaving one empty descriptor
@@ -1946,8 +2054,8 @@ static inline void nss_core_handle_empty_buffer_sos(struct nss_ctx_instance *nss
 
 	if (paged_mode) {
 		nss_core_alloc_paged_buffers(nss_ctx, if_map, count, mask, hlos_index,
-					NSS_STATS_DRV_NBUF_ALLOC_FAILS, H2N_BUFFER_EMPTY,
-					NSS_IF_H2N_EMPTY_BUFFER_QUEUE, NSS_STATS_DRV_TX_EMPTY);
+					NSS_DRV_STATS_NBUF_ALLOC_FAILS, H2N_BUFFER_EMPTY,
+					NSS_IF_H2N_EMPTY_BUFFER_QUEUE, NSS_DRV_STATS_TX_EMPTY);
 	} else if (jumbo_mru) {
 		nss_core_alloc_jumbo_mru_buffers(nss_ctx, if_map, jumbo_mru, count,
 					mask, hlos_index);
@@ -1985,7 +2093,7 @@ static inline void nss_core_handle_paged_empty_buffer_sos(struct nss_ctx_instanc
 
 	mask = size - 1;
 	count = ((nss_index - hlos_index - 1) + size) & (mask);
-	nss_trace("%p: Adding %d buffers to paged buffer queue", nss_ctx, count);
+	nss_trace("%px: Adding %d buffers to paged buffer queue", nss_ctx, count);
 
 	/*
 	 * Fill empty buffer queue with buffers leaving one empty descriptor
@@ -1996,8 +2104,8 @@ static inline void nss_core_handle_paged_empty_buffer_sos(struct nss_ctx_instanc
 	}
 
 	nss_core_alloc_paged_buffers(nss_ctx, if_map, count, mask, hlos_index,
-			NSS_STATS_DRV_PAGED_BUF_ALLOC_FAILS, H2N_PAGED_BUFFER_EMPTY,
-			NSS_IF_H2N_EMPTY_PAGED_BUFFER_QUEUE, NSS_STATS_DRV_PAGED_TX_EMPTY);
+			NSS_DRV_STATS_PAGED_BUF_ALLOC_FAILS, H2N_PAGED_BUFFER_EMPTY,
+			NSS_IF_H2N_EMPTY_PAGED_BUFFER_QUEUE, NSS_DRV_STATS_PAGED_TX_EMPTY);
 
 	/*
 	 * Inform NSS that new buffers are available
@@ -2012,7 +2120,7 @@ static inline void nss_core_handle_paged_empty_buffer_sos(struct nss_ctx_instanc
 static inline void nss_core_handle_tx_unblocked(struct nss_ctx_instance *nss_ctx)
 {
 	int32_t i;
-	nss_trace("%p: Data queue unblocked", nss_ctx);
+	nss_trace("%px: Data queue unblocked", nss_ctx);
 
 	/*
 	 * Call callback functions of drivers that have registered with us
@@ -2044,8 +2152,10 @@ static void nss_core_handle_cause_nonqueue(struct int_ctx_instance *int_ctx, uin
 	struct nss_meminfo_ctx *mem_ctx = &nss_ctx->meminfo_ctx;
 	struct nss_if_mem_map *if_map = mem_ctx->if_map;
 	uint16_t max_buf_size = (uint16_t) nss_ctx->max_buf_size;
+#ifdef NSS_DRV_C2C_ENABLE
 	uint32_t c2c_intr_addr1, c2c_intr_addr2;
 	int32_t i;
+#endif
 
 	nss_assert((cause == NSS_N2H_INTR_EMPTY_BUFFERS_SOS)
 			|| (cause == NSS_N2H_INTR_TX_UNBLOCKED)
@@ -2058,12 +2168,14 @@ static void nss_core_handle_cause_nonqueue(struct int_ctx_instance *int_ctx, uin
 	 * of processor will prevent any excessive penalties.
 	 */
 	if (unlikely(nss_ctx->state == NSS_CORE_STATE_UNINITIALIZED)) {
-		struct nss_top_instance *nss_top = nss_ctx->nss_top;
+		struct nss_top_instance *nss_top = NULL;
 		nss_core_init_nss(nss_ctx, if_map);
 		nss_send_ddr_info(nss_ctx);
 
-		nss_info_always("%p: nss core %d booted successfully\n", nss_ctx, nss_ctx->id);
+		nss_info_always("%px: nss core %d booted successfully\n", nss_ctx, nss_ctx->id);
+		nss_top = nss_ctx->nss_top;
 
+#ifdef NSS_DRV_C2C_ENABLE
 #if (NSS_MAX_CORES > 1)
 		/*
 		 * Pass C2C addresses of already brought up cores to the recently brought
@@ -2095,6 +2207,7 @@ static void nss_core_handle_cause_nonqueue(struct int_ctx_instance *int_ctx, uin
 				spin_unlock_bh(&nss_top->lock);
 			}
 		}
+#endif
 #endif
 	}
 
@@ -2179,6 +2292,11 @@ static uint32_t nss_core_get_prioritized_cause(uint32_t cause, uint32_t *type, i
 		return NSS_N2H_INTR_COREDUMP_COMPLETE;
 	}
 
+	if (cause & NSS_N2H_INTR_PROFILE_DMA) {
+		*type = NSS_INTR_CAUSE_SDMA;
+		return NSS_N2H_INTR_PROFILE_DMA;
+	}
+
 	return 0;
 }
 
@@ -2236,6 +2354,11 @@ int nss_core_handle_napi(struct napi_struct *napi, int budget)
 				int_ctx->cause &= ~prio_cause;
 				break;
 
+			case NSS_INTR_CAUSE_SDMA:
+				nss_core_handle_napi_sdma(napi, budget);
+				int_ctx->cause &= ~prio_cause;
+				break;
+
 			case NSS_INTR_CAUSE_EMERGENCY:
 				nss_info_always("NSS core %d signal COREDUMP COMPLETE %x\n",
 					nss_ctx->id, int_ctx->cause);
@@ -2244,7 +2367,7 @@ int nss_core_handle_napi(struct napi_struct *napi, int budget)
 				break;
 
 			default:
-				nss_warning("%p: Invalid cause %x received from nss", nss_ctx, int_cause);
+				nss_warning("%px: Invalid cause %x received from nss", nss_ctx, int_cause);
 				nss_assert(0);
 				break;
 			}
@@ -2279,6 +2402,26 @@ int nss_core_handle_napi_emergency(struct napi_struct *napi, int budget)
 				int_ctx->nss_ctx->id, int_ctx->cause);
 	nss_fw_coredump_notify(int_ctx->nss_ctx, 0);
 
+	return 0;
+}
+
+/*
+ * nss_core_handle_napi_sdma()
+ *	NAPI handler for NSS soft DMA
+ */
+int nss_core_handle_napi_sdma(struct napi_struct *napi, int budget)
+{
+	struct int_ctx_instance *int_ctx = container_of(napi, struct int_ctx_instance, napi);
+	struct nss_ctx_instance *nss_ctx = int_ctx->nss_ctx;
+	struct nss_profile_sdma_ctrl *ctrl = (struct nss_profile_sdma_ctrl *)nss_ctx->meminfo_ctx.sdma_ctrl;
+
+	if (ctrl->consumer[0].dispatch.fp)
+		ctrl->consumer[0].dispatch.fp(ctrl->consumer[0].arg.kp);
+
+#if !defined(NSS_HAL_IPQ806X_SUPPORT)
+	napi_complete(napi);
+	enable_irq(int_ctx->irq);
+#endif
 	return 0;
 }
 
@@ -2354,7 +2497,7 @@ static inline void nss_core_send_unwind_dma(struct device *dev, struct h2n_desc_
 		} else {
 			dma_unmap_page(dev, desc->buffer, desc->buffer_len, DMA_TO_DEVICE);
 		}
-		hlos_index = (hlos_index + 1) & mask;
+		hlos_index = (hlos_index - 1) & mask;
 	}
 }
 
@@ -2380,26 +2523,12 @@ static inline uint32_t nss_core_dma_map_single(struct device *dev, struct sk_buf
 
 #if (NSS_SKB_REUSE_SUPPORT == 1)
 /*
- * nss_skb_can_reuse
+ * nss_core_skb_can_reuse
  *	check if skb can be reuse
  */
-static inline bool nss_skb_can_reuse(struct nss_ctx_instance *nss_ctx,
+static inline bool nss_core_skb_can_reuse(struct nss_ctx_instance *nss_ctx,
 	uint32_t if_num, struct sk_buff *nbuf, int min_skb_size)
 {
-	/*
-	 * Don't re-use if this is a redirect interface.
-	 */
-	if (nss_cmn_interface_is_redirect(nss_ctx, if_num)) {
-		return false;
-	}
-
-	/*
-	 * Check if this interface supports skb reuse.
-	 */
-	if (nss_cmn_interface_is_reuse_not_supported(nss_ctx, if_num)) {
-		return false;
-	}
-
 	/*
 	 * If we have to call a destructor, we can't re-use the buffer?
 	 */
@@ -2419,9 +2548,15 @@ static inline bool nss_skb_can_reuse(struct nss_ctx_instance *nss_ctx,
 	 * This check is added to avoid deadlock from nf_conntrack
 	 * when ecm is trying to flush a rule.
 	 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 	if (unlikely(nbuf->nfct)) {
 		return false;
 	}
+#else
+	if (unlikely(nbuf->_nfct)) {
+		return false;
+	}
+#endif
 #endif
 
 #ifdef CONFIG_BRIDGE_NETFILTER
@@ -2429,7 +2564,7 @@ static inline bool nss_skb_can_reuse(struct nss_ctx_instance *nss_ctx,
 	 * This check is added to avoid deadlock from nf_bridge
 	 * when ecm is trying to flush a rule.
 	 */
-	if (unlikely(nbuf->nf_bridge)) {
+	if (unlikely(nf_bridge_info_get(nbuf))) {
 		return false;
 	}
 #endif
@@ -2543,9 +2678,16 @@ static inline int32_t nss_core_send_buffer_simple_skb(struct nss_ctx_instance *n
 
 #if (NSS_SKB_REUSE_SUPPORT == 1)
 	/*
-	 * Check if the skb is reuseable without resetting its fields.
+	 * Check if the caller indicates that the buffer is not to be re-used (kept in the accelerator).
 	 */
-	if (unlikely(!nss_skb_can_reuse(nss_ctx, if_num, nbuf, nss_ctx->max_buf_size))) {
+	if (unlikely(!(bit_flags & H2N_BIT_FLAG_BUFFER_REUSABLE))) {
+		goto no_reuse;
+	}
+
+	/*
+	 * Since the caller is allowing re-use, we now check if the skb meets the criteria.
+	 */
+	if (unlikely(!nss_core_skb_can_reuse(nss_ctx, if_num, nbuf, nss_ctx->max_buf_size))) {
 		goto no_reuse;
 	}
 
@@ -2562,7 +2704,6 @@ static inline int32_t nss_core_send_buffer_simple_skb(struct nss_ctx_instance *n
 	/*
 	 * We are allowed to re-use the packet
 	 */
-	bit_flags |= H2N_BIT_FLAG_BUFFER_REUSE;
 	nss_core_write_one_descriptor(desc, buffer_type, frag0phyaddr, if_num,
 		(nss_ptr_t)nbuf, (uint16_t)(nbuf->data - nbuf->head), nbuf->len,
 		sz, (uint32_t)nbuf->priority, mss, bit_flags);
@@ -2574,15 +2715,16 @@ static inline int32_t nss_core_send_buffer_simple_skb(struct nss_ctx_instance *n
 	 */
 	nss_skb_reuse(nbuf);
 
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_BUFFER_REUSE]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_BUFFER_REUSE]);
 	return 1;
 
 no_reuse:
 #endif
 
+	bit_flags &= ~H2N_BIT_FLAG_BUFFER_REUSABLE;
 	frag0phyaddr = nss_core_dma_map_single(nss_ctx->dev, nbuf);
 	if (unlikely(dma_mapping_error(nss_ctx->dev, frag0phyaddr))) {
-		nss_warning("%p: DMA mapping failed for virtual address = %p", nss_ctx, nbuf->head);
+		nss_warning("%px: DMA mapping failed for virtual address = %px", nss_ctx, nbuf->head);
 		return 0;
 	}
 
@@ -2592,7 +2734,7 @@ no_reuse:
 
 	NSS_CORE_DMA_CACHE_MAINT((void *)desc, sizeof(*desc), DMA_TO_DEVICE);
 
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_SIMPLE]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_SIMPLE]);
 	return 1;
 }
 
@@ -2618,7 +2760,7 @@ static inline int32_t nss_core_send_buffer_nr_frags(struct nss_ctx_instance *nss
 
 	uint32_t frag0phyaddr = nss_core_dma_map_single(nss_ctx->dev, nbuf);
 	if (unlikely(dma_mapping_error(nss_ctx->dev, frag0phyaddr))) {
-		nss_warning("%p: DMA mapping failed for virtual address = %p", nss_ctx, nbuf->head);
+		nss_warning("%px: DMA mapping failed for virtual address = %px", nss_ctx, nbuf->head);
 		return 0;
 	}
 
@@ -2626,6 +2768,11 @@ static inline int32_t nss_core_send_buffer_nr_frags(struct nss_ctx_instance *nss
 	 * Set the appropriate flags.
 	 */
 	bit_flags = (flags | H2N_BIT_FLAG_DISCARD);
+
+	/*
+	 * Reset the reuse flag for non-linear buffers.
+	 */
+	bit_flags &= ~H2N_BIT_FLAG_BUFFER_REUSABLE;
 	if (likely(nbuf->ip_summed == CHECKSUM_PARTIAL)) {
 		bit_flags |= H2N_BIT_FLAG_GEN_IP_TRANSPORT_CHECKSUM;
 		bit_flags |= H2N_BIT_FLAG_GEN_IPV4_IP_CHECKSUM;
@@ -2653,7 +2800,7 @@ static inline int32_t nss_core_send_buffer_nr_frags(struct nss_ctx_instance *nss
 
 		buffer = skb_frag_dma_map(nss_ctx->dev, frag, 0, skb_frag_size(frag), DMA_TO_DEVICE);
 		if (unlikely(dma_mapping_error(nss_ctx->dev, buffer))) {
-			nss_warning("%p: DMA mapping failed for fragment", nss_ctx);
+			nss_warning("%px: DMA mapping failed for fragment", nss_ctx);
 			nss_core_send_unwind_dma(nss_ctx->dev, desc_if, hlos_index, i + 1, false);
 			return -(i + 1);
 		}
@@ -2683,7 +2830,7 @@ static inline int32_t nss_core_send_buffer_nr_frags(struct nss_ctx_instance *nss
 
 	NSS_CORE_DMA_CACHE_MAINT((void *)desc, sizeof(*desc), DMA_TO_DEVICE);
 
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_NR_FRAGS]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_NR_FRAGS]);
 	return i+1;
 }
 
@@ -2708,7 +2855,7 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 
 	uint32_t frag0phyaddr = nss_core_dma_map_single(nss_ctx->dev, nbuf);
 	if (unlikely(dma_mapping_error(nss_ctx->dev, frag0phyaddr))) {
-		nss_warning("%p: DMA mapping failed for virtual address = %p", nss_ctx, nbuf->head);
+		nss_warning("%px: DMA mapping failed for virtual address = %px", nss_ctx, nbuf->head);
 		return 0;
 	}
 
@@ -2716,6 +2863,11 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 	 * Copy and Set bit flags
 	 */
 	bit_flags = flags;
+
+	/*
+	 * Reset the reuse flag for non-linear buffers.
+	 */
+	bit_flags &= ~H2N_BIT_FLAG_BUFFER_REUSABLE;
 	if (likely(nbuf->ip_summed == CHECKSUM_PARTIAL)) {
 		bit_flags |= H2N_BIT_FLAG_GEN_IP_TRANSPORT_CHECKSUM;
 		bit_flags |= H2N_BIT_FLAG_GEN_IPV4_IP_CHECKSUM;
@@ -2742,7 +2894,7 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 
 		buffer = nss_core_dma_map_single(nss_ctx->dev, iter);
 		if (unlikely(dma_mapping_error(nss_ctx->dev, buffer))) {
-			nss_warning("%p: DMA mapping failed for virtual address = %p", nss_ctx, iter->head);
+			nss_warning("%px: DMA mapping failed for virtual address = %px", nss_ctx, iter->head);
 			nss_core_send_unwind_dma(nss_ctx->dev, desc_if, hlos_index, i + 1, true);
 			return -(i+1);
 		}
@@ -2753,7 +2905,7 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 		 */
 		nr_frags = skb_shinfo(iter)->nr_frags;
 		if (unlikely(nr_frags > 0)) {
-			nss_warning("%p: fraglist with page data are not supported: %p\n", nss_ctx, iter);
+			nss_warning("%px: fraglist with page data are not supported: %px\n", nss_ctx, iter);
 			nss_core_send_unwind_dma(nss_ctx->dev, desc_if, hlos_index, i + 1, true);
 			return -(i+1);
 		}
@@ -2797,7 +2949,7 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 	 * So, the information will be in the NSS-FW.
 	 */
 	skb_shinfo(nbuf)->frag_list = NULL;
-	NSS_PKT_STATS_ADD(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT], i);
+	NSS_PKT_STATS_ADD(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT], i);
 
 	/*
 	 * Update bit flag for last descriptor.
@@ -2805,8 +2957,18 @@ static inline int32_t nss_core_send_buffer_fraglist(struct nss_ctx_instance *nss
 	desc->bit_flags |= H2N_BIT_FLAG_LAST_SEGMENT;
 	NSS_CORE_DMA_CACHE_MAINT((void *)desc, sizeof(*desc), DMA_TO_DEVICE);
 
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_FRAGLIST]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_FRAGLIST]);
 	return i+1;
+}
+
+/*
+ * nss_core_init_handlers()
+ *	Initialize the handlers for all interfaces associated with core
+ */
+void nss_core_init_handlers(struct nss_ctx_instance *nss_ctx)
+{
+	struct nss_rx_cb_list *cb_list = nss_ctx->nss_rx_interface_handlers;
+	memset(cb_list, 0, sizeof(*cb_list) * NSS_MAX_NET_INTERFACES);
 }
 
 /*
@@ -2850,7 +3012,7 @@ int32_t nss_core_send_buffer(struct nss_ctx_instance *nss_ctx, uint32_t if_num,
 		 * Check that segments do not overflow the number of descriptors
 		 */
 		if (unlikely(segments > size)) {
-			nss_warning("%p: Unable to fit in skb - %d segments in our descriptors", nss_ctx, segments);
+			nss_warning("%px: Unable to fit in skb - %d segments in our descriptors", nss_ctx, segments);
 			return NSS_CORE_STATUS_FAILURE;
 		}
 	}
@@ -2881,15 +3043,15 @@ int32_t nss_core_send_buffer(struct nss_ctx_instance *nss_ctx, uint32_t if_num,
 		h2n_desc_ring->tx_q_full_cnt++;
 		h2n_desc_ring->flags |= NSS_H2N_DESC_RING_FLAGS_TX_STOPPED;
 		spin_unlock_bh(&h2n_desc_ring->lock);
-		nss_warning("%p: Data/Command Queue full reached", nss_ctx);
+		nss_warning("%px: Data/Command Queue full reached", nss_ctx);
 
 #if (NSS_PKT_STATS_ENABLED == 1)
 		if (nss_ctx->id == NSS_CORE_0) {
-			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_QUEUE_FULL_0]);
+			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_QUEUE_FULL_0]);
 		} else if (nss_ctx->id == NSS_CORE_1) {
-			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_QUEUE_FULL_1]);
+			NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_QUEUE_FULL_1]);
 		} else {
-			nss_warning("%p: Invalid nss core: %d\n", nss_ctx, nss_ctx->id);
+			nss_warning("%px: Invalid nss core: %d\n", nss_ctx, nss_ctx->id);
 		}
 #endif
 
@@ -2947,7 +3109,7 @@ int32_t nss_core_send_buffer(struct nss_ctx_instance *nss_ctx, uint32_t if_num,
 		/*
 		 * We failed and hence we need to unmap dma regions
 		 */
-		nss_warning("%p: failed to map DMA regions:%d", nss_ctx, -count);
+		nss_warning("%px: failed to map DMA regions:%d", nss_ctx, -count);
 		spin_unlock_bh(&h2n_desc_ring->lock);
 		return NSS_CORE_STATUS_FAILURE;
 	}
@@ -2983,7 +3145,7 @@ int32_t nss_core_send_buffer(struct nss_ctx_instance *nss_ctx, uint32_t if_num,
 	}
 #endif
 
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NSS_SKB_COUNT]);
 
 	spin_unlock_bh(&h2n_desc_ring->lock);
 	return NSS_CORE_STATUS_SUCCESS;
@@ -3001,41 +3163,41 @@ int32_t nss_core_send_cmd(struct nss_ctx_instance *nss_ctx, void *msg, int size,
 
 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
 	if (unlikely(nss_ctx->state != NSS_CORE_STATE_INITIALIZED)) {
-		nss_warning("%p: interface: %d type: %d message dropped as core not ready\n", nss_ctx, ncm->interface, ncm->type);
+		nss_warning("%px: interface: %d type: %d message dropped as core not ready\n", nss_ctx, ncm->interface, ncm->type);
 		return NSS_TX_FAILURE_NOT_READY;
 	}
 
 	if (nss_cmn_get_msg_len(ncm) > size) {
-		nss_warning("%p: interface: %d type: %d message length %d is invalid, size = %d\n",
+		nss_warning("%px: interface: %d type: %d message length %d is invalid, size = %d\n",
 					nss_ctx, ncm->interface, ncm->type, nss_cmn_get_msg_len(ncm), size);
 		return NSS_TX_FAILURE_TOO_LARGE;
 	}
 
 	if (buf_size > PAGE_SIZE) {
-		nss_warning("%p: interface: %d type: %d tx request size too large: %u",
+		nss_warning("%px: interface: %d type: %d tx request size too large: %u",
 					nss_ctx, ncm->interface, ncm->type, buf_size);
 		return NSS_TX_FAILURE_BAD_PARAM;
 	}
 
 	nbuf = dev_alloc_skb(buf_size);
 	if (unlikely(!nbuf)) {
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NBUF_ALLOC_FAILS]);
-		nss_warning("%p: interface: %d type: %d msg dropped as command allocation failed", nss_ctx, ncm->interface, ncm->type);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_NBUF_ALLOC_FAILS]);
+		nss_warning("%px: interface: %d type: %d msg dropped as command allocation failed", nss_ctx, ncm->interface, ncm->type);
 		return NSS_TX_FAILURE;
 	}
 
 	memcpy(skb_put(nbuf, buf_size), (void *)ncm, size);
 
-	status = nss_core_send_buffer(nss_ctx, 0, nbuf, NSS_IF_H2N_CMD_QUEUE, H2N_BUFFER_CTRL, 0);
+	status = nss_core_send_buffer(nss_ctx, 0, nbuf, NSS_IF_H2N_CMD_QUEUE, H2N_BUFFER_CTRL, H2N_BIT_FLAG_BUFFER_REUSABLE);
 	if (status != NSS_CORE_STATUS_SUCCESS) {
 		dev_kfree_skb_any(nbuf);
-		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_CMD_QUEUE_FULL]);
-		nss_warning("%p: interface: %d type: %d unable to enqueue message status %d\n", nss_ctx, ncm->interface, ncm->type, status);
+		NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_CMD_QUEUE_FULL]);
+		nss_warning("%px: interface: %d type: %d unable to enqueue message status %d\n", nss_ctx, ncm->interface, ncm->type, status);
 		return status;
 	}
 
 	nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_DATA_COMMAND_QUEUE);
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_CMD_REQ]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_CMD_REQ]);
 	return status;
 }
 
@@ -3050,7 +3212,7 @@ int32_t nss_core_send_packet(struct nss_ctx_instance *nss_ctx, struct sk_buff *n
 
 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
 	if (unlikely(nss_ctx->state != NSS_CORE_STATE_INITIALIZED)) {
-		nss_warning("%p: interface: %d packet dropped as core not ready\n", nss_ctx, if_num);
+		nss_warning("%px: interface: %d packet dropped as core not ready\n", nss_ctx, if_num);
 		return NSS_TX_FAILURE_NOT_READY;
 	}
 
@@ -3062,7 +3224,7 @@ int32_t nss_core_send_packet(struct nss_ctx_instance *nss_ctx, struct sk_buff *n
 #endif
 	status = nss_core_send_buffer(nss_ctx, if_num, nbuf, NSS_IF_H2N_DATA_QUEUE + queue_id, H2N_BUFFER_PACKET, flag);
 	if (status != NSS_CORE_STATUS_SUCCESS) {
-		nss_warning("%p: interface: %d unable to enqueue packet status %d\n", nss_ctx, if_num, status);
+		nss_warning("%px: interface: %d unable to enqueue packet status %d\n", nss_ctx, if_num, status);
 		return status;
 	}
 
@@ -3072,9 +3234,9 @@ int32_t nss_core_send_packet(struct nss_ctx_instance *nss_ctx, struct sk_buff *n
 	/*
 	 * Count per queue and aggregate packet count
 	 */
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET_QUEUE_0 + queue_id]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_PACKET_QUEUE_0 + queue_id]);
 #endif
-	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_TX_PACKET]);
+	NSS_PKT_STATS_INC(&nss_ctx->nss_top->stats_drv[NSS_DRV_STATS_TX_PACKET]);
 	return status;
 }
 

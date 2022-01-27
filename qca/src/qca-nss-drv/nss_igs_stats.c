@@ -14,7 +14,6 @@
  **************************************************************************
  */
 
-#include "nss_stats.h"
 #include "nss_core.h"
 #include "nss_igs_stats.h"
 
@@ -72,33 +71,33 @@ static DEFINE_SPINLOCK(nss_igs_stats_debug_lock);
  * nss_igs_stats_str
  *	IGS statistics strings for nss session stats
  */
-static int8_t *nss_igs_stats_str[NSS_IGS_STATS_MAX] = {
-	"IGS_SHAPER_TX_DROP",
-	"IGS_SHAPER_DROP",
-	"IGS_EXCEPTION_IPV4_PARSE_FAIL",
-	"IGS_EXCEPTION_IPV4_UNKNOWN_GRE_TYPE",
-	"IGS_EXCEPTION_IPV4_UNKNOWN_L4",
-	"IGS_EXCEPTION_IPV4_NO_CME",
-	"IGS_EXCEPTION_IPV4_FRAG_INITIAL",
-	"IGS_EXCEPTION_IPV4_FRAG_NON_INITIAL",
-	"IGS_EXCEPTION_IPV4_MALFORMED_UDP",
-	"IGS_EXCEPTION_IPV4_MALFORMED_TCP",
-	"IGS_EXCEPTION_IPV4_MALFORMED_UDPL",
-	"IGS_EXCEPTION_IPV4_MALFORMED_GRE",
-	"IGS_EXCEPTION_IPV6_PARSE_FAIL",
-	"IGS_EXCEPTION_IPV6_UNKNOWN_L4",
-	"IGS_EXCEPTION_IPV6_NO_CME",
-	"IGS_EXCEPTION_IPV6_FRAG_INITIAL",
-	"IGS_EXCEPTION_IPV6_FRAG_NON_INITIAL",
-	"IGS_EXCEPTION_IPV6_MALFORMED_UDP",
-	"IGS_EXCEPTION_IPV6_MALFORMED_TCP",
-	"IGS_EXCEPTION_IPV6_MALFORMED_UDPL",
-	"IGS_EXCEPTION_IPV6_MALFORMED_FRAG",
-	"IGS_EXCEPTION_EVENT_NO_SI",
-	"IGS_EXCEPTION_ETH_PARSE_FAIL",
-	"IGS_EXCEPTION_ETH_UNKNOWN_TYPE",
-	"IGS_EXCEPTION_PPPOE_NON_IP",
-	"IGS_EXCEPTION_PPPOE_MALFORMED"
+struct nss_stats_info nss_igs_stats_str[NSS_IGS_STATS_MAX] = {
+	{"IGS_SHAPER_TX_DROP"				, NSS_STATS_TYPE_DROP},
+	{"IGS_SHAPER_DROP"				, NSS_STATS_TYPE_DROP},
+	{"IGS_EXCEPTION_IPV4_PARSE_FAIL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_UNKNOWN_GRE_TYPE"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_UNKNOWN_L4"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_NO_CME"			, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_FRAG_INITIAL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_FRAG_NON_INITIAL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_MALFORMED_UDP"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_MALFORMED_TCP"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_MALFORMED_UDPL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV4_MALFORMED_GRE"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_PARSE_FAIL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_UNKNOWN_L4"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_NO_CME"			, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_FRAG_INITIAL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_FRAG_NON_INITIAL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_MALFORMED_UDP"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_MALFORMED_TCP"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_MALFORMED_UDPL"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_IPV6_MALFORMED_FRAG"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_EVENT_NO_SI"			, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_ETH_PARSE_FAIL"			, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_ETH_UNKNOWN_TYPE"		, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_PPPOE_NON_IP"			, NSS_STATS_TYPE_EXCEPTION},
+	{"IGS_EXCEPTION_PPPOE_MALFORMED"		, NSS_STATS_TYPE_EXCEPTION}
 };
 
 /*
@@ -141,7 +140,7 @@ static ssize_t nss_igs_stats_read(struct file *fp, char __user *ubuf, size_t sz,
 	ssize_t bytes_read = 0;
 	struct net_device *dev;
 	struct nss_igs_stats_debug_instance *igs_shadow_stats;
-	int id, i;
+	int id;
 
 	char *lbuf = kzalloc(size_al, GFP_KERNEL);
 	if (unlikely(!lbuf)) {
@@ -161,11 +160,11 @@ static ssize_t nss_igs_stats_read(struct file *fp, char __user *ubuf, size_t sz,
 	 * Get all stats
 	 */
 	nss_igs_stats_get((void *)igs_shadow_stats);
+	size_wr += nss_stats_banner(lbuf, size_wr, size_al, "igs", NSS_STATS_SINGLE_CORE);
 
 	/*
 	 * Session stats
 	 */
-	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "\nigs stats start:\n\n");
 	for (id = 0; id < NSS_MAX_IGS_DYNAMIC_INTERFACES; id++) {
 
 			if (!igs_shadow_stats[id].valid) {
@@ -182,23 +181,20 @@ static ssize_t nss_igs_stats_read(struct file *fp, char __user *ubuf, size_t sz,
 				size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "%d. nss interface id=%d\n", id,
 						igs_shadow_stats[id].if_num);
 			}
-
-			size_wr = nss_stats_fill_common_stats(igs_shadow_stats[id].if_num, lbuf, size_wr, size_al);
+			size_wr += nss_stats_fill_common_stats(igs_shadow_stats[id].if_num, id, lbuf, size_wr, size_al, "igs");
 
 			/*
 			 * IGS exception stats.
 			 */
-			size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "\nigs exception stats start:\n\n");
-
-			for (i = 0; i < NSS_IGS_STATS_MAX; i++) {
-				size_wr += scnprintf(lbuf + size_wr, size_al - size_wr,
-						     "\t%s = %llu\n", nss_igs_stats_str[i],
-						      igs_shadow_stats[id].stats[i]);
-			}
+			size_wr += nss_stats_print("igs", "igs exception stats start"
+							, id
+							, nss_igs_stats_str
+							, igs_shadow_stats[id].stats
+							, NSS_IGS_STATS_MAX
+							, lbuf, size_wr, size_al);
 			size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "\n");
 	}
 
-	size_wr += scnprintf(lbuf + size_wr, size_al - size_wr, "\nigs stats end\n");
 	bytes_read = simple_read_from_buffer(ubuf, sz, ppos, lbuf, size_wr);
 
 	kfree(igs_shadow_stats);

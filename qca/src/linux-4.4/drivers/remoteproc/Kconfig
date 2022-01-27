@@ -17,6 +17,8 @@ config IPQ807X_REMOTEPROC
 	tristate "IPQ807x Q6-WCSS rproc support"
 	depends on REMOTEPROC && QCOM_SMP2P
 	select IPQ_SUBSYTEM_DUMP
+	select QCOM_MDT_LOADER
+	select QCOM_SCM
 	help
 	  Say y here to support IPQ807x q6v5 wcss remote processors
 	  via the remote processor framework. Q6v5 WCSS are DSP remote
@@ -26,7 +28,9 @@ config IPQ807X_REMOTEPROC
 config IPQ_REMOTEPROC_ADSP
 	tristate "IPQ Q6-ADSP rproc support"
 	depends on REMOTEPROC && QCOM_SMP2P
-	select IPQ_SUBSYTEM_DUMP
+	select IPQ_SUBSYSTEM_DUMP
+	select QCOM_MDT_LOADER
+	select QCOM_SCM
 	help
 	  Say y here to support IPQ q6v6 adsp remote processors
 	  via the remote processor framework. Q6v6 ADSP are DSP remote
@@ -123,6 +127,21 @@ config QCOM_Q6V5_COMMON
 	tristate
 	depends on ARCH_QCOM
 	depends on QCOM_SMEM
+
+config QTI_Q6V5_ADSP
+	tristate "Qualcomm Technology Inc ADSP Peripheral Image Loader"
+	depends on OF && ARCH_QCOM
+	depends on QCOM_SMEM
+	depends on RPMSG_QCOM_SMD || (COMPILE_TEST && RPMSG_QCOM_SMD=n)
+	depends on RPMSG_QCOM_GLINK_SMEM || RPMSG_QCOM_GLINK_SMEM=n
+	depends on QCOM_SYSMON || QCOM_SYSMON=n
+	select MFD_SYSCON
+	select QCOM_MDT_LOADER
+	select QCOM_Q6V5_COMMON
+	select QCOM_RPROC_COMMON
+	help
+	  Say y here to support the Peripheral Image Loader
+	  for the Qualcomm Technology Inc. ADSP remote processors.
 
 config QCOM_Q6V5_WCSS
 	tristate "Qualcomm Hexagon based WCSS Peripheral Image Loader"

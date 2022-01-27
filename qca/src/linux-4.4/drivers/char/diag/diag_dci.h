@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,7 +25,7 @@
 #define DISABLE_LOG_MASK	0
 #define MAX_EVENT_SIZE		512
 #define DCI_CLIENT_INDEX_INVALID -1
-#define DCI_LOG_CON_MIN_LEN		14
+#define DCI_LOG_CON_MIN_LEN		16
 #define DCI_EVENT_CON_MIN_LEN		16
 
 #define DCI_BUF_PRIMARY		1
@@ -72,7 +72,7 @@ extern unsigned int dci_max_clients;
 
 #define DCI_REMOTE_DATA	0
 
-#define NUM_REMOTE_DATA_DEV     2
+#define NUM_REMOTE_DATA_DEV     3
 #define DIAGFWD_MDM_DCI         NUM_REMOTE_DATA_DEV
 #define NUM_REMOTE_DCI_DEV      (DIAGFWD_MDM_DCI - NUM_REMOTE_DATA_DEV + 1)
 
@@ -319,6 +319,7 @@ unsigned char *dci_get_buffer_from_bridge(int token);
 int diag_dci_write_bridge(int token, unsigned char *buf, int len);
 int diag_dci_write_done_bridge(int index, unsigned char *buf, int len);
 int diag_dci_send_handshake_pkt(int index);
+int diag_dci_init_remote(void);
 #endif
 
 #endif

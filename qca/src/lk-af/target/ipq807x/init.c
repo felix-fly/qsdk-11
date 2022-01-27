@@ -40,6 +40,7 @@
 #include <platform/timer.h>
 #include <platform/gpio.h>
 #include <platform/irqs.h>
+#include <platform/interrupts.h>
 #include <reg.h>
 #include <i2c_qup.h>
 #include <gsbi.h>
@@ -58,11 +59,14 @@
 #include <partition_parser.h>
 #include <usb30_wrapper.h>
 #include <string.h>
+#include <kernel/mutex.h>
+#include <malloc.h>
 
 #define APPS_DLOAD_MAGIC			0x10
 #define CLEAR_MAGIC				0x0
 #define SCM_CMD_TZ_CONFIG_HW_FOR_RAM_DUMP_ID 	0x9
 #define SCM_CMD_TZ_FORCE_DLOAD_ID 		0x10
+#define CDUMP_MODE				0x1
 
 #define CE1_INSTANCE		1
 #define CE_EE			1
@@ -80,6 +84,41 @@ extern struct mmc_card *get_mmc_card();
 extern void dmb(void);
 static struct qup_i2c_dev *dev = NULL;
 static int i2c_qup_initialized;
+
+#define TZ_INFO_GET_DIAG_ID	0x2
+#define SCM_SVC_INFO		0x6
+#define TZ_HK			BIT(2)
+#define TZBSP_DIAG_BUF_LEN	0x2000
+
+struct tzbsp_log_pos_t {
+        uint16_t wrap;          /* Ring buffer wrap-around ctr */
+        uint16_t offset;        /* Ring buffer current position */
+};
+
+struct tzbsp_diag_log_t {
+        struct tzbsp_log_pos_t log_pos; /* Ring buffer position mgmt */
+        uint8_t log_buf[1];             /* Open ended array to the end
+                                         * of the 4K IMEM buffer
+                                         */
+};
+
+/* Below structure to support AARCH64 TZ */
+struct ipq807x_tzbsp_diag_t_v8 {
+        uint32_t unused[7];     /* Unused variable is to support the
+                                 * corresponding structure in trustzone
+                                 * and size is varying based on AARCH64 TZ
+                                 */
+        uint32_t ring_off;
+        uint32_t unused1[571];
+        struct tzbsp_diag_log_t log;
+};
+
+struct tz_log_struct {
+	char *ker_buf;
+	char *copy_buf;
+	int buf_len;
+	int copy_len;
+};
 
 /* Setting this variable to different values defines the
  * behavior of CE engine:
@@ -225,6 +264,101 @@ void i2c_ipq807x_init(uint8_t blsp_id, uint8_t qup_id)
 	i2c_qup_initialized = 1;
 }
 
+void crashdump_init(void)
+{
+	int ret;
+	ret = qca_scm_call_write(SCM_SVC_IO_ACCESS, SCM_IO_WRITE,
+				(uint32_t *)0x193D100, APPS_DLOAD_MAGIC);
+	if (ret)
+		dprintf(CRITICAL, "Error setting crashdump magic\n");
+	else
+		dprintf(INFO, "Crashdump MAGIC set\n");
+}
+
+int display_tzlog(void)
+{
+	char *ker_buf;
+	char *tmp_buf;
+	uint32_t buf_len, copy_len = 0;
+	uint16_t wrap, ring, offset;
+	struct tzbsp_diag_log_t *log;
+	struct ipq807x_tzbsp_diag_t_v8 *ipq807x_diag_buf;
+	int ret;
+
+	buf_len = TZBSP_DIAG_BUF_LEN;
+	ker_buf = malloc(buf_len);
+	if (!ker_buf) {
+		dprintf(CRITICAL, "malloc failed for ker_buf\n");
+		goto err_ker_buf;
+	}
+
+	tmp_buf = malloc(buf_len);
+	if (!tmp_buf) {
+		dprintf(CRITICAL, "malloc failed for tmp_buf\n");
+		goto err_tmp_buf;
+	}
+	memset((void *)tmp_buf, 0, (size_t)buf_len);
+	memset((void *)ker_buf, 0, (size_t)buf_len);
+
+
+	/* SCM call to TZ to get the tz log */
+	ret = qca_scm_tz_log(SCM_SVC_INFO, TZ_INFO_GET_DIAG_ID,
+					ker_buf, buf_len);
+	if (ret != 0) {
+		dprintf(CRITICAL, "Error in getting tz log\n");
+		goto err_scm;
+	}
+
+	ipq807x_diag_buf = (struct ipq807x_tzbsp_diag_t_v8 *)ker_buf;
+	ring = ipq807x_diag_buf->ring_off;
+	log = &ipq807x_diag_buf->log;
+
+	offset = log->log_pos.offset;
+	wrap = log->log_pos.wrap;
+
+	if (wrap != 0) {
+		memcpy(tmp_buf, (ker_buf + offset + ring),
+			(buf_len - offset - ring));
+		memcpy(tmp_buf + (buf_len - offset - ring),
+				(ker_buf + ring), offset);
+		copy_len = (buf_len - offset - ring) + offset;
+	}
+	else {
+		memcpy(tmp_buf, (ker_buf + ring), offset);
+		copy_len = offset;
+	}
+
+	/* display buffer to console*/
+	dprintf(INFO, "TZ LOG:\n\n");
+	for (uint32_t i = 0; i < copy_len; i++) {
+		printf("%c", (char)*tmp_buf);
+		tmp_buf += 1;
+	}
+	printf("\n");
+
+err_scm:
+	free(tmp_buf);
+err_tmp_buf:
+	free(ker_buf);
+err_ker_buf:
+	return 0;
+}
+
+static enum handler_return tzerr_irq_handler(void *arg)
+{
+	dprintf(CRITICAL, "NOC Error detected, Halting...\n");
+	display_tzlog();
+	halt();
+	return IRQ_HANDLED;
+}
+
+void enable_noc_error_detection(void)
+{
+	dprintf(INFO, "Enable tzerr IRQ\n");
+	register_int_handler(TZ_ERR_IRQ, tzerr_irq_handler, 0);
+	unmask_interrupt(TZ_ERR_IRQ);
+}
+
 void target_init(void)
 {
 	unsigned platform_id = board_platform_id();
@@ -235,6 +369,7 @@ void target_init(void)
 	dprintf(INFO, "board platform id is 0x%x\n",  platform_id);
 	dprintf(INFO, "board platform verson is 0x%x\n",  board_platform_ver());
 
+	enable_noc_error_detection();
 	target_sdc_init();
 	if (partition_read_table(mmc_host, (struct mmc_boot_card *)mmc_card))
 	{
@@ -264,9 +399,36 @@ void reboot_device(unsigned reboot_reason)
 {
 	writel(reboot_reason, RESTART_REASON_ADDR);
 
-	reset_crashdump();
-	writel(0, GCNT_PSHOLD);
-	mdelay(10000);
+	if (reboot_reason == CDUMP_MODE) {
+		dprintf(INFO, "CDUMP mode enabled\n");
+	}
+	else {
+		int ret;
+		uint32_t reset_type = 0x0;
+
+		ret = qca_scm_call_write(SCM_SVC_IO_ACCESS, SCM_IO_WRITE,
+					 (uint32_t *)0x193D100, CLEAR_MAGIC);
+		if (ret) {
+			dprintf(CRITICAL, "Error resetting crashdump magic\n");
+			return;
+		}
+
+		reset_crashdump();
+		ret = qca_scm_set_resettype(reset_type);
+		if (ret) {
+			dprintf(CRITICAL, "Error setting reset type\n");
+			return;
+		}
+
+	}
+
+	writel(1, MSM_WDT0_RST);
+	writel(0, MSM_WDT0_EN);
+	/* Set BITE_TIME to be 128ms*/
+	writel(0x1000, MSM_WDT0_BITE_TIME);
+	writel(1, MSM_WDT0_EN);
+	dmb();
+	mdelay(1000);
 
 	dprintf(CRITICAL, "Rebooting failed\n");
 }
@@ -523,7 +685,7 @@ static void target_crypto_init_params()
 	 * Do not do it again as the initialization address space
 	 * is locked.
 	 */
-	ce_params.do_bam_init      = 1;
+	ce_params.do_bam_init      = 0;
 
 	crypto_init_params(&ce_params);
 }

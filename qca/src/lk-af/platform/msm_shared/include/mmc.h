@@ -575,6 +575,7 @@ struct mmc_boot_host {
 #define MMC_CLK_DISABLE     0
 
 #ifndef MMC_SDHCI_SUPPORT
+__WEAK uint32_t mmc_get_device_blocksize() { return 0; }
 unsigned int mmc_boot_main(unsigned char slot, unsigned int base);
 unsigned int mmc_boot_read_from_card(struct mmc_boot_host *host,
 				     struct mmc_boot_card *card,

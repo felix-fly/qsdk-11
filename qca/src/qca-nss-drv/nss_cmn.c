@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -75,7 +75,7 @@ int32_t nss_cmn_get_interface_number(struct nss_ctx_instance *nss_ctx, struct ne
 
 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
 	if (unlikely(nss_ctx->state != NSS_CORE_STATE_INITIALIZED)) {
-		nss_warning("%p: Interface number could not be found as core not ready\n", nss_ctx);
+		nss_warning("%px: Interface number could not be found as core not ready\n", nss_ctx);
 		return -1;
 	}
 
@@ -90,7 +90,7 @@ int32_t nss_cmn_get_interface_number(struct nss_ctx_instance *nss_ctx, struct ne
 		}
 	}
 
-	nss_warning("%p: Interface number could not be found as interface has not registered yet\n", nss_ctx);
+	nss_warning("%px: Interface number could not be found as interface has not registered yet\n", nss_ctx);
 	return -1;
 }
 EXPORT_SYMBOL(nss_cmn_get_interface_number);
@@ -119,7 +119,7 @@ struct net_device *nss_cmn_get_interface_dev(struct nss_ctx_instance *ctx, uint3
 
 	NSS_VERIFY_CTX_MAGIC(nss_ctx);
 	if (unlikely(nss_ctx->state != NSS_CORE_STATE_INITIALIZED)) {
-		nss_warning("%p: Interface device could not be found as core not ready\n", nss_ctx);
+		nss_warning("%px: Interface device could not be found as core not ready\n", nss_ctx);
 		return NULL;
 	}
 
@@ -152,7 +152,7 @@ int32_t nss_cmn_get_interface_number_by_dev_and_type(struct net_device *dev, uin
 		}
 	}
 
-	nss_warning("Interface number could not be found for %p (%s) as interface has not registered yet\n", dev, dev->name);
+	nss_warning("Interface number could not be found for %px (%s) as interface has not registered yet\n", dev, dev->name);
 	return -1;
 }
 EXPORT_SYMBOL(nss_cmn_get_interface_number_by_dev_and_type);
@@ -197,28 +197,11 @@ bool nss_cmn_interface_is_redirect(struct nss_ctx_instance *nss_ctx, int32_t int
 {
 	enum nss_dynamic_interface_type type = nss_dynamic_interface_get_type(nss_ctx, interface_num);
 
-	return type == NSS_DYNAMIC_INTERFACE_TYPE_WIFI
-		|| type == NSS_DYNAMIC_INTERFACE_TYPE_GENERIC_REDIR_N2H
+	return type == NSS_DYNAMIC_INTERFACE_TYPE_GENERIC_REDIR_N2H
 		|| type == NSS_DYNAMIC_INTERFACE_TYPE_GENERIC_REDIR_H2N
 		|| type == NSS_DYNAMIC_INTERFACE_TYPE_VIRTIF_DEPRECATED;
 }
 EXPORT_SYMBOL(nss_cmn_interface_is_redirect);
-
-/*
- * nss_cmn_interface_is_reuse_not_supported()
- *	Determines if the interface supports skb no-reuse.
- */
-bool nss_cmn_interface_is_reuse_not_supported(struct nss_ctx_instance *nss_ctx, int32_t interface_num)
-{
-	enum nss_dynamic_interface_type type = NSS_DYNAMIC_INTERFACE_TYPE_NONE;
-
-	/*
-	 * Check if the interface belongs to the GRE exception DS.
-	 */
-	type = nss_dynamic_interface_get_type(nss_ctx, interface_num);
-	return type == NSS_DYNAMIC_INTERFACE_TYPE_GRE_REDIR_EXCEPTION_DS;
-}
-EXPORT_SYMBOL(nss_cmn_interface_is_reuse_not_supported);
 
 /*
  * nss_cmn_rx_dropped_sum()
@@ -303,7 +286,7 @@ nss_cb_register_status_t nss_cmn_register_service_code(struct nss_ctx_instance *
 		/*
 		 * We already have a callback registered for this service code.
 		 */
-		nss_warning("%p: a callback is registered already for this service code %d\n", nss_ctx, service_code);
+		nss_warning("%px: a callback is registered already for this service code %d\n", nss_ctx, service_code);
 
 		return NSS_CB_REGISTER_FAILED;
 	}
@@ -326,7 +309,7 @@ nss_cb_unregister_status_t nss_cmn_unregister_service_code(struct nss_ctx_instan
 		/*
 		 * No callback was registered for this service code.
 		 */
-		nss_warning("%p: no callback is registered for this service code %d\n", nss_ctx, service_code);
+		nss_warning("%px: no callback is registered for this service code %d\n", nss_ctx, service_code);
 		return NSS_CB_UNREGISTER_FAILED;
 	}
 

@@ -16,6 +16,9 @@
  */
 
 #include "qcom-ipq6018.dtsi"
+#include "qcom-ipq6018-rpm-regulator.dtsi"
+#include "qcom-ipq6018-cpr-regulator.dtsi"
+#include "qcom-ipq6018-cp-cpu.dtsi"
 #include "qcom-ipq6018-audio-overlay.dtsi"
 
 / {
@@ -37,7 +40,11 @@
 
 	chosen {
 		bootargs = "console=ttyMSM0,115200,n8 rw init=/init";
+#ifdef __IPQ_MEM_PROFILE_256_MB__
+		bootargs-append = " swiotlb=1";
+#else
 		bootargs-append = " swiotlb=1 coherent_pool=2M";
+#endif
 	};
 
 	/*
@@ -310,7 +317,9 @@
 };
 
 &pcie0 {
+#if defined(__CNSS2__)
 	status = "ok";
+#endif
 };
 
 /* TZAPP is enabled in default memory profile only */

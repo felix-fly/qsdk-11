@@ -21,7 +21,7 @@
 #include "ssdk_init.h"
 /*qca808x_end*/
 #include "ssdk_dts.h"
-#ifdef HPPE
+#if (defined(HPPE) || defined(MP))
 #include "hppe_init.h"
 #endif
 #include <linux/kconfig.h>
@@ -418,6 +418,7 @@ qca_switch_reg_write(a_uint32_t dev_id, a_uint32_t reg_addr, a_uint8_t * reg_dat
 sw_error_t
 qca_psgmii_reg_read(a_uint32_t dev_id, a_uint32_t reg_addr, a_uint8_t * reg_data, a_uint32_t len)
 {
+#ifdef DESS
 	uint32_t reg_val = 0;
 
 	if (len != sizeof (a_uint32_t))
@@ -432,12 +433,14 @@ qca_psgmii_reg_read(a_uint32_t dev_id, a_uint32_t reg_addr, a_uint8_t * reg_data
 	reg_val = readl(qca_phy_priv_global[dev_id]->psgmii_hw_addr + reg_addr);
 
 	aos_mem_copy(reg_data, &reg_val, sizeof (a_uint32_t));
+#endif
 	return 0;
 }
 
 sw_error_t
 qca_psgmii_reg_write(a_uint32_t dev_id, a_uint32_t reg_addr, a_uint8_t * reg_data, a_uint32_t len)
 {
+#ifdef DESS
 	uint32_t reg_val = 0;
 	if (len != sizeof (a_uint32_t))
         return SW_BAD_LEN;
@@ -450,6 +453,7 @@ qca_psgmii_reg_write(a_uint32_t dev_id, a_uint32_t reg_addr, a_uint8_t * reg_dat
 
 	aos_mem_copy(&reg_val, reg_data, sizeof (a_uint32_t));
 	writel(reg_val, qca_phy_priv_global[dev_id]->psgmii_hw_addr + reg_addr);
+#endif
 	return 0;
 }
 
@@ -457,7 +461,7 @@ sw_error_t
 qca_uniphy_reg_read(a_uint32_t dev_id, a_uint32_t uniphy_index,
 				a_uint32_t reg_addr, a_uint8_t * reg_data, a_uint32_t len)
 {
-#ifdef HPPE
+#if (defined(HPPE) || defined(MP))
 	uint32_t reg_val = 0;
 	void __iomem *hppe_uniphy_base = NULL;
 	a_uint32_t reg_addr1, reg_addr2;
@@ -500,7 +504,7 @@ sw_error_t
 qca_uniphy_reg_write(a_uint32_t dev_id, a_uint32_t uniphy_index,
 				a_uint32_t reg_addr, a_uint8_t * reg_data, a_uint32_t len)
 {
-#ifdef HPPE
+#if (defined(HPPE) || defined(MP))
 	void __iomem *hppe_uniphy_base = NULL;
 	a_uint32_t reg_addr1, reg_addr2;
 	uint32_t reg_val = 0;
@@ -537,7 +541,6 @@ qca_uniphy_reg_write(a_uint32_t dev_id, a_uint32_t uniphy_index,
 #endif
 	return 0;
 }
-#ifdef HAWKEYE_CHIP
 #ifndef BOARD_AR71XX
 /*qca808x_start*/
 static int miibus_get(a_uint32_t dev_id)
@@ -687,7 +690,6 @@ static int miibus_get(a_uint32_t dev_id)
 
 	return 0;
 }
-#endif
 #endif
 
 struct mii_bus *ssdk_miibus_get_by_device(a_uint32_t dev_id)
@@ -846,6 +848,8 @@ static ssize_t ssdk_byte_counter_set(struct device *dev,
 	return count;
 }
 
+#ifdef HPPE
+#ifdef IN_QOS
 void ssdk_dts_port_scheduler_dump(a_uint32_t dev_id)
 {
 	a_uint32_t i;
@@ -917,6 +921,46 @@ void ssdk_dts_l1scheduler_dump(a_uint32_t dev_id)
 				scheduler_cfg->epri, scheduler_cfg->edrr_id);
 	}
 }
+#endif
+#endif
+static const a_int8_t *qca_phy_feature_str[QCA_PHY_FEATURE_MAX] = {
+	"PHY_CLAUSE45",
+	"PHY_COMBO",
+	"PHY_QGMAC",
+	"PHY_XGMAC",
+	"PHY_I2C",
+	"PHY_INIT",
+	"PHY_FORCE"
+};
+
+void ssdk_dts_phyinfo_dump(a_uint32_t dev_id)
+{
+	a_uint32_t i, j;
+	ssdk_port_phyinfo *port_phyinfo;
+
+	printk("=====================port phyinfo========================\n");
+	printk("portid     phy_addr     features\n");
+
+	for (i = 0; i <= SSDK_MAX_PORT_NUM; i++) {
+		port_phyinfo = ssdk_port_phyinfo_get(dev_id, i);
+		if (port_phyinfo) {
+			printk("%6d%13d%*s", port_phyinfo->port_id,
+					port_phyinfo->phy_addr, 5, "");
+			for (j = 0; j < QCA_PHY_FEATURE_MAX; j++) {
+				if (port_phyinfo->phy_features & BIT(j) && BIT(j) != PHY_F_INIT) {
+					printk(KERN_CONT "%s ", qca_phy_feature_str[j]);
+					if (BIT(j) == PHY_F_FORCE) {
+						printk(KERN_CONT "(speed: %d, duplex: %s) ",
+								port_phyinfo->port_speed,
+								port_phyinfo->port_duplex > 0 ?
+								"full" : "half");
+					}
+				}
+			}
+			printk(KERN_CONT "\n");
+		}
+	}
+}
 
 static ssize_t ssdk_dts_dump(struct device *dev,
 		struct device_attribute *attr,
@@ -950,9 +994,15 @@ static ssize_t ssdk_dts_dump(struct device *dev,
 		printk("        switch_mac_mode = <0x%x>\n", ssdk_dt_global_get_mac_mode(dev_id, 0));
 		printk("        switch_mac_mode1 = <0x%x>\n", ssdk_dt_global_get_mac_mode(dev_id, 1));
 		printk("        switch_mac_mode2 = <0x%x>\n", ssdk_dt_global_get_mac_mode(dev_id, 2));
+#ifdef IN_BM
 		printk("        bm_tick_mode = <0x%x>\n", ssdk_bm_tick_mode_get(dev_id));
+#endif
+#ifdef HPPE
+#ifdef IN_QOS
 		printk("        tm_tick_mode = <0x%x>\n", ssdk_tm_tick_mode_get(dev_id));
-
+#endif
+#endif
+#ifdef DESS
 		printk("ess-psgmii\n");
 		ssdk_psgmii_reg_map_info_get(dev_id, &map);
 		mode = ssdk_psgmii_reg_access_mode_get(dev_id);
@@ -963,7 +1013,8 @@ static ssize_t ssdk_dts_dump(struct device *dev,
 			printk("        psgmii_access_mode = <mdio bus>\n");
 		else
 			printk("        psgmii_access_mode = <(null)>\n");
-
+#endif
+#ifdef IN_UNIPHY
 		printk("ess-uniphy\n");
 		ssdk_uniphy_reg_map_info_get(dev_id, &map);
 		mode = ssdk_uniphy_reg_access_mode_get(dev_id);
@@ -974,13 +1025,19 @@ static ssize_t ssdk_dts_dump(struct device *dev,
 			printk("        uniphy_access_mode = <mdio bus>\n");
 		else
 			printk("        uniphy_access_mode = <(null)>\n");
-
+#endif
+#ifdef HPPE
+#ifdef IN_QOS
 		printk("\n");
 		ssdk_dts_port_scheduler_dump(dev_id);
 		printk("\n");
 		ssdk_dts_l0scheduler_dump(dev_id);
 		printk("\n");
 		ssdk_dts_l1scheduler_dump(dev_id);
+#endif
+#endif
+		printk("\n");
+		ssdk_dts_phyinfo_dump(dev_id);
 	}
 
 	return count;
@@ -1245,13 +1302,13 @@ ssdk_plat_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 /*qca808x_end*/
 	mutex_init(&switch_mdio_lock);
 
-#ifdef HAWKEYE_CHIP
+	if(!ssdk_is_emulation(dev_id)){
 /*qca808x_start*/
-	if(miibus_get(dev_id))
-		return -ENODEV;
+		if(miibus_get(dev_id))
+			return -ENODEV;
 /*qca808x_end*/
-#endif
-
+	}
+#ifdef IN_UNIPHY
 	reg_mode = ssdk_uniphy_reg_access_mode_get(dev_id);
 	if(reg_mode == HSL_REG_LOCAL_BUS) {
 		ssdk_uniphy_reg_map_info_get(dev_id, &map);
@@ -1266,6 +1323,7 @@ ssdk_plat_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 		cfg->reg_func.uniphy_reg_set = qca_uniphy_reg_write;
 		cfg->reg_func.uniphy_reg_get = qca_uniphy_reg_read;
 	}
+#endif
 	reg_mode = ssdk_switch_reg_access_mode_get(dev_id);
 	if(reg_mode == HSL_REG_LOCAL_BUS) {
 		ssdk_switch_reg_map_info_get(dev_id, &map);
@@ -1282,17 +1340,15 @@ ssdk_plat_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 			SSDK_INFO("Enable ess clk\n");
 			clk_prepare_enable(ess_clk);
 		} else if (!IS_ERR(cmn_clk)) {
-#if defined(HPPE)
-#ifdef HAWKEYE_CHIP
-			ssdk_ppe_clock_init();
-#endif
+#if defined(HPPE) || defined(MP)
+			ssdk_gcc_clock_init();
 #endif
 			return 0;
 		}
 
 		cfg->reg_mode = HSL_HEADER;
 	}
-
+#ifdef DESS
 	reg_mode = ssdk_psgmii_reg_access_mode_get(dev_id);
 	if(reg_mode == HSL_REG_LOCAL_BUS) {
 		ssdk_psgmii_reg_map_info_get(dev_id, &map);
@@ -1314,7 +1370,7 @@ ssdk_plat_init(ssdk_init_cfg *cfg, a_uint32_t dev_id)
 		cfg->reg_func.psgmii_reg_set = qca_psgmii_reg_write;
 		cfg->reg_func.psgmii_reg_get = qca_psgmii_reg_read;
 	}
-
+#endif
 	reg_mode = ssdk_switch_reg_access_mode_get(dev_id);
 	if(reg_mode == HSL_REG_MDIO) {
 		cfg->reg_mode = HSL_MDIO;
@@ -1330,7 +1386,9 @@ ssdk_plat_exit(a_uint32_t dev_id)
 {
 /*qca808x_end*/
 	hsl_reg_mode reg_mode;
+#ifdef DESS
 	ssdk_reg_map_info map;
+#endif
 /*qca808x_start*/
 	printk("ssdk_plat_exit\n");
 /*qca808x_end*/
@@ -1338,7 +1396,7 @@ ssdk_plat_exit(a_uint32_t dev_id)
 	if (reg_mode == HSL_REG_LOCAL_BUS) {
 		iounmap(qca_phy_priv_global[dev_id]->hw_addr);
 	}
-
+#ifdef DESS
 	reg_mode = ssdk_psgmii_reg_access_mode_get(dev_id);
 	if (reg_mode == HSL_REG_LOCAL_BUS) {
 		ssdk_psgmii_reg_map_info_get(dev_id, &map);
@@ -1346,11 +1404,13 @@ ssdk_plat_exit(a_uint32_t dev_id)
 		release_mem_region(map.base_addr,
                                         map.size);
 	}
-
+#endif
+#ifdef IN_UNIPHY
 	reg_mode = ssdk_uniphy_reg_access_mode_get(dev_id);
 	if (reg_mode == HSL_REG_LOCAL_BUS) {
 		iounmap(qca_phy_priv_global[dev_id]->uniphy_hw_addr);
 	}
+#endif
 /*qca808x_start*/
 }
 /*qca808x_end*/

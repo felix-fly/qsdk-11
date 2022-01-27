@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -19,6 +19,50 @@
 #include "dp_types.h"
 #include "hal_reo.h"
 #include "dp_internal.h"
+#include <qdf_time.h>
+
+#define dp_reo_alert(params...) QDF_TRACE_FATAL(QDF_MODULE_ID_DP_REO, params)
+#define dp_reo_err(params...) QDF_TRACE_ERROR(QDF_MODULE_ID_DP_REO, params)
+#define dp_reo_warn(params...) QDF_TRACE_WARN(QDF_MODULE_ID_DP_REO, params)
+#define dp_reo_info(params...) \
+	__QDF_TRACE_FL(QDF_TRACE_LEVEL_INFO_HIGH, QDF_MODULE_ID_DP_REO, ## params)
+#define dp_reo_debug(params...) QDF_TRACE_DEBUG(QDF_MODULE_ID_DP_REO, params)
+
+#ifdef WLAN_FEATURE_DP_EVENT_HISTORY
+/**
+ * dp_reo_cmd_srng_event_record() - Record reo cmds posted
+ * to the reo cmd ring
+ * @soc: dp soc handle
+ * @type: reo cmd type
+ * @post_status: command error status
+ *
+ * Return: None
+ */
+static
+void dp_reo_cmd_srng_event_record(struct dp_soc *soc,
+				  enum hal_reo_cmd_type type,
+				  int post_status)
+{
+	struct reo_cmd_event_history *cmd_event_history =
+					&soc->stats.cmd_event_history;
+	struct reo_cmd_event_record *record = cmd_event_history->cmd_record;
+	int record_index;
+
+	record_index = (qdf_atomic_inc_return(&cmd_event_history->index)) &
+				(REO_CMD_EVENT_HIST_MAX - 1);
+
+	record[record_index].cmd_type = type;
+	record[record_index].cmd_return_status = post_status;
+	record[record_index].timestamp  = qdf_get_log_timestamp();
+}
+#else
+static inline
+void dp_reo_cmd_srng_event_record(struct dp_soc *soc,
+				  enum hal_reo_cmd_type type,
+				  int post_status)
+{
+}
+#endif /*WLAN_FEATURE_DP_EVENT_HISTORY */
 
 QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc, enum hal_reo_cmd_type type,
 		     struct hal_reo_cmd_params *params,
@@ -27,48 +71,22 @@ QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc, enum hal_reo_cmd_type type,
 	struct dp_reo_cmd_info *reo_cmd;
 	int num;
 
-	switch (type) {
-	case CMD_GET_QUEUE_STATS:
-		num = hal_reo_cmd_queue_stats(soc->reo_cmd_ring.hal_srng,
-					      soc->hal_soc, params);
-		break;
-	case CMD_FLUSH_QUEUE:
-		num = hal_reo_cmd_flush_queue(soc->reo_cmd_ring.hal_srng,
-					      soc->hal_soc, params);
-		break;
-	case CMD_FLUSH_CACHE:
-		num = hal_reo_cmd_flush_cache(soc->reo_cmd_ring.hal_srng,
-					      soc->hal_soc, params);
-		break;
-	case CMD_UNBLOCK_CACHE:
-		num = hal_reo_cmd_unblock_cache(soc->reo_cmd_ring.hal_srng,
-						soc->hal_soc, params);
-		break;
-	case CMD_FLUSH_TIMEOUT_LIST:
-		num = hal_reo_cmd_flush_timeout_list(soc->reo_cmd_ring.hal_srng,
-						     soc->hal_soc, params);
-		break;
-	case CMD_UPDATE_RX_REO_QUEUE:
-		num = hal_reo_cmd_update_rx_queue(soc->reo_cmd_ring.hal_srng,
-						  soc->hal_soc, params);
-		break;
-	default:
-		QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
-			"%s: Invalid REO command type", __func__);
-		return QDF_STATUS_E_FAILURE;
-	};
+	num = hal_reo_send_cmd(soc->hal_soc, soc->reo_cmd_ring.hal_srng, type,
+			       params);
+	if (num < 0)
+		return QDF_STATUS_E_INVAL;
+
+	dp_reo_cmd_srng_event_record(soc, type, num);
 
 	if (num < 0) {
-		qdf_print("%s: Error with sending REO command", __func__);
 		return QDF_STATUS_E_FAILURE;
 	}
 
 	if (callback_fn) {
 		reo_cmd = qdf_mem_malloc(sizeof(*reo_cmd));
 		if (!reo_cmd) {
-			QDF_TRACE(QDF_MODULE_ID_TXRX, QDF_TRACE_LEVEL_ERROR,
-				"%s: alloc failed for REO cmd:%d!!",
-				__func__, type);
+			dp_err_log("alloc failed for REO cmd:%d!!",
+				   type);
 			return QDF_STATUS_E_NOMEM;
 		}
 
@@ -87,7 +105,7 @@ QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc, enum hal_reo_cmd_type type,
 
 uint32_t dp_reo_status_ring_handler(struct dp_intr *int_ctx, struct dp_soc *soc)
 {
-	uint32_t *reo_desc;
+	hal_ring_desc_t reo_desc;
 	struct dp_reo_cmd_info *reo_cmd = NULL;
 	union hal_reo_status reo_status;
 	int num;
@@ -101,55 +119,15 @@ uint32_t dp_reo_status_ring_handler(struct dp_intr *int_ctx, struct dp_soc *soc)
 
 	while (reo_desc) {
 		uint16_t tlv = HAL_GET_TLV(reo_desc);
+		QDF_STATUS status;
+
 		processed_count++;
 
-		switch (tlv) {
-		case HAL_REO_QUEUE_STATS_STATUS_TLV:
-			hal_reo_queue_stats_status(reo_desc,
-					   &reo_status.queue_status,
-					   soc->hal_soc);
-			num = reo_status.queue_status.header.cmd_num;
-			break;
-		case HAL_REO_FLUSH_QUEUE_STATUS_TLV:
-			hal_reo_flush_queue_status(reo_desc,
-						   &reo_status.fl_queue_status,
-						   soc->hal_soc);
-			num = reo_status.fl_queue_status.header.cmd_num;
-			break;
-		case HAL_REO_FLUSH_CACHE_STATUS_TLV:
-			hal_reo_flush_cache_status(reo_desc,
-						   &reo_status.fl_cache_status,
-						   soc->hal_soc);
-			num = reo_status.fl_cache_status.header.cmd_num;
-			break;
-		case HAL_REO_UNBLK_CACHE_STATUS_TLV:
-			hal_reo_unblock_cache_status(reo_desc, soc->hal_soc,
-						&reo_status.unblk_cache_status);
-			num = reo_status.unblk_cache_status.header.cmd_num;
-			break;
-		case HAL_REO_TIMOUT_LIST_STATUS_TLV:
-			hal_reo_flush_timeout_list_status(reo_desc,
-						&reo_status.fl_timeout_status,
-						soc->hal_soc);
-			num = reo_status.fl_timeout_status.header.cmd_num;
-			break;
-		case HAL_REO_DESC_THRES_STATUS_TLV:
-			hal_reo_desc_thres_reached_status(reo_desc,
-						&reo_status.thres_status,
-						soc->hal_soc);
-			num = reo_status.thres_status.header.cmd_num;
-			break;
-		case HAL_REO_UPDATE_RX_QUEUE_STATUS_TLV:
-			hal_reo_rx_update_queue_status(reo_desc,
-						&reo_status.rx_queue_status,
-						soc->hal_soc);
-			num = reo_status.rx_queue_status.header.cmd_num;
-			break;
-		default:
-			QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_WARN,
-				"%s, no handler for TLV:%d", __func__, tlv);
+		status = hal_reo_status_update(soc->hal_soc,
+					       reo_desc,
+					       &reo_status, tlv, &num);
+		if (status != QDF_STATUS_SUCCESS)
 			goto next;
-		} /* switch */
 
 		qdf_spin_lock_bh(&soc->rx.reo_cmd_lock);
 		TAILQ_FOREACH(reo_cmd, &soc->rx.reo_cmd_list,

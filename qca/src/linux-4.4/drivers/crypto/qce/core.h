@@ -15,6 +15,7 @@
 #define _CORE_H_
 
 #include <linux/kobject.h>
+#include <linux/interrupt.h>
 #include "dma.h"
 
 #define DEBUG_MAX_RW_BUF 2048
@@ -90,6 +91,7 @@ struct qce_device {
 	struct device *dev;
 	struct clk *core, *iface, *bus;
 	struct qce_dma_data dma;
+	dma_addr_t base_dma;
 	int burst_size;
 	unsigned int pipe_pair_id;
 	struct qce_stat qce_stat;
@@ -101,6 +103,9 @@ struct qce_device {
 	struct kset *parent_kset;
 	struct kobject kobj;
 	int fixed_key;
+	__le32 *reg_read_buf;
+	dma_addr_t reg_read_buf_phys;
+	bool qce_cmd_desc_enable;
 };
 
 /**
@@ -116,5 +121,19 @@ struct qce_algo_ops {
 	void (*unregister_algs)(struct qce_device *qce);
 	int (*async_req_handle)(struct crypto_async_request *async_req);
 };
+int qce_write_reg_dma(struct qce_device *qce, unsigned int offset, u32 val,
+		int cnt, int flag);
+int qce_read_reg_dma(struct qce_device *qce, unsigned int offset, void *buff,
+		int cnt, int flag);
+void qce_clear_bam_transaction(struct qce_device *qce);
+
+int qce_submit_cmd_desc(struct qce_device *qce);
+
+int qce_read_dma_get_lock(struct qce_device *qce);
+
+int qce_unlock_reg_dma(struct qce_device *qce);
+
+int qce_start_dma(struct crypto_async_request *async_req,
+		u32 type, u32 totallen, u32 offset);
 
 #endif /* _CORE_H_ */

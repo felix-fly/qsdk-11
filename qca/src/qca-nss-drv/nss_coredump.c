@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -79,7 +79,7 @@ static int nss_panic_handler(struct notifier_block *nb,
 			continue;
 		nss_ctx->state |= NSS_CORE_STATE_PANIC;
 		nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_TRIGGER_COREDUMP);
-		nss_warning("panic call NSS FW %p to dump %x\n",
+		nss_warning("panic call NSS FW %px to dump %x\n",
 			nss_ctx->nmap, nss_ctx->state);
 	}
 
@@ -138,7 +138,7 @@ void nss_fw_coredump_notify(struct nss_ctx_instance *nss_own,
 	dma_addr_t dma_addr;
 	uint32_t offset, index;
 
-	nss_warning("%p: COREDUMP %x Baddr %p stat %x",
+	nss_warning("%px: COREDUMP %x Baddr %px stat %x",
 			nss_own, intr, nss_own->nmap, nss_own->state);
 	nss_own->state |= NSS_CORE_STATE_FW_DEAD;
 	queue_delayed_work(coredump_workqueue, &coredump_queuewait,
@@ -161,7 +161,7 @@ void nss_fw_coredump_notify(struct nss_ctx_instance *nss_own,
 	 * only print whatever is in the buffer. Otherwise, dump last NSS_LOG_COREDUMP_LINE_NUM
 	 * to the dmessage.
 	 */
-	nss_info_always("%p: Starting NSS-FW logbuffer dump for core %u\n",
+	nss_info_always("%px: Starting NSS-FW logbuffer dump for core %u\n",
 			nss_own, nss_own->id);
 	nle_init = nld->log_ring_buffer;
 	if (nld->current_entry <= NSS_LOG_COREDUMP_LINE_NUM) {
@@ -183,7 +183,7 @@ void nss_fw_coredump_notify(struct nss_ctx_instance *nss_own,
 			+ offsetof(struct nss_log_descriptor, log_ring_buffer);
 		dma_sync_single_for_cpu(NULL, dma_addr + offset,
 				sizeof(struct nss_log_entry), DMA_FROM_DEVICE);
-		nss_info_always("%p: %s\n", nss_own, nle_print->message);
+		nss_info_always("%px: %s\n", nss_own, nle_print->message);
 		nle_print++;
 	}
 
@@ -195,7 +195,17 @@ void nss_fw_coredump_notify(struct nss_ctx_instance *nss_own,
 	 */
 	num_cores_wait = (nss_top_main.num_nss - 1);
 	if (!num_cores_wait) {
-		panic("NSS FW coredump: bringing system down\n");
+		/*
+		 * nss_cmd_buf.coredump values:
+		 *	0 ==	normal coredump and panic
+		 * non-zero value is for debug purpose:
+		 *	1 ==	force coredump and panic
+		 * otherwise	coredump but do not panic.
+		 */
+		if (!(nss_cmd_buf.coredump & 0xFFFFFFFE)) {
+			panic("NSS FW coredump: bringing system down\n");
+		}
+		nss_info_always("NSS core dump completed & use mdump to collect dump to debug\n");
 		return;
 	}
 
@@ -213,7 +223,7 @@ void nss_fw_coredump_notify(struct nss_ctx_instance *nss_own,
 		 * Notify any live core to dump.
 		 */
 		if (!(nss_ctx->state & NSS_CORE_STATE_FW_DEAD) && nss_ctx->nmap) {
-			nss_warning("notify NSS FW %p for coredump\n", nss_ctx->nmap);
+			nss_warning("notify NSS FW %px for coredump\n", nss_ctx->nmap);
 			nss_hal_send_interrupt(nss_ctx, NSS_H2N_INTR_TRIGGER_COREDUMP);
 			continue;
 		}

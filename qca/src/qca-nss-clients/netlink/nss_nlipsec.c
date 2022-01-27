@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2015-2016,2018-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016,2018-2021 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -36,12 +36,21 @@
 #include <nss_ipsecmgr.h>
 #include <nss_nl_if.h>
 #include <nss_ipsec_cmn.h>
-#include "nss_crypto_defines.h"
 #include "nss_nl.h"
 #include "nss_nlcmn_if.h"
 #include "nss_nlipsec_if.h"
 #include "nss_nlipv6_if.h"
 #include "nss_nlipv4_if.h"
+
+/*
+ * Function prototypes
+ */
+static int nss_nlipsec_op_create_tunnel(struct sk_buff *skb, struct genl_info *info);
+static int nss_nlipsec_op_destroy_tunnel(struct sk_buff *skb, struct genl_info *info);
+static int nss_nlipsec_op_add_sa(struct sk_buff *skb, struct genl_info *info);
+static int nss_nlipsec_op_delete_sa(struct sk_buff *skb, struct genl_info *info);
+static int nss_nlipsec_op_add_flow(struct sk_buff *skb, struct genl_info *info);
+static int nss_nlipsec_op_delete_flow(struct sk_buff *skb, struct genl_info *info);
 
 /*
  * Hold netdevice references
@@ -73,10 +82,49 @@ struct nss_nlipsec_ctx {
 static struct nss_nlipsec_ctx gbl_ctx;
 
 /*
+ * Multicast group for sending message status & events
+ */
+static const struct genl_multicast_group nss_nlipsec_mcgrp[] = {
+	{.name = NSS_NLIPSEC_MCAST_GRP},
+};
+
+/*
+ * Operation table called by the generic netlink layer based on the command
+ */
+static struct genl_ops nss_nlipsec_ops[] = {
+	{ /* Create tunnel */
+		.cmd = NSS_NLIPSEC_CMD_ADD_TUNNEL,
+		.doit = nss_nlipsec_op_create_tunnel,
+	},
+	{ /* Destroy tunnel */
+		.cmd = NSS_NLIPSEC_CMD_DEL_TUNNEL,
+		.doit = nss_nlipsec_op_destroy_tunnel,
+	},
+	{ /* Add Security Association */
+		.cmd = NSS_NLIPSEC_CMD_ADD_SA,
+		.doit = nss_nlipsec_op_add_sa,
+	},
+	{ /* Delete Security Association */
+		.cmd = NSS_NLIPSEC_CMD_DEL_SA,
+		.doit = nss_nlipsec_op_delete_sa,
+	},
+	{ /* Add flow */
+		.cmd = NSS_NLIPSEC_CMD_ADD_FLOW,
+		.doit = nss_nlipsec_op_add_flow,
+	},
+	{ /* Delete flow */
+		.cmd = NSS_NLIPSEC_CMD_DEL_FLOW,
+		.doit = nss_nlipsec_op_delete_flow,
+	},
+};
+
+/*
  * IPsec family definition
  */
 static struct genl_family nss_nlipsec_family = {
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 9, 0))
 	.id = GENL_ID_GENERATE,			/* Auto generate ID */
+#endif
 	.name = NSS_NLIPSEC_FAMILY,		/* Family name string */
 	.hdrsize = sizeof(struct nss_nlipsec_rule),/* NSS NETLINK IPsec rule */
 	.version = NSS_NL_VER,			/* Set it to NSS_NL version */
@@ -84,13 +132,10 @@ static struct genl_family nss_nlipsec_family = {
 	.netnsok = true,
 	.pre_doit = NULL,
 	.post_doit = NULL,
-};
-
-/*
- * Multicast group for sending message status & events
- */
-static const struct genl_multicast_group nss_nlipsec_mcgrp[] = {
-	{.name = NSS_NLIPSEC_MCAST_GRP},
+	.ops = nss_nlipsec_ops,
+	.n_ops = ARRAY_SIZE(nss_nlipsec_ops),
+	.mcgrps = nss_nlipsec_mcgrp,
+	.n_mcgrps = ARRAY_SIZE(nss_nlipsec_mcgrp)
 };
 
 /*
@@ -225,7 +270,7 @@ int nss_nlipsec_get_ifnum(struct net_device *dev, uint8_t proto, uint16_t dest_p
 
 	ifnum = nss_cmn_get_interface_number_by_dev_and_type(dev, type);
 	if (ifnum < 0) {
-		nss_nl_error("%p: Failed to find interface number (dev:%s, type:%d)\n", dev, dev->name, type);
+		nss_nl_error("%px: Failed to find interface number (dev:%s, type:%d)\n", dev, dev->name, type);
 		return -1;
 	}
 
@@ -233,7 +278,6 @@ int nss_nlipsec_get_ifnum(struct net_device *dev, uint8_t proto, uint16_t dest_p
 	 * Interface number with core-id
 	 */
 	return nss_ipsec_cmn_get_ifnum_with_coreid(ifnum);
-
 }
 
 /*
@@ -282,7 +326,7 @@ int nss_nlipsec_get_mtu(struct net_device *dev, uint8_t ip_ver, uint8_t proto, u
 static int nss_nlipsec_op_create_tunnel(struct sk_buff *skb, struct genl_info *info)
 {
 	struct nss_nlipsec_rule *nl_rule;
-	struct nss_ipsecmgr_callback cb;
+	struct nss_ipsecmgr_callback cb = {0};
 	struct nss_nlcmn *nl_cm;
 	struct net_device *dev;
 	struct sk_buff *resp;
@@ -308,7 +352,7 @@ static int nss_nlipsec_op_create_tunnel(struct sk_buff *skb, struct genl_info *i
 	 * Create a IPsec tunnel device
 	 */
 	cb.app_data = &gbl_ctx;
-	cb.skb_dev = NULL; /* FIXME: passing NULL ???? */
+	cb.skb_dev = NULL;
 	cb.data_cb = NULL;
 	cb.event_cb = nss_nlipsec_process_event;
 	dev = nss_ipsecmgr_tunnel_add(&cb);
@@ -324,7 +368,7 @@ static int nss_nlipsec_op_create_tunnel(struct sk_buff *skb, struct genl_info *i
 	nss_nlipsec_add_ref(dev);
 
 	/*
-	 * Response message
+	 * Response message to caller
 	 */
 	resp = nss_nl_copy_msg(skb);
 	if (!resp) {
@@ -477,6 +521,7 @@ static int nss_nlipsec_op_add_sa(struct sk_buff *skb, struct genl_info *info)
 	struct nss_nlipsec_rule_sa *sa_rule;
 	struct nss_nlipsec_rule *nl_rule;
 	struct net_device *dev;
+	struct sk_buff *resp;
 	uint32_t pid, if_num;
 	int error = 0;
 
@@ -502,11 +547,45 @@ static int nss_nlipsec_op_add_sa(struct sk_buff *skb, struct genl_info *info)
 	sa_data->cmn.keys.auth_key = sa_rule->auth_key;
 	sa_data->cmn.keys.nonce = sa_rule->nonce;
 
-	if (nss_ipsecmgr_sa_add_sync(dev, &sa_rule->tuple, sa_data, &if_num)) {
-		nss_nl_error("%d: Failed to add SA for net device(%s)\n", pid, nl_rule->ifname);
-		error = -EINVAL;
+	error = nss_ipsecmgr_sa_add_sync(dev, &sa_rule->tuple, sa_data, &if_num);
+	if (error) {
+		nss_nl_error("%d: Failed to add SA for net device(%s), error:%d\n", pid, nl_rule->ifname, error);
+		goto free_dev;
 	}
 
+	/*
+	 * Response message to caller
+	 */
+	resp = nss_nl_copy_msg(skb);
+	if (!resp) {
+		nss_nl_error("unable to copy incoming message\n");
+		error = -ENOMEM;
+		goto free_dev;
+	}
+
+	/*
+	 * Overload the nl_rule with the new response address
+	 */
+	nl_rule = nss_nl_get_data(resp);
+
+	/*
+	 * Init the command
+	 */
+	nss_nlipsec_rule_init(nl_rule, NSS_NLIPSEC_CMD_ADD_SA);
+
+	/*
+	 * We need to send the ifnum to the user; copy
+	 * the if_number into the same rule and send it
+	 * as part of the response for the create operation
+	 */
+	nl_rule->ifnum = if_num;
+
+	/*
+	 * Send to userspace
+	 */
+	nss_nl_ucast_resp(resp);
+
+free_dev:
 	/*
 	 *  dev_put for dev_get done on nss_nlipsec_get_rule
 	 */
@@ -567,9 +646,9 @@ static int nss_nlipsec_op_add_flow(struct sk_buff *skb, struct genl_info *info)
 	flow_tuple = &nl_rule->rule.flow.tuple;
 	sa_tuple = &nl_rule->rule.flow.sa;
 
-	if (nss_ipsecmgr_flow_add_sync(dev, flow_tuple, sa_tuple)) {
+	error = nss_ipsecmgr_flow_add_sync(dev, flow_tuple, sa_tuple);
+	if (error) {
 		nss_nl_error("%d: Failed to add subnet for net_device(%s)", pid, nl_rule->ifname);
-		error = -EINVAL;
 	}
 
 	/*
@@ -614,36 +693,6 @@ static int nss_nlipsec_op_delete_flow(struct sk_buff *skb, struct genl_info *inf
 }
 
 /*
- * Operation table called by the generic netlink layer based on the command
- */
-static struct genl_ops nss_nlipsec_ops[] = {
-	{ /* Create tunnel */
-		.cmd = NSS_NLIPSEC_CMD_ADD_TUNNEL,
-		.doit = nss_nlipsec_op_create_tunnel,
-	},
-	{ /* Destroy tunnel */
-		.cmd = NSS_NLIPSEC_CMD_DEL_TUNNEL,
-		.doit = nss_nlipsec_op_destroy_tunnel,
-	},
-	{ /* Add Security Association */
-		.cmd = NSS_NLIPSEC_CMD_ADD_SA,
-		.doit = nss_nlipsec_op_add_sa,
-	},
-	{ /* Delete Security Association */
-		.cmd = NSS_NLIPSEC_CMD_DEL_SA,
-		.doit = nss_nlipsec_op_delete_sa,
-	},
-	{ /* Add flow */
-		.cmd = NSS_NLIPSEC_CMD_ADD_FLOW,
-		.doit = nss_nlipsec_op_add_flow,
-	},
-	{ /* Delete flow */
-		.cmd = NSS_NLIPSEC_CMD_DEL_FLOW,
-		.doit = nss_nlipsec_op_delete_flow,
-	},
-};
-
-/*
  * nss_nlipsec_init()
  *	Netlink IPsec handler initialization
  */
@@ -667,7 +716,7 @@ bool nss_nlipsec_init(void)
 	/*
 	 * Register with the family
 	 */
-	error = genl_register_family_with_ops_groups(&nss_nlipsec_family, nss_nlipsec_ops, nss_nlipsec_mcgrp);
+	error = genl_register_family(&nss_nlipsec_family);
 	if (error != 0) {
 		nss_nl_info_always("Error: unable to register IPsec family\n");
 		return false;

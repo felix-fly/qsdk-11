@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018,2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -64,16 +64,6 @@ QDF_STATUS wmi_unified_pdev_get_tpc_config_cmd_send(wmi_unified_t wmi_handle,
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS wmi_unified_beacon_send_cmd(wmi_unified_t wmi_handle,
-				       struct beacon_params *param)
-{
-	if (wmi_handle->ops->send_beacon_send_cmd)
-		return wmi_handle->ops->send_beacon_send_cmd(wmi_handle,
-				  param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 QDF_STATUS wmi_unified_set_ctl_table_cmd_send(
 		wmi_unified_t wmi_handle,
 		struct ctl_table_params *param)
@@ -103,29 +93,6 @@ QDF_STATUS wmi_unified_packet_power_info_get_cmd_send(
 	if (wmi_handle->ops->send_packet_power_info_get_cmd)
 		return wmi_handle->ops->send_packet_power_info_get_cmd(
 						wmi_handle, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_unified_vdev_config_ratemask_cmd_send(
-		wmi_unified_t wmi_handle,
-		struct config_ratemask_params *param)
-{
-	if (wmi_handle->ops->send_vdev_config_ratemask_cmd)
-		return wmi_handle->ops->send_vdev_config_ratemask_cmd(
-						wmi_handle, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_unified_vdev_set_neighbour_rx_cmd_send(
-		wmi_unified_t wmi_handle,
-		uint8_t macaddr[QDF_MAC_ADDR_SIZE],
-		struct set_neighbour_rx_params *param)
-{
-	if (wmi_handle->ops->send_vdev_set_neighbour_rx_cmd)
-		return wmi_handle->ops->send_vdev_set_neighbour_rx_cmd(
-						wmi_handle, macaddr, param);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -191,28 +158,6 @@ QDF_STATUS wmi_send_bcn_offload_control_cmd(
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS wmi_extract_tbttoffset_num_vdevs(wmi_unified_t wmi_handle,
-					    void *evt_buf,
-					    uint32_t *num_vdevs)
-{
-	if (wmi_handle->ops->extract_tbttoffset_num_vdevs)
-		return wmi_handle->ops->extract_tbttoffset_num_vdevs(
-					wmi_handle, evt_buf, num_vdevs);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_ext_tbttoffset_num_vdevs(wmi_unified_t wmi_handle,
-						void *evt_buf,
-						uint32_t *num_vdevs)
-{
-	if (wmi_handle->ops->extract_ext_tbttoffset_num_vdevs)
-		return wmi_handle->ops->extract_ext_tbttoffset_num_vdevs(
-					wmi_handle, evt_buf, num_vdevs);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 QDF_STATUS wmi_extract_tbttoffset_update_params(
 		wmi_unified_t wmi_handle, void *evt_buf,
 		uint8_t idx, struct tbttoffset_params *tbtt_param)
@@ -247,21 +192,6 @@ QDF_STATUS wmi_extract_offchan_data_tx_compl_param(
 
 	return QDF_STATUS_E_FAILURE;
 }
-
-QDF_STATUS wmi_extract_pdev_csa_switch_count_status(
-		wmi_unified_t wmi_handle,
-		void *evt_buf,
-		struct pdev_csa_switch_count_status *param)
-{
-	if (wmi_handle->ops->extract_pdev_csa_switch_count_status)
-		return wmi_handle->ops->extract_pdev_csa_switch_count_status(
-				wmi_handle,
-				evt_buf,
-				param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 
 QDF_STATUS wmi_extract_swba_num_vdevs(wmi_unified_t wmi_handle, void *evt_buf,
 				      uint32_t *num_vdevs)
@@ -317,18 +247,6 @@ QDF_STATUS wmi_extract_peer_sta_kickout_ev(
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS wmi_unified_send_multiple_vdev_restart_req_cmd(
-		wmi_unified_t wmi_handle,
-		struct multiple_vdev_restart_params *param)
-{
-	if (wmi_handle->ops->send_multiple_vdev_restart_req_cmd)
-		return wmi_handle->ops->send_multiple_vdev_restart_req_cmd(
-					wmi_handle,
-					param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 QDF_STATUS wmi_extract_wds_addr_event(
 		wmi_unified_t wmi_handle, void *evt_buf,
 		uint16_t len, wds_addr_event_t *wds_ev)
@@ -353,6 +271,17 @@ QDF_STATUS wmi_extract_dcs_interference_type(
 	return QDF_STATUS_E_FAILURE;
 }
 
+QDF_STATUS wmi_extract_dcs_awgn_info(wmi_unified_t wmi_handle,
+				     void *evt_buf,
+				     struct wmi_host_dcs_awgn_info *awgn_info)
+{
+	if (wmi_handle->ops->extract_dcs_awgn_info) {
+		return wmi_handle->ops->extract_dcs_awgn_info(wmi_handle,
+						evt_buf, awgn_info);
+	}
+	return QDF_STATUS_E_FAILURE;
+}
+
 QDF_STATUS wmi_extract_dcs_cw_int(wmi_unified_t wmi_handle, void *evt_buf,
 				  wmi_host_ath_dcs_cw_int *cw_int)
 {
@@ -373,6 +302,19 @@ QDF_STATUS wmi_extract_dcs_im_tgt_stats(wmi_unified_t wmi_handle, void *evt_buf,
 	return QDF_STATUS_E_FAILURE;
 }
 
+QDF_STATUS wmi_extract_peer_create_response_event(
+			wmi_unified_t wmi_handle,
+			uint8_t *evt_buf,
+			struct wmi_host_peer_create_response_event *param)
+{
+	if (wmi_handle->ops->extract_peer_create_response_event)
+		return wmi_handle->ops->extract_peer_create_response_event(
+				wmi_handle,
+				evt_buf, param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
 QDF_STATUS wmi_extract_peer_delete_response_event(
 			wmi_unified_t wmi_handle,
 			uint8_t *evt_buf,
@@ -380,20 +322,6 @@ QDF_STATUS wmi_extract_peer_delete_response_event(
 {
 	if (wmi_handle->ops->extract_peer_delete_response_event)
 		return wmi_handle->ops->extract_peer_delete_response_event(
-				wmi_handle,
-				evt_buf, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_vdev_peer_delete_all_response_event(
-		wmi_unified_t wmi_handle,
-		uint8_t *evt_buf,
-		struct wmi_host_vdev_peer_delete_all_response_event *param)
-{
-	if (wmi_handle->ops->extract_vdev_peer_delete_all_response_event)
-		return
-		wmi_handle->ops->extract_vdev_peer_delete_all_response_event(
 				wmi_handle,
 				evt_buf, param);
 
@@ -536,25 +464,6 @@ QDF_STATUS wmi_unified_set_qboost_param_cmd_send(
 	return QDF_STATUS_E_FAILURE;
 }
 
-QDF_STATUS wmi_unified_gpio_config_cmd_send(
-		wmi_unified_t wmi_handle,
-		struct gpio_config_params *param)
-{
-	if (wmi_handle->ops->send_gpio_config_cmd)
-		return wmi_handle->ops->send_gpio_config_cmd(wmi_handle, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_unified_gpio_output_cmd_send(wmi_unified_t wmi_handle,
-					    struct gpio_output_params *param)
-{
-	if (wmi_handle->ops->send_gpio_output_cmd)
-		return wmi_handle->ops->send_gpio_output_cmd(wmi_handle, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
 QDF_STATUS wmi_unified_mcast_group_update_cmd_send(
 		wmi_unified_t wmi_handle,
 		struct mcast_group_update_params *param)
@@ -580,39 +489,6 @@ QDF_STATUS wmi_unified_wmm_update_cmd_send(wmi_unified_t wmi_handle,
 {
 	if (wmi_handle->ops->send_wmm_update_cmd)
 		return wmi_handle->ops->send_wmm_update_cmd(wmi_handle, param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_vdev_start_resp(
-		wmi_unified_t wmi_handle, void *evt_buf,
-		wmi_host_vdev_start_resp *vdev_rsp)
-{
-	if (wmi_handle->ops->extract_vdev_start_resp)
-		return wmi_handle->ops->extract_vdev_start_resp(wmi_handle,
-				evt_buf, vdev_rsp);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_vdev_delete_resp(
-		wmi_unified_t wmi_handle, void *evt_buf,
-		struct wmi_host_vdev_delete_resp *delete_rsp)
-{
-	if (wmi_handle->ops->extract_vdev_delete_resp)
-		return wmi_handle->ops->extract_vdev_delete_resp(wmi_handle,
-				evt_buf, delete_rsp);
-
-	return QDF_STATUS_E_FAILURE;
-}
-
-QDF_STATUS wmi_extract_vdev_stopped_param(wmi_unified_t wmi_handle,
-					  void *evt_buf,
-					  uint32_t *vdev_id)
-{
-	if (wmi_handle->ops->extract_vdev_stopped_param)
-		return wmi_handle->ops->extract_vdev_stopped_param(wmi_handle,
-				evt_buf, vdev_id);
 
 	return QDF_STATUS_E_FAILURE;
 }
@@ -707,3 +583,107 @@ QDF_STATUS wmi_unified_set_rx_pkt_type_routing_tag(
 	return QDF_STATUS_E_FAILURE;
 }
 #endif /* WLAN_SUPPORT_RX_PROTOCOL_TYPE_TAG */
+
+QDF_STATUS wmi_unified_peer_vlan_config_send(wmi_unified_t wmi_handle,
+				uint8_t peer_addr[QDF_MAC_ADDR_SIZE],
+				struct peer_vlan_config_param *param)
+{
+	if (wmi_handle->ops->send_peer_vlan_config_cmd)
+		return wmi_handle->ops->send_peer_vlan_config_cmd(wmi_handle,
+							   peer_addr,
+							   param);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_extract_muedca_params_handler(
+		wmi_unified_t wmi_handle,
+		void *evt_buf,
+		struct muedca_params *muedca_param_list)
+{
+	if (wmi_handle->ops->extract_muedca_params_handler)
+		return wmi_handle->ops->extract_muedca_params_handler(
+					wmi_handle, evt_buf, muedca_param_list);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * wmi_unified_set_radio_tx_mode_select_cmd_send() - WMI tx mode select cmd function
+ * @wmi_handle: wmi handle
+ * @param: pointer to hold tx mode selection param
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_unified_set_radio_tx_mode_select_cmd_send(
+		wmi_unified_t wmi_hdl,
+		struct wmi_pdev_enable_tx_mode_selection
+		*tx_mode_select_param)
+{
+	wmi_unified_t wmi_handle = wmi_hdl;
+
+	if (wmi_handle->ops->set_radio_tx_mode_select_cmd)
+		return wmi_handle->ops->set_radio_tx_mode_select_cmd(
+				wmi_handle, tx_mode_select_param);
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_lcr_cmd(wmi_unified_t wmi_handle,
+				    struct wmi_wifi_pos_lcr_info *lcr_info)
+{
+	if (wmi_handle->ops->send_lcr_cmd)
+		return wmi_handle->ops->send_lcr_cmd(wmi_handle, lcr_info);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+QDF_STATUS wmi_unified_send_lci_cmd(wmi_unified_t wmi_handle,
+				    struct wifi_pos_lci_info *lci_info)
+{
+	if (wmi_handle->ops->send_lci_cmd)
+		return wmi_handle->ops->send_lci_cmd(wmi_handle, lci_info);
+
+	return QDF_STATUS_E_FAILURE;
+}
+
+#ifdef WLAN_SUPPORT_MESH_LATENCY
+/**
+ * wmi_unified_config_vdev_tid_latency_info_cmd_send() - WMI vdev tid latency
+ * @wmi_handle: wmi handle
+ * @param: pointer to hold vdev latency config param
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_unified_config_vdev_tid_latency_info_cmd_send(
+		wmi_unified_t wmi_hdl,
+		struct wmi_vdev_tid_latency_config_params
+		*vdev_latency_config_param)
+{
+	wmi_unified_t wmi_handle = wmi_hdl;
+
+	if (wmi_handle->ops->config_vdev_tid_latency_info_cmd)
+		return wmi_handle->ops->config_vdev_tid_latency_info_cmd(
+				wmi_handle, vdev_latency_config_param);
+	return QDF_STATUS_E_FAILURE;
+}
+
+/**
+ * wmi_unified_config_peer_latency_info_cmd_send() - WMI vdev tid latency
+ * @wmi_handle: wmi handle
+ * @param: pointer to hold peer latency config param
+ *
+ * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
+ */
+QDF_STATUS wmi_unified_config_peer_latency_info_cmd_send(
+		wmi_unified_t wmi_hdl,
+		struct wmi_peer_latency_config_params
+		*param)
+{
+	wmi_unified_t wmi_handle = wmi_hdl;
+
+	if (wmi_handle->ops->config_peer_latency_info_cmd)
+		return wmi_handle->ops->config_peer_latency_info_cmd(
+				wmi_handle, param);
+	return QDF_STATUS_E_FAILURE;
+}
+#endif

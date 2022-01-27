@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2015-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2015-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -26,19 +26,22 @@ extern "C" {
 /*qca808x_end*/
 #include "fal/fal_led.h"
 /*qca808x_start*/
-#define SSDK_MAX_PORT_NUM		8
+#define SSDK_MAX_PORT_NUM               8
 /*qca808x_end*/
-#define SSDK_MAX_VIRTUAL_PORT_NUM	256
-#define SSDK_MAX_SERVICE_CODE_NUM	256
-#define SSDK_MAX_CPU_CODE_NUM		256
-#define SSDK_L0SCHEDULER_CFG_MAX	300
-#define SSDK_L0SCHEDULER_UCASTQ_CFG_MAX	256
-#define SSDK_L1SCHEDULER_CFG_MAX	64
-#define SSDK_SP_MAX_PRIORITY		8
-#define SSDK_MAX_FRAME_SIZE	0x3000
+#define SSDK_MAX_VIRTUAL_PORT_NUM       256
+#define SSDK_MAX_SERVICE_CODE_NUM       256
+#define SSDK_MAX_CPU_CODE_NUM           256
+#define SSDK_L0SCHEDULER_CFG_MAX        300
+#define SSDK_L0SCHEDULER_UCASTQ_CFG_MAX 256
+#define SSDK_L1SCHEDULER_CFG_MAX        64
+#define SSDK_SP_MAX_PRIORITY            8
+#define SSDK_MAX_FRAME_SIZE             0x3000
 
-#define PORT_GMAC_TYPE	1
-#define PORT_XGMAC_TYPE	2
+#define PORT_GMAC_TYPE                  1
+#define PORT_XGMAC_TYPE                 2
+#define PORT_LINK_UP                    1
+#define PORT_LINK_DOWN                  0
+
 /*qca808x_start*/
     typedef enum {
         HSL_MDIO = 1,
@@ -192,6 +195,9 @@ enum {
 	QCA_PHY_F_QGMAC_BIT,
 	QCA_PHY_F_XGMAC_BIT,
 	QCA_PHY_F_I2C_BIT,
+	QCA_PHY_F_INIT_BIT,
+	QCA_PHY_F_FORCE_BIT,
+	QCA_PHY_F_SFP_BIT,
 	QCA_PHY_FEATURE_MAX
 };
 /*qca808x_start*/
@@ -204,6 +210,9 @@ enum {
 #define PHY_F_QGMAC        _PHY_F(QGMAC)
 #define PHY_F_XGMAC        _PHY_F(XGMAC)
 #define PHY_F_I2C          _PHY_F(I2C)
+#define PHY_F_INIT         _PHY_F(INIT)
+#define PHY_F_FORCE        _PHY_F(FORCE)
+#define PHY_F_SFP          _PHY_F(SFP)
 
 typedef struct
 {
@@ -360,6 +369,9 @@ qca_hppe_port_mac_type_get(a_uint32_t dev_id, a_uint32_t port_id);
 a_uint32_t
 qca_hppe_port_mac_type_set(a_uint32_t dev_id, a_uint32_t port_id, a_uint32_t port_type);
 
+void ssdk_portvlan_init(a_uint32_t dev_id);
+sw_error_t ssdk_dess_trunk_init(a_uint32_t dev_id, a_uint32_t wan_bitmap);
+
 void
 qca_mac_port_status_init(a_uint32_t dev_id, a_uint32_t port_id);
 void
@@ -368,6 +380,9 @@ qca_mac_sw_sync_port_status_init(a_uint32_t dev_id);
 struct qca_phy_priv* ssdk_phy_priv_data_get(a_uint32_t dev_id);
 /*qca808x_end*/
 sw_error_t qca_switch_init(a_uint32_t dev_id);
+void qca_mac_sw_sync_work_stop(struct qca_phy_priv *priv);
+void qca_mac_sw_sync_work_resume(struct qca_phy_priv *priv);
+int qca_mac_sw_sync_work_start(struct qca_phy_priv *priv);
 /*qca808x_start*/
 #ifdef __cplusplus
 }

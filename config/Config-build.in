@@ -55,6 +55,14 @@ menu "Global build settings"
 		  This removes all ipkg/opkg status data files from the target directory
 		  before building the root filesystem.
 
+	config LOWMEM_FLASH
+		bool
+		prompt "Enable support for lowmem flash"
+		default n
+		help
+		  This enables support for lowmem flash based packages only
+		  before building the root filesystem.
+
 	config COLLECT_KERNEL_DEBUG
 		bool
 		prompt "Collect kernel debug information"
@@ -64,6 +72,12 @@ menu "Global build settings"
 		  This collects debugging symbols from the kernel and all compiled modules.
 		  Useful for release builds, so that kernel issues can be debugged offline
 		  later.
+
+	config BUILD_SHORTENED_PATH
+		bool "Enable short build paths"
+		default n
+		help
+		  If enabled, build_dir and staging_dir paths will be shortened.
 
 	comment "Kernel build options"
 

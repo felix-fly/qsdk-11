@@ -147,7 +147,18 @@ static struct spmi_driver pmic_spmi_driver = {
 		.of_match_table = pmic_spmi_id_table,
 	},
 };
-module_spmi_driver(pmic_spmi_driver);
+
+static int __init pmic_spmi_driver_init(void)
+{
+	return spmi_driver_register(&pmic_spmi_driver);
+}
+arch_initcall(pmic_spmi_driver_init);
+
+static void __exit pmic_spmi_driver_exit(void)
+{
+	spmi_driver_unregister(&pmic_spmi_driver);
+}
+module_exit(pmic_spmi_driver_exit);
 
 MODULE_DESCRIPTION("Qualcomm SPMI PMIC driver");
 MODULE_ALIAS("spmi:spmi-pmic");

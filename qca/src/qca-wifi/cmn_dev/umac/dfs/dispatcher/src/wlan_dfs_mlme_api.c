@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -31,18 +31,28 @@
 #include "wni_api.h"
 #endif
 
+#if defined(QCA_DFS_RCSA_SUPPORT)
 void dfs_mlme_start_rcsa(struct wlan_objmgr_pdev *pdev,
 		bool *wait_for_csa)
 {
 	if (global_dfs_to_mlme.dfs_start_rcsa)
 		global_dfs_to_mlme.dfs_start_rcsa(pdev, wait_for_csa);
 }
+#endif
+
+#if defined(WLAN_DFS_PARTIAL_OFFLOAD) && defined(HOST_DFS_SPOOF_TEST)
+void dfs_mlme_proc_spoof_success(struct wlan_objmgr_pdev *pdev)
+{
+	if (global_dfs_to_mlme.mlme_proc_spoof_success)
+		global_dfs_to_mlme.mlme_proc_spoof_success(pdev);
+}
+#endif
 
 #ifndef QCA_MCL_DFS_SUPPORT
 void dfs_mlme_mark_dfs(struct wlan_objmgr_pdev *pdev,
 		uint8_t ieee,
 		uint16_t freq,
-		uint8_t vhtop_ch_freq_seg2,
+		uint16_t vhtop_ch_freq_seg2,
 		uint64_t flags)
 {
 	if (global_dfs_to_mlme.mlme_mark_dfs)
@@ -52,7 +62,7 @@ void dfs_mlme_mark_dfs(struct wlan_objmgr_pdev *pdev,
 				vhtop_ch_freq_seg2,
 				flags);
 }
-#else
+#else /* Else of ndef MCL_DFS_SUPPORT */
 static void dfs_send_radar_ind(struct wlan_objmgr_pdev *pdev,
 		void *object,
 		void *arg)
@@ -66,14 +76,14 @@ static void dfs_send_radar_ind(struct wlan_objmgr_pdev *pdev,
 	scheduler_post_message(QDF_MODULE_ID_DFS,
 			       QDF_MODULE_ID_SME,
 			       QDF_MODULE_ID_SME, &sme_msg);
-	dfs_info(NULL, WLAN_DEBUG_DFS_ALWAYS, "eWNI_SME_DFS_RADAR_FOUND pdev%d posted",
-		    vdev_id);
+	dfs_debug(NULL, WLAN_DEBUG_DFS_ALWAYS, "eWNI_SME_DFS_RADAR_FOUND pdev%d posted",
+		  vdev_id);
 }
 
 void dfs_mlme_mark_dfs(struct wlan_objmgr_pdev *pdev,
 		uint8_t ieee,
 		uint16_t freq,
-		uint8_t vhtop_ch_freq_seg2,
+		uint16_t vhtop_ch_freq_seg2,
 		uint64_t flags)
 {
 	struct wlan_objmgr_vdev *vdev;
@@ -93,18 +103,21 @@ void dfs_mlme_mark_dfs(struct wlan_objmgr_pdev *pdev,
 #endif
 
 #ifndef QCA_MCL_DFS_SUPPORT
-void dfs_mlme_start_csa(struct wlan_objmgr_pdev *pdev,
-		uint8_t ieee_chan, uint16_t freq,
-		uint8_t cfreq2, uint64_t flags)
+#ifdef CONFIG_CHAN_FREQ_API
+void dfs_mlme_start_csa_for_freq(struct wlan_objmgr_pdev *pdev,
+				 uint8_t ieee_chan, uint16_t freq,
+				 uint16_t cfreq2, uint64_t flags)
 {
-	if (global_dfs_to_mlme.mlme_start_csa)
-		global_dfs_to_mlme.mlme_start_csa(pdev, ieee_chan, freq, cfreq2,
-				flags);
+	if (global_dfs_to_mlme.mlme_start_csa_for_freq)
+		global_dfs_to_mlme.mlme_start_csa_for_freq(pdev, ieee_chan,
+							   freq, cfreq2, flags);
 }
+#endif
 #else
-void dfs_mlme_start_csa(struct wlan_objmgr_pdev *pdev,
-			uint8_t ieee_chan, uint16_t freq,
-			uint8_t cfreq2, uint64_t flags)
+#ifdef CONFIG_CHAN_FREQ_API
+void dfs_mlme_start_csa_for_freq(struct wlan_objmgr_pdev *pdev,
+				 uint8_t ieee_chan, uint16_t freq,
+				 uint16_t cfreq2, uint64_t flags)
 {
 	struct wlan_objmgr_vdev *vdev;
 
@@ -120,6 +133,7 @@ void dfs_mlme_start_csa(struct wlan_objmgr_pdev *pdev,
 		wlan_objmgr_vdev_release_ref(vdev, WLAN_DFS_ID);
 	}
 }
+#endif
 #endif
 
 #ifndef QCA_MCL_DFS_SUPPORT
@@ -151,33 +165,31 @@ void dfs_mlme_deliver_event_up_after_cac(struct wlan_objmgr_pdev *pdev)
 				pdev);
 }
 
-void dfs_mlme_get_dfs_ch_nchans(struct wlan_objmgr_pdev *pdev,
-		int *nchans)
+#ifdef CONFIG_CHAN_FREQ_API
+QDF_STATUS dfs_mlme_get_extchan_for_freq(struct wlan_objmgr_pdev *pdev,
+					 uint16_t *dfs_chan_freq,
+					 uint64_t *dfs_chan_flags,
+					 uint16_t *dfs_chan_flagext,
+					 uint8_t *dfs_chan_ieee,
+					 uint8_t *dfs_chan_vhtop_ch_freq_seg1,
+					 uint8_t *dfs_chan_vhtop_ch_freq_seg2,
+					 uint16_t *dfs_chan_mhz_freq_seg1,
+					 uint16_t *dfs_chan_mhz_freq_seg2)
 {
-	if (global_dfs_to_mlme.mlme_get_dfs_ch_nchans)
-		global_dfs_to_mlme.mlme_get_dfs_ch_nchans(pdev,
-				nchans);
-}
-
-QDF_STATUS dfs_mlme_get_extchan(struct wlan_objmgr_pdev *pdev,
-		uint16_t *dfs_ch_freq,
-		uint64_t *dfs_ch_flags,
-		uint16_t *dfs_ch_flagext,
-		uint8_t *dfs_ch_ieee,
-		uint8_t *dfs_ch_vhtop_ch_freq_seg1,
-		uint8_t *dfs_ch_vhtop_ch_freq_seg2)
-{
-	if (global_dfs_to_mlme.mlme_get_extchan)
-		return global_dfs_to_mlme.mlme_get_extchan(pdev,
-				dfs_ch_freq,
-				dfs_ch_flags,
-				dfs_ch_flagext,
-				dfs_ch_ieee,
-				dfs_ch_vhtop_ch_freq_seg1,
-				dfs_ch_vhtop_ch_freq_seg2);
+	if (global_dfs_to_mlme.mlme_get_extchan_for_freq)
+		return global_dfs_to_mlme.mlme_get_extchan_for_freq(pdev,
+				dfs_chan_freq,
+				dfs_chan_flags,
+				dfs_chan_flagext,
+				dfs_chan_ieee,
+				dfs_chan_vhtop_ch_freq_seg1,
+				dfs_chan_vhtop_ch_freq_seg2,
+				dfs_chan_mhz_freq_seg1,
+				dfs_chan_mhz_freq_seg2);
 
 	return QDF_STATUS_E_FAILURE;
 }
+#endif
 
 void dfs_mlme_set_no_chans_available(struct wlan_objmgr_pdev *pdev,
 		int val)
@@ -201,51 +213,38 @@ int dfs_mlme_ieee2mhz(struct wlan_objmgr_pdev *pdev, int ieee, uint64_t flag)
 	return freq;
 }
 
+#ifdef CONFIG_CHAN_FREQ_API
 QDF_STATUS
-dfs_mlme_find_dot11_channel(struct wlan_objmgr_pdev *pdev,
-			    uint8_t ieee,
-			    uint8_t des_cfreq2,
-			    int mode,
-			    uint16_t *dfs_ch_freq,
-			    uint64_t *dfs_ch_flags,
-			    uint16_t *dfs_ch_flagext,
-			    uint8_t *dfs_ch_ieee,
-			    uint8_t *dfs_ch_vhtop_ch_freq_seg1,
-			    uint8_t *dfs_ch_vhtop_ch_freq_seg2)
+dfs_mlme_find_dot11_chan_for_freq(struct wlan_objmgr_pdev *pdev,
+				  uint16_t freq,
+				  uint16_t des_cfreq2,
+				  int mode,
+				  uint16_t *dfs_chan_freq,
+				  uint64_t *dfs_chan_flag,
+				  uint16_t *dfs_flagext,
+				  uint8_t *dfs_chan_ieee,
+				  uint8_t *dfs_cfreq1,
+				  uint8_t *dfs_cfreq2,
+				  uint16_t *cfreq1_mhz,
+				  uint16_t *cfreq2_mhz)
 {
-	if (global_dfs_to_mlme.mlme_find_dot11_channel)
-		return global_dfs_to_mlme.mlme_find_dot11_channel(pdev,
-								  ieee,
-								  des_cfreq2,
-								  mode,
-								  dfs_ch_freq,
-								  dfs_ch_flags,
-								  dfs_ch_flagext,
-								  dfs_ch_ieee,
-								  dfs_ch_vhtop_ch_freq_seg1,
-								  dfs_ch_vhtop_ch_freq_seg2);
+	if (global_dfs_to_mlme.mlme_find_dot11_chan_for_freq)
+	return global_dfs_to_mlme.mlme_find_dot11_chan_for_freq(pdev,
+								freq,
+								des_cfreq2,
+								mode,
+								dfs_chan_freq,
+								dfs_chan_flag,
+								dfs_flagext,
+								dfs_chan_ieee,
+								dfs_cfreq1,
+								dfs_cfreq2,
+								cfreq1_mhz,
+								cfreq2_mhz);
 	return QDF_STATUS_E_FAILURE;
 }
+#endif
 
-void dfs_mlme_get_dfs_ch_channels(struct wlan_objmgr_pdev *pdev,
-		uint16_t *dfs_ch_freq,
-		uint64_t *dfs_ch_flags,
-		uint16_t *dfs_ch_flagext,
-		uint8_t *dfs_ch_ieee,
-		uint8_t *dfs_ch_vhtop_ch_freq_seg1,
-		uint8_t *dfs_ch_vhtop_ch_freq_seg2,
-		int index)
-{
-	if (global_dfs_to_mlme.mlme_get_dfs_ch_channels)
-		global_dfs_to_mlme.mlme_get_dfs_ch_channels(pdev,
-				dfs_ch_freq,
-				dfs_ch_flags,
-				dfs_ch_flagext,
-				dfs_ch_ieee,
-				dfs_ch_vhtop_ch_freq_seg1,
-				dfs_ch_vhtop_ch_freq_seg2,
-				index);
-}
 
 uint32_t dfs_mlme_dfs_ch_flags_ext(struct wlan_objmgr_pdev *pdev)
 {
@@ -282,22 +281,24 @@ void dfs_mlme_clist_update(struct wlan_objmgr_pdev *pdev,
 				nentries);
 }
 
-int dfs_mlme_get_cac_timeout(struct wlan_objmgr_pdev *pdev,
-		uint16_t dfs_ch_freq,
-		uint8_t dfs_ch_vhtop_ch_freq_seg2,
-		uint64_t dfs_ch_flags)
+#ifdef CONFIG_CHAN_FREQ_API
+int dfs_mlme_get_cac_timeout_for_freq(struct wlan_objmgr_pdev *pdev,
+				      uint16_t dfs_chan_freq,
+				      uint16_t dfs_cfreq2,
+				      uint64_t dfs_ch_flags)
 {
 	int cac_timeout = 0;
 
-	if (global_dfs_to_mlme.mlme_get_cac_timeout)
-		global_dfs_to_mlme.mlme_get_cac_timeout(pdev,
-				dfs_ch_freq,
-				dfs_ch_vhtop_ch_freq_seg2,
-				dfs_ch_flags,
-				&cac_timeout);
+	if (global_dfs_to_mlme.mlme_get_cac_timeout_for_freq)
+		global_dfs_to_mlme.mlme_get_cac_timeout_for_freq(pdev,
+								 dfs_chan_freq,
+								 dfs_cfreq2,
+								 dfs_ch_flags,
+								 &cac_timeout);
 
 	return cac_timeout;
 }
+#endif
 
 #if defined(WLAN_DFS_PARTIAL_OFFLOAD) && defined(HOST_DFS_SPOOF_TEST)
 int dfs_mlme_rebuild_chan_list_with_non_dfs_channels(
@@ -323,13 +324,13 @@ void dfs_mlme_restart_vaps_with_non_dfs_chan(struct wlan_objmgr_pdev *pdev,
 
 #if defined(WLAN_SUPPORT_PRIMARY_ALLOWED_CHAN)
 bool dfs_mlme_check_allowed_prim_chanlist(struct wlan_objmgr_pdev *pdev,
-					  uint32_t chan_num)
+					  uint32_t chan_freq)
 {
 	if (!global_dfs_to_mlme.mlme_check_allowed_prim_chanlist)
 		return true;
 
 	return global_dfs_to_mlme.mlme_check_allowed_prim_chanlist(pdev,
-								   chan_num);
+								   chan_freq);
 }
 
 #endif
@@ -346,6 +347,14 @@ void dfs_mlme_handle_dfs_scan_violation(struct wlan_objmgr_pdev *pdev)
 	global_dfs_to_mlme.mlme_update_scan_channel_list(pdev);
 }
 #endif
+
+bool dfs_mlme_is_inter_band_chan_switch_allowed(struct wlan_objmgr_pdev *pdev)
+{
+	if (!global_dfs_to_mlme.mlme_is_inter_band_chan_switch_allowed)
+		return false;
+
+	return global_dfs_to_mlme.mlme_is_inter_band_chan_switch_allowed(pdev);
+}
 
 bool dfs_mlme_is_opmode_sta(struct wlan_objmgr_pdev *pdev)
 {

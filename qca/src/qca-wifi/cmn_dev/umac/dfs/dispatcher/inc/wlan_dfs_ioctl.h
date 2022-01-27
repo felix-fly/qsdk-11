@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2016-2020 The Linux Foundation. All rights reserved.
  * Copyright (c) 2010, Atheros Communications Inc.
  * All Rights Reserved.
  *
@@ -55,6 +55,19 @@
 
 #define DFS_INJECT_SEQUENCE 27
 #define DFS_ALLOW_HW_PULSES 28
+#define DFS_SET_PRI_MULTIPILER   29
+
+#define RESTRICTED_80P80_START_FREQ 5660
+#define RESTRICTED_80P80_END_FREQ 5805
+
+/* Check if the given frequencies are within restricted 80P80 start freq(5660)
+ * and end freq (5805).
+ */
+#define CHAN_WITHIN_RESTRICTED_80P80(cfreq1, cfreq2) \
+	((((cfreq1) >= RESTRICTED_80P80_START_FREQ) && \
+	  ((cfreq1) <= RESTRICTED_80P80_END_FREQ) && \
+	  ((cfreq2) >= RESTRICTED_80P80_START_FREQ) && \
+	  ((cfreq2) <= RESTRICTED_80P80_END_FREQ)) ? true : false)
 
 /*
  * Spectral IOCTLs use DFS_LAST_IOCTL as the base.
@@ -64,21 +77,21 @@
 #define DFS_LAST_IOCTL 29
 
 #ifndef DFS_CHAN_MAX
-#define DFS_CHAN_MAX 1023
+#define DFS_CHAN_MAX 25
 #endif
 
 /**
  * struct dfsreq_nolelem - NOL elements.
  * @nol_freq:          NOL channel frequency.
  * @nol_chwidth:       NOL channel width.
- * @nol_start_ticks:   OS ticks when the NOL timer started.
+ * @nol_start_us:      OS microseconds when the NOL timer started.
  * @nol_timeout_ms:    Nol timeout value in msec.
  */
 
 struct dfsreq_nolelem {
 	uint16_t        nol_freq;
 	uint16_t        nol_chwidth;
-	unsigned long   nol_start_ticks;
+	uint64_t        nol_start_us;
 	uint32_t        nol_timeout_ms;
 };
 
@@ -154,12 +167,14 @@ enum dfs_bangradar_types {
  * @seg_id:         Segment ID information.
  * @is_chirp:       Chirp radar or not.
  * @freq_offset:    Frequency offset at which radar was found.
+ * @detector_id:    Detector ID corresponding to primary/agile detectors.
  */
 struct dfs_bangradar_params {
 	enum dfs_bangradar_types bangradar_type;
 	uint8_t seg_id;
 	uint8_t is_chirp;
 	int32_t freq_offset;
+	uint8_t detector_id;
 };
 #define DFS_IOCTL_PARAM_NOVAL  65535
 #define DFS_IOCTL_PARAM_ENABLE 0x8000
@@ -191,6 +206,13 @@ struct dfs_bangradar_params {
 
 /* Flag to exclude Japan W53 channnels */
 #define DFS_RANDOM_CH_FLAG_NO_JAPAN_W53_CH      0x0100 /* 0000 0001 0000 0000 */
+
+/* Restricted 80P80 MHz is enabled */
+#define DFS_RANDOM_CH_FLAG_RESTRICTED_80P80_ENABLED 0x0200
+						       /* 0000 0010 0000 0000 */
+
+/* Flag to exclude all 6GHz channels */
+#define DFS_RANDOM_CH_FLAG_NO_6GHZ_CH          0x00400 /* 0000 0100 0000 0000 */
 
 /**
  * struct wlan_dfs_caps - DFS capability structure.
@@ -258,20 +280,26 @@ struct wlan_dfs_phyerr_param {
 /**
  * enum WLAN_DFS_EVENTS - DFS Events that will be sent to userspace
  * @WLAN_EV_RADAR_DETECTED: Radar is detected
+ * @WLAN_EV_CAC_RESET:      CAC started or CAC completed status is reset
  * @WLAN_EV_CAC_STARTED:    CAC timer has started
  * @WLAN_EV_CAC_COMPLETED:  CAC timer completed
  * @WLAN_EV_NOL_STARTED:    NOL started
  * @WLAN_EV_NOL_FINISHED:   NOL Completed
+ * @WLAN_EV_PCAC_STARTED:   PreCAC Started
+ * @WLAN_EV_PCAC_COMPLETED: PreCAC Completed
  *
  * DFS events such as radar detected, CAC started,
  * CAC completed, NOL started, NOL finished
  */
 enum WLAN_DFS_EVENTS {
 	WLAN_EV_RADAR_DETECTED,
+	WLAN_EV_CAC_RESET,
 	WLAN_EV_CAC_STARTED,
 	WLAN_EV_CAC_COMPLETED,
 	WLAN_EV_NOL_STARTED,
 	WLAN_EV_NOL_FINISHED,
+	WLAN_EV_PCAC_STARTED,
+	WLAN_EV_PCAC_COMPLETED,
 };
 
 #if defined(WLAN_DFS_PARTIAL_OFFLOAD) && defined(WLAN_DFS_SYNTHETIC_RADAR)
@@ -339,4 +367,39 @@ struct seq_store {
 	struct synthetic_seq *seq_arr[0];
 };
 #endif /* WLAN_DFS_PARTIAL_OFFLOAD && WLAN_DFS_SYNTHETIC_RADAR */
+
+/**
+ * enum dfs_agile_sm_evt - DFS Agile SM events.
+ * @DFS_AGILE_SM_EV_AGILE_START: Event to start AGILE PreCAC/RCAC.
+ * @DFS_AGILE_SM_EV_AGILE_DOWN:  Event to stop AGILE PreCAC/RCAC..
+ * @DFS_AGILE_SM_EV_AGILE_DONE:  Event to complete AGILE PreCAC/RCAC..
+ * @DFS_AGILE_SM_EV_ADFS_RADAR: Event to restart AGILE PreCAC/RCAC after radar.
+ */
+enum dfs_agile_sm_evt {
+	DFS_AGILE_SM_EV_AGILE_START = 0,
+	DFS_AGILE_SM_EV_AGILE_STOP =  1,
+	DFS_AGILE_SM_EV_AGILE_DONE =  2,
+	DFS_AGILE_SM_EV_ADFS_RADAR =  3,
+};
+
+/**
+ * enum precac_status_for_chan - preCAC status for channels.
+ * @DFS_NO_PRECAC_COMPLETED_CHANS: None of the channels are preCAC completed.
+ * @DFS_PRECAC_COMPLETED_CHAN: A given channel is preCAC completed.
+ * @DFS_PRECAC_REQUIRED_CHAN:  A given channel required preCAC.
+ * @DFS_INVALID_PRECAC_STATUS: Invalid status.
+ *
+ * Note: "DFS_NO_PRECAC_COMPLETED_CHANS" has more priority than
+ * "DFS_PRECAC_COMPLETED_CHAN". This is because if the preCAC list does not
+ * have any channel that completed preCAC, "DFS_NO_PRECAC_COMPLETED_CHANS"
+ * is returned and search for preCAC completion (DFS_PRECAC_COMPLETED_CHAN)
+ * for a given channel is not done.
+ */
+enum precac_status_for_chan {
+	DFS_NO_PRECAC_COMPLETED_CHANS,
+	DFS_PRECAC_COMPLETED_CHAN,
+	DFS_PRECAC_REQUIRED_CHAN,
+	DFS_INVALID_PRECAC_STATUS,
+};
+
 #endif  /* _DFS_IOCTL_H_ */

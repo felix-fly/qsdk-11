@@ -116,6 +116,7 @@ static const struct freq_tbl ftbl_apcs_alias0_clk_src[] = {
 	F(1200000000, P_APSS_PLL_EARLY, 1, 0, 0),
 	F(1320000000, P_APSS_PLL_EARLY, 1, 0, 0),
 	F(1440000000, P_APSS_PLL_EARLY, 1, 0, 0),
+	F(1488000000, P_APSS_PLL_EARLY, 1, 0, 0),
 	F(1608000000, P_APSS_PLL_EARLY, 1, 0, 0),
 	F(1800000000, P_APSS_PLL_EARLY, 1, 0, 0),
 	{ }
@@ -162,10 +163,14 @@ static struct clk_regmap *apss_ipq6018_clks[] = {
 
 static const struct alpha_pll_config apss_pll_config = {
 	.l = 0x37,
-	.config_ctl_val = 0x00141200,
-	.config_ctl_hi_val = 0x0,
+	.config_ctl_val = 0x240D4828,
+	.config_ctl_hi_val = 0x6,
 	.early_output_mask = BIT(3),
+	.aux2_output_mask = BIT(2),
+	.aux_output_mask = BIT(1),
 	.main_output_mask = BIT(0),
+	.test_ctl_val = 0x1C0000C0,
+	.test_ctl_hi_val = 0x4000,
 };
 
 static const struct of_device_id apss_ipq6018_match_table[] = {

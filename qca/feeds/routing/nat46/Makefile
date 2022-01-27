@@ -42,6 +42,7 @@ define KernelPackage/nat46
   TITLE:=Stateless NAT46 translation kernel module
   SECTION:=kernel
   SUBMENU:=Network Support
+  DEPENDS:=+kmod-nf-conntrack6
   FILES:=$(PKG_BUILD_DIR)/nat46/modules/nat46.ko
   AUTOLOAD:=$(call AutoLoad,33,nat46)
 endef

@@ -35,6 +35,7 @@
 #include <arch/arm/dcc.h>
 #include <dev/fbcon.h>
 #include <dev/uart.h>
+#include <platform.h>
 
 void _dputc(char c)
 {
@@ -75,6 +76,8 @@ int dgetc(char *c, bool wait)
 
 void platform_halt(void)
 {
-	dprintf(INFO, "HALT: spinning forever...\n");
-	for (;;) ;
+	dprintf(INFO, "HALT:\n");
+	crashdump_init();
+	dprintf(INFO, "Rebooting device... \n");
+	reboot_device(1);
 }

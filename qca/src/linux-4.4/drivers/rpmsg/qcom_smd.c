@@ -746,7 +746,7 @@ static int __qcom_smd_send(struct qcom_smd_channel *channel, const void *data,
 	__le32 hdr[5] = { cpu_to_le32(len), };
 	int tlen = sizeof(hdr) + len;
 	unsigned long flags;
-	int ret;
+	int ret = 0;
 
 	/* Word aligned channels only accept word size aligned data */
 	if (channel->info_word && len % 4)
@@ -914,7 +914,7 @@ static struct rpmsg_endpoint *qcom_smd_create_ept(struct rpmsg_device *rpdev,
 	ret = wait_event_interruptible_timeout(edge->new_channel_event,
 			(channel = qcom_smd_find_channel(edge, name)) != NULL,
 			HZ);
-	if (!ret)
+	if (!ret || !channel)
 		return NULL;
 
 	if (channel->state != SMD_CHANNEL_CLOSED) {
@@ -1073,7 +1073,7 @@ static int qcom_smd_create_device(struct qcom_smd_channel *channel)
 
 	/* Assign public information to the rpmsg_device */
 	rpdev = &qsdev->rpdev;
-	strncpy(rpdev->id.name, channel->name, RPMSG_NAME_SIZE);
+	strlcpy(rpdev->id.name, channel->name, RPMSG_NAME_SIZE);
 	rpdev->src = RPMSG_ADDR_ANY;
 	rpdev->dst = RPMSG_ADDR_ANY;
 
@@ -1304,7 +1304,7 @@ static void qcom_channel_state_worker(struct work_struct *work)
 
 		spin_unlock_irqrestore(&edge->channels_lock, flags);
 
-		strncpy(chinfo.name, channel->name, sizeof(chinfo.name));
+		strlcpy(chinfo.name, channel->name, sizeof(chinfo.name));
 		chinfo.src = RPMSG_ADDR_ANY;
 		chinfo.dst = RPMSG_ADDR_ANY;
 		rpmsg_unregister_device(&edge->dev, &chinfo);
@@ -1424,7 +1424,7 @@ static ssize_t rpmsg_name_show(struct device *dev,
 {
 	struct qcom_smd_edge *edge = to_smd_edge(dev);
 
-	return sprintf(buf, "%s\n", edge->name);
+	return snprintf(buf, PAGE_SIZE, "%s\n", edge->name);
 }
 static DEVICE_ATTR_RO(rpmsg_name);
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -67,6 +67,7 @@
  */
 struct nss_ipsec_klips_skb_cb {
 	struct net_device *hlos_dev;
+	struct sock *sk;
 	uint32_t flags;
 	uint16_t replay_win;
 	uint16_t magic;
@@ -83,6 +84,16 @@ struct nss_ipsec_klips_sa {
 };
 
 /*
+ * 3-tuple information for each tunnel.
+ */
+struct nss_ipsec_klips_tun_addr {
+	uint32_t src[4];	/* Source IP address in network order */
+	uint32_t dest[4];	/* Destination IP address in network order */
+	uint8_t ver;		/* IP version 4 or 6 */
+	uint8_t res[3];		/* Reserved */
+};
+
+/*
  * CFI IPsec netdevice  mapping between HLOS devices and NSS devices
  * Essentially various HLOS IPsec devices will be used as indexes to
  * map into the NSS devices. For example
@@ -93,9 +104,12 @@ struct nss_ipsec_klips_sa {
  * the table
  */
 struct nss_ipsec_klips_tun {
+	struct list_head sa_list;
+	struct nss_ipsec_klips_tun_addr addr;
+	sk_encap_rcv_method_t sk_encap_rcv;
 	struct net_device *klips_dev;
 	struct net_device *nss_dev;
-	struct list_head sa_list;
+	struct sock *sk;
 };
 
 /*
@@ -230,6 +244,50 @@ static inline struct nss_ipsec_klips_skb_cb *nss_ipsec_klips_get_skb_cb(struct s
 }
 
 /*
+ * nss_ipsec_klips_tun_match_addr()
+ * 	Compare tunnel address with ip header.
+ */
+static bool nss_ipsec_klips_tun_match_addr(struct sk_buff *skb, struct nss_ipsec_klips_tun *tun)
+{
+	struct nss_ipsec_klips_tun_addr *addr = &tun->addr;
+	uint8_t version = ip_hdr(skb)->version;
+	uint32_t status = 0;
+
+	status += addr->ver ^ version;
+
+	switch (version) {
+	case IPVERSION: {
+		struct iphdr *iph = ip_hdr(skb);
+
+		status += addr->src[0] ^ iph->saddr;
+		status += addr->dest[0] ^ iph->daddr;
+
+		return !status;
+	}
+
+	case 6: {
+		struct ipv6hdr *ip6h = ipv6_hdr(skb);
+
+		status += addr->src[0] ^ ip6h->saddr.s6_addr32[0];
+		status += addr->src[1] ^ ip6h->saddr.s6_addr32[1];
+		status += addr->src[2] ^ ip6h->saddr.s6_addr32[2];
+		status += addr->src[3] ^ ip6h->saddr.s6_addr32[3];
+
+		status += addr->dest[0] ^ ip6h->daddr.s6_addr32[0];
+		status += addr->dest[1] ^ ip6h->daddr.s6_addr32[1];
+		status += addr->dest[2] ^ ip6h->daddr.s6_addr32[2];
+		status += addr->dest[3] ^ ip6h->daddr.s6_addr32[3];
+
+		return !status;
+	}
+
+	default:
+		nss_ipsec_klips_warn("%px: non ip version:%u received", skb, version);
+		return false;
+	}
+}
+
+/*
  * nss_ipsec_klips_get_tun()
  * 	get tunnel entry for given klips dev.
  */
@@ -286,63 +344,31 @@ static struct net_device *nss_ipsec_klips_get_tun_dev(struct net_device *klips_d
 	return tun_dev;
 }
 
+#if defined(NSS_L2TPV2_ENABLED)
 /*
- * nss_ipsec_klips_match_addr()
- * 	Match ip_addr with addresses associated with net_device.
+ * nss_ipsec_klips_get_inner_ifnum()
+ * 	Get ipsecmgr interface number for klips netdevice
+ *
+ * Calls nss_ipsec_klips_get_tun_dev(), which holds reference for tunnel,
+ * which gets released at the end of this function.
  */
-static bool nss_ipsec_klips_match_addr(struct net_device *dev, struct sk_buff *skb)
+static int nss_ipsec_klips_get_inner_ifnum(struct net_device *klips_dev)
 {
-	struct inet6_dev *in6_dev;
-	struct inet6_ifaddr *ifa;
-	struct ipv6hdr *ip6h;
-	struct iphdr *iph;
-	bool match = false;
+	struct net_device *tun_dev;
+	int32_t ipsec_ifnum;
 
-	iph = ip_hdr(skb);
-
-	if (iph->version == IPVERSION) {
-		struct in_device *in_dev;
-		struct in_ifaddr *ifa;
-
-		in_dev = in_dev_get(dev);
-		if (!in_dev) {
-			nss_ipsec_klips_warn("%p: Failed to find in_dev\n", dev);
-			return false;
-		}
-
-		rcu_read_lock();
-		for (ifa = in_dev->ifa_list; ifa && !match; ifa = ifa->ifa_next) {
-			match = (ifa->ifa_local == iph->daddr);
-		}
-
-		rcu_read_unlock();
-
-		in_dev_put(in_dev);
-		return match;
+	tun_dev = nss_ipsec_klips_get_tun_dev(klips_dev);
+	if (!tun_dev) {
+		nss_ipsec_klips_warn("%px: Tunnel device not found for klips dev", klips_dev);
+		return -1;
 	}
 
-	ip6h = ipv6_hdr(skb);
+	ipsec_ifnum = nss_cmn_get_interface_number_by_dev_and_type(tun_dev, NSS_DYNAMIC_INTERFACE_TYPE_IPSEC_CMN_INNER);
+	dev_put(tun_dev);
 
-	in6_dev = in6_dev_get(dev);
-	if (!in6_dev) {
-		nss_ipsec_klips_warn("%p: Failed to find in6_dev\n", dev);
-		return false;
-	}
-
-	read_lock_bh(&in6_dev->lock);
-
-	list_for_each_entry(ifa, &in6_dev->addr_list, if_list) {
-		match = ipv6_addr_equal(&ifa->addr, &ip6h->daddr);
-		if (match) {
-			break;
-		}
-	}
-
-	read_unlock_bh(&in6_dev->lock);
-
-	in6_dev_put(in6_dev);
-	return match;
+	return ipsec_ifnum;
 }
+#endif
 
 /*
  * nss_ipsec_klips_get_tun_by_addr()
@@ -364,7 +390,7 @@ static struct nss_ipsec_klips_tun *nss_ipsec_klips_get_tun_by_addr(struct sk_buf
 			continue;
 		}
 
-		if (nss_ipsec_klips_match_addr(tun->klips_dev, skb)) {
+		if (nss_ipsec_klips_tun_match_addr(skb, tun)) {
 			return tun;
 		}
 	}
@@ -668,6 +694,30 @@ static void nss_ipsec_klips_sa2ecm_tuple(struct nss_ipsecmgr_sa_tuple *sa, struc
 }
 
 /*
+ * nss_ipsec_klips_outer2tun_addr()
+ * 	Fill tunnel address information.
+ */
+static inline void nss_ipsec_klips_outer2tun_addr(uint8_t *iph, struct nss_ipsec_klips_tun_addr *addr)
+{
+	struct iphdr *ip4h = (struct iphdr *)iph;
+	struct ipv6hdr *ip6h;
+
+	addr->ver = ip4h->version;
+
+	if (ip4h->version == IPVERSION) {
+		addr->src[0] = ip4h->saddr;
+		addr->dest[0] = ip4h->daddr;
+		return;
+	}
+
+	ip6h = (struct ipv6hdr *)iph;
+	BUG_ON(ip6h->version != 6);
+
+	memcpy(addr->src, ip6h->saddr.s6_addr32, sizeof(addr->src));
+	memcpy(addr->dest, ip6h->daddr.s6_addr32, sizeof(addr->dest));
+}
+
+/*
  * nss_ipsec_klips_fallback_esp_handler()
  *	Fallback to original ESP protocol handler.
  */
@@ -683,7 +733,7 @@ static int nss_ipsec_klips_fallback_esp_handler(struct sk_buff *skb)
 			return esp_handler->handler(skb);
 		}
 
-		nss_ipsec_klips_warn("%p: Fallback ESP handler not present for IPv4\n", skb);
+		nss_ipsec_klips_warn("%px: Fallback ESP handler not present for IPv4\n", skb);
 		break;
 	}
 
@@ -695,16 +745,56 @@ static int nss_ipsec_klips_fallback_esp_handler(struct sk_buff *skb)
 			return esp_handler->handler(skb);
 		}
 
-		nss_ipsec_klips_warn("%p: Fallback ESP handler not present for IPv6\n", skb);
+		nss_ipsec_klips_warn("%px: Fallback ESP handler not present for IPv6\n", skb);
 		break;
 	}
 
 	default:
-		nss_ipsec_klips_warn("%p: Invalid IP header version:%u\n", skb, ip_hdr(skb)->version);
+		nss_ipsec_klips_warn("%px: Invalid IP header version:%u\n", skb, ip_hdr(skb)->version);
 		break;
 	}
 
-	nss_ipsec_klips_warn("%p: Droping SKB", skb);
+	nss_ipsec_klips_warn("%px: Droping SKB", skb);
+	dev_kfree_skb_any(skb);
+	return 0;
+}
+
+/*
+ * nss_ipsec_klips_fallback_natt_handler()
+ *	Invoke KLIPS encap recieve handler for socket.
+ */
+static int nss_ipsec_klips_fallback_natt_handler(struct sock *sk, struct sk_buff *skb)
+{
+	struct nss_ipsec_klips_tun *tun;
+	sk_encap_rcv_method_t encap_rcv;
+
+	read_lock(&tunnel_map.lock);
+
+	tun = nss_ipsec_klips_get_tun_by_addr(skb);
+	if (!tun) {
+		read_unlock(&tunnel_map.lock);
+		nss_ipsec_klips_warn("%px: Unable to find tunnel assciated, dropping skb", skb);
+		goto drop_skb;
+	}
+
+	if (tun->sk != sk) {
+		read_unlock(&tunnel_map.lock);
+		nss_ipsec_klips_warn("%px: Packet recieved from incorrect socket, dropping skb", tun);
+		goto drop_skb;
+	}
+
+	encap_rcv = tun->sk_encap_rcv;
+	if (!encap_rcv) {
+		read_unlock(&tunnel_map.lock);
+		nss_ipsec_klips_warn("%px: NULL sk_encap_rcv, dropping skb", tun);
+		goto drop_skb;
+	}
+
+	read_unlock(&tunnel_map.lock);
+
+	return encap_rcv(sk, skb);
+
+drop_skb:
 	dev_kfree_skb_any(skb);
 	return 0;
 }
@@ -802,13 +892,13 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 
 	iv_len = nss_ipsec_klips_get_blk_len(crypto->algo);
 	if (iv_len < 0) {
-		nss_ipsec_klips_warn("%p:Failed to map valid IV and block length\n", orig_skb);
+		nss_ipsec_klips_warn("%px:Failed to map valid IV and block length\n", orig_skb);
 		return 0;
 	}
 
 	ipsec_cb = nss_ipsec_klips_get_skb_cb(orig_skb);
 	if (!ipsec_cb) {
-		nss_ipsec_klips_warn("%p:Unable to get ipsec cb\n", orig_skb);
+		nss_ipsec_klips_warn("%px:Unable to get ipsec cb\n", orig_skb);
 		return 0;
 	}
 
@@ -821,7 +911,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 	tun = nss_ipsec_klips_get_tun(ipsec_cb->hlos_dev);
 	if (!tun) {
 		write_unlock(&tunnel_map.lock);
-		nss_ipsec_klips_warn("%p: Failed to find tun entry\n", ipsec_cb->hlos_dev);
+		nss_ipsec_klips_warn("%px: Failed to find tun entry\n", ipsec_cb->hlos_dev);
 		return 1;
 	}
 
@@ -831,7 +921,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 	sa = nss_ipsec_klips_sa_lookup(tun, crypto_idx);
 	if (!sa) {
 		write_unlock(&tunnel_map.lock);
-		nss_ipsec_klips_trace("%p: Failed to find SA entry(%u)\n", tun, crypto_idx);
+		nss_ipsec_klips_trace("%px: Failed to find SA entry(%u)\n", tun, crypto_idx);
 		return 1;
 	}
 
@@ -864,7 +954,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 			ecm_accel_outer = sa->ecm_accel_outer = true;
 		}
 
-		nss_ipsec_klips_trace("%p: Get ecm connection state(%u)\n", tun, ecm_state);
+		nss_ipsec_klips_trace("%px: Get ecm connection state(%u)\n", tun, ecm_state);
 	}
 
 	dev_hold(nss_dev);
@@ -877,7 +967,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 	if (ipsec_cb->flags & NSS_IPSEC_KLIPS_FLAG_TRANSPORT_MODE) {
 		skb_reset_network_header(orig_skb);
 		if (unlikely(ip_hdr(orig_skb)->version != IPVERSION)) {
-			nss_ipsec_klips_warn("%p:IPv6 transport mode offload is not supported\n", orig_skb);
+			nss_ipsec_klips_warn("%px:IPv6 transport mode offload is not supported\n", orig_skb);
 			dev_put(nss_dev);
 			return 1;
 		}
@@ -902,7 +992,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 	 */
 	skb = skb_copy_expand(orig_skb, nss_dev->needed_headroom, nss_dev->needed_tailroom, GFP_ATOMIC);
 	if (!skb) {
-		nss_ipsec_klips_err("%p: Unable to create copy of SKB\n", nss_dev);
+		nss_ipsec_klips_err("%px: Unable to create copy of SKB\n", nss_dev);
 		dev_put(nss_dev);
 		return 0;
 	}
@@ -923,7 +1013,7 @@ static int32_t nss_ipsec_klips_offload_inner(struct sk_buff *orig_skb, struct ns
 	 */
 	status = nss_ipsecmgr_sa_tx_inner(nss_dev, &sa_tuple, skb);
 	if (status != NSS_IPSECMGR_OK) {
-		nss_ipsec_klips_trace("%p: Failed to transmit encap packet, error(%u)\n", skb, status);
+		nss_ipsec_klips_trace("%px: Failed to transmit encap packet, error(%u)\n", skb, status);
 		dev_kfree_skb_any(skb);
 	}
 
@@ -960,7 +1050,7 @@ static int nss_ipsec_klips_offload_outer(struct sk_buff *skb, struct nss_ipsecmg
 	tun = nss_ipsec_klips_get_tun_by_addr(skb);
 	if (!tun) {
 		write_unlock(&tunnel_map.lock);
-		return nss_ipsec_klips_fallback_esp_handler(skb);
+		return -ENODEV;
 	}
 
 	ifindex = tun->klips_dev->ifindex;
@@ -975,11 +1065,11 @@ static int nss_ipsec_klips_offload_outer(struct sk_buff *skb, struct nss_ipsecmg
 	 */
 	if (!nss_ipsecmgr_sa_verify(nss_dev, sa_tuple)) {
 		dev_put(nss_dev);
-		return nss_ipsec_klips_fallback_esp_handler(skb);
+		return -ENODATA;
 	}
 
 	/*
-	 * In case of Decap, skb->data points to ESP header.
+	 * In case of Decap, skb->data points to ESP header or UDP header for NATT.
 	 * Set the skb->data to outer IP header.
 	 */
 	skb_push(skb, skb->data - skb_network_header(skb));
@@ -989,7 +1079,7 @@ static int nss_ipsec_klips_offload_outer(struct sk_buff *skb, struct nss_ipsecmg
 	 * skb_cow() has check for skb_cloned().
 	 */
 	if (skb_cow(skb, skb_headroom(skb))) {
-		nss_ipsec_klips_warn("%p: Failed to create writable copy, Droping", skb);
+		nss_ipsec_klips_warn("%px: Failed to create writable copy, Droping", skb);
 		goto drop_skb;
 	}
 
@@ -1032,13 +1122,127 @@ static int nss_ipsec_klips_offload_esp(struct sk_buff *skb)
 	struct nss_ipsecmgr_flow_tuple flow_tuple = {0};
 	struct nss_ipsecmgr_sa_tuple sa_tuple = {0};
 	uint8_t ttl;
+	int ret;
 
-	nss_ipsec_klips_trace("%p: SKb recieved by KLIPS plugin\n", skb);
+	nss_ipsec_klips_trace("%px: SKb recieved by KLIPS plugin\n", skb);
 
 	nss_ipsec_klips_outer2sa_tuple(skb_network_header(skb), false, &sa_tuple, &ttl, true);
 	nss_ipsec_klips_outer2flow_tuple(skb_network_header(skb), false, &flow_tuple);
 
-	return nss_ipsec_klips_offload_outer(skb, &sa_tuple, &flow_tuple);
+	ret = nss_ipsec_klips_offload_outer(skb, &sa_tuple, &flow_tuple);
+	if (ret) {
+		nss_ipsec_klips_trace("%px: Fallback to klips esp handler. error(%d)\n", skb, ret);
+		return nss_ipsec_klips_fallback_esp_handler(skb);
+	}
+
+	return 0;
+}
+
+/*
+ * nss_ipsec_klips_offload_natt()
+ * 	Socket encap recieve handler for IPsec UDP encapsulated packets.
+ *
+ * Shell returns the following value:
+ * =0 if SKB is consumed.
+ * >0 if skb should be passed on to UDP.
+ * <0 if skb should be resubmitted.
+ */
+int nss_ipsec_klips_offload_natt(struct sock *sk, struct sk_buff *skb)
+{
+	size_t hdr_len = sizeof(struct udphdr) +  sizeof(struct ip_esp_hdr);
+	struct nss_ipsecmgr_flow_tuple flow_tuple = {0};
+	struct nss_ipsecmgr_sa_tuple sa_tuple = {0};
+	struct ip_esp_hdr *esph;
+	uint8_t ttl;
+	int status;
+
+	/*
+	 * Socket has to be of type UDP_ENCAP_ESPINUDP .
+	 */
+	BUG_ON(udp_sk(sk)->encap_type != UDP_ENCAP_ESPINUDP);
+
+	/*
+	 * NAT-keepalive packet has udphdr & one byte payload (rfc3948).
+	 */
+	if (skb->len < hdr_len) {
+		goto fallback;
+	}
+
+	/*
+	 * In case of non-linear SKB we would like to ensure that
+	 * all the required headers are present in the first segment
+	 */
+	if (skb_is_nonlinear(skb) && (skb_headlen(skb) < hdr_len)) {
+		if (skb_linearize(skb)) {
+			dev_kfree_skb_any(skb);
+			return 0;
+		}
+
+		/*
+		 * skb_linearize may change header. So, reload all required pointer.
+		 */
+		skb_reset_transport_header(skb);
+		skb_set_network_header(skb, -(int)sizeof(struct iphdr));
+	}
+
+	/*
+	 * Check if packet has non-ESP marker (rfc3948)
+	 */
+	esph = (struct ip_esp_hdr *)(skb_transport_header(skb) + sizeof(struct udphdr));
+	if (ntohl(esph->spi) == NSS_IPSEC_KLIPS_NON_ESP_MARKER) {
+		goto fallback;
+	}
+
+	/*
+	 * ESP packet recieved, offload it to NSS else send it to KLIPS.
+	 */
+	nss_ipsec_klips_outer2sa_tuple(skb_network_header(skb), true, &sa_tuple, &ttl, true);
+	nss_ipsec_klips_outer2flow_tuple(skb_network_header(skb), true, &flow_tuple);
+
+	status = nss_ipsec_klips_offload_outer(skb, &sa_tuple, &flow_tuple);
+	if (status) {
+		nss_ipsec_klips_trace("%px: Fallback to klips natt handler. error(%d)\n", skb, status);
+		goto fallback;
+	}
+
+	return 0;
+
+fallback:
+	return nss_ipsec_klips_fallback_natt_handler(sk, skb);
+}
+
+/*
+ * nss_ipsec_klips_register_natt_handler()
+ * 	Hold and set the encap recieve handler of socket with offload method.
+ */
+static void nss_ipsec_klips_register_natt_handler(struct nss_ipsec_klips_tun *tun, struct sock *sk)
+{
+	/*
+	 * write lock is needed as we are modifying tunnel entry.
+	 */
+	BUG_ON(write_can_lock(&tunnel_map.lock));
+
+	sock_hold(sk);
+	tun->sk_encap_rcv = udp_sk(sk)->encap_rcv;
+	tun->sk = sk;
+	xchg(&udp_sk(sk)->encap_rcv, nss_ipsec_klips_offload_natt);
+}
+
+/*
+ * nss_ipsec_klips_unregister_natt_handler()
+ * 	 Release socket and revert encap recieve handler to original.
+ */
+static void nss_ipsec_klips_unregister_natt_handler(struct nss_ipsec_klips_tun *tun, struct sock *sk)
+{
+	/*
+	 * write lock is needed as we are modifying tunnel entry.
+	 */
+	BUG_ON(write_can_lock(&tunnel_map.lock));
+
+	xchg(&udp_sk(tun->sk)->encap_rcv, tun->sk_encap_rcv);
+	sock_put(tun->sk);
+	tun->sk = NULL;
+	tun->sk_encap_rcv = NULL;
 }
 
 /*
@@ -1067,19 +1271,19 @@ static int32_t nss_ipsec_klips_trap_encap(struct sk_buff *skb, struct nss_cfi_cr
 
 	iv_blk_len = nss_ipsec_klips_get_blk_len(crypto->algo);
 	if (iv_blk_len < 0) {
-		nss_ipsec_klips_warn("%p:Failed to map valid IV and block length\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to map valid IV and block length\n", skb);
 		return -EOPNOTSUPP;
 	}
 
 	algo = nss_ipsec_klips_get_algo(crypto->algo);
 	if (algo >= NSS_IPSECMGR_ALGO_MAX) {
-		nss_ipsec_klips_warn("%p:Failed to map valid algo\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to map valid algo\n", skb);
 		return -EOPNOTSUPP;
 	}
 
 	ipsec_cb = nss_ipsec_klips_get_skb_cb(skb);
 	if (!ipsec_cb) {
-		nss_ipsec_klips_warn("%p:Unable to get ipsec cb\n", skb);
+		nss_ipsec_klips_warn("%px:Unable to get ipsec cb\n", skb);
 		return -ENOENT;
 	}
 
@@ -1114,7 +1318,7 @@ static int32_t nss_ipsec_klips_trap_encap(struct sk_buff *skb, struct nss_cfi_cr
 	tun = nss_ipsec_klips_get_tun(ipsec_cb->hlos_dev);
 	if (!tun) {
 		write_unlock(&tunnel_map.lock);
-		nss_ipsec_klips_warn("%p:Failed to find NSS device mapped to KLIPS device\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to find NSS device mapped to KLIPS device\n", skb);
 		return -ENOENT;
 	}
 
@@ -1164,7 +1368,7 @@ static int32_t nss_ipsec_klips_trap_encap(struct sk_buff *skb, struct nss_cfi_cr
 	}
 
 	write_unlock(&tunnel_map.lock);
-	nss_ipsec_klips_trace("%p: Encap SA rule message sent\n", tun);
+	nss_ipsec_klips_trace("%px: Encap SA rule message sent\n", tun);
 
 	return 0;
 }
@@ -1194,19 +1398,19 @@ static int32_t nss_ipsec_klips_trap_decap(struct sk_buff *skb, struct nss_cfi_cr
 
 	iv_blk_len = nss_ipsec_klips_get_blk_len(crypto->algo);
 	if (iv_blk_len < 0) {
-		nss_ipsec_klips_warn("%p:Failed to map valid IV and block length\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to map valid IV and block length\n", skb);
 		return -EOPNOTSUPP;
 	}
 
 	algo = nss_ipsec_klips_get_algo(crypto->algo);
 	if (algo >= NSS_IPSECMGR_ALGO_MAX) {
-		nss_ipsec_klips_warn("%p:Failed to map valid algo\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to map valid algo\n", skb);
 		return -EOPNOTSUPP;
 	}
 
 	skb_cb = nss_ipsec_klips_get_skb_cb(skb);
 	if (!skb_cb) {
-		nss_ipsec_klips_warn("%p:skb->cb is NULL\n", skb);
+		nss_ipsec_klips_warn("%px:skb->cb is NULL\n", skb);
 		return -EINVAL;
 	}
 
@@ -1231,7 +1435,7 @@ static int32_t nss_ipsec_klips_trap_decap(struct sk_buff *skb, struct nss_cfi_cr
 	BUG_ON(!payload);
 
 	if (!nss_ipsec_klips_outer2flow_tuple(skb_network_header(skb), natt, &flow_tuple)) {
-		nss_ipsec_klips_warn("%p: Invalid packet\n", skb);
+		nss_ipsec_klips_warn("%px: Invalid packet\n", skb);
 		return -EINVAL;
 	}
 
@@ -1247,12 +1451,20 @@ static int32_t nss_ipsec_klips_trap_decap(struct sk_buff *skb, struct nss_cfi_cr
 	tun = nss_ipsec_klips_get_tun(skb_cb->hlos_dev);
 	if (!tun) {
 		write_unlock(&tunnel_map.lock);
-		nss_ipsec_klips_warn("%p:Failed to find NSS device mapped to KLIPS device\n", skb);
+		nss_ipsec_klips_warn("%px:Failed to find NSS device mapped to KLIPS device\n", skb);
 		return -ENOENT;
 	}
 
 	nss_dev = tun->nss_dev;
 	BUG_ON(!nss_dev);
+
+	if (!tun->addr.ver) {
+		/*
+		 * Fill tunnel address.
+		 */
+		nss_ipsec_klips_outer2tun_addr(skb_network_header(skb), &tun->addr);
+		nss_ipsec_klips_trace("%px:Tunnel tuple configured\n", skb);
+	}
 
 	/*
 	 * This information is used by ECM to know input interface.
@@ -1296,8 +1508,15 @@ static int32_t nss_ipsec_klips_trap_decap(struct sk_buff *skb, struct nss_cfi_cr
 		return -EINVAL;
 	}
 
+	/*
+	 * Convert socket to use our (de)encapsulation routine and save original pointers in tun map.
+	 */
+	if (natt && !tun->sk && skb_cb->sk) {
+		nss_ipsec_klips_info("%px: Updating sock(%px) encap_rcv handler\n", tun, skb_cb->sk);
+		nss_ipsec_klips_register_natt_handler(tun, skb_cb->sk);
+	}
+
 	write_unlock(&tunnel_map.lock);
-	nss_ipsec_klips_trace("%p: Decap SA rule message sent\n", tun);
 
 	return 0;
 }
@@ -1352,7 +1571,7 @@ static struct net_device *nss_ipsec_klips_get_dev_and_type(struct net_device *kl
 	}
 
 	default:
-		nss_ipsec_klips_warn("%p: Packet is not IPv4 or IPv6. version=%d\n", klips_dev, ip_hdr(skb)->version);
+		nss_ipsec_klips_warn("%px: Packet is not IPv4 or IPv6. version=%d\n", klips_dev, ip_hdr(skb)->version);
 		return NULL;
 	}
 
@@ -1367,14 +1586,14 @@ static bool nss_ipsec_klips_flow_delete(struct net_device *nss_dev, struct nss_i
 {
 	struct nss_ipsecmgr_sa_tuple sa_tuple = {0};
 
-	nss_ipsec_klips_trace("%p: Flow delete for tuple src_ip= %u:%u:%u:%u, dest_ip= %u:%u:%u:%u,\
+	nss_ipsec_klips_trace("%px: Flow delete for tuple src_ip= %u:%u:%u:%u, dest_ip= %u:%u:%u:%u,\
 			proto_next_hdr=%u, ip_version= %u\n", nss_dev, flow_tuple->src_ip[0],
 			flow_tuple->src_ip[1], flow_tuple->src_ip[2], flow_tuple->src_ip[3],
 			flow_tuple->dest_ip[0], flow_tuple->dest_ip[1], flow_tuple->dest_ip[2],
 			flow_tuple->dest_ip[3], flow_tuple->proto_next_hdr, flow_tuple->ip_version);
 
 	if (nss_ipsecmgr_flow_get_sa(nss_dev, flow_tuple, &sa_tuple) != NSS_IPSECMGR_OK) {
-		nss_ipsec_klips_trace("%p: SA not found\n", nss_dev);
+		nss_ipsec_klips_trace("%px: SA not found\n", nss_dev);
 		return false;
 	}
 
@@ -1383,7 +1602,7 @@ static bool nss_ipsec_klips_flow_delete(struct net_device *nss_dev, struct nss_i
 	/*
 	 * TODO:handle case when tx message to NSS fails in nss_ipsecmgr_flow_del()
 	 */
-	nss_ipsec_klips_trace("%p: IPSec Flow deleted\n", nss_dev);
+	nss_ipsec_klips_trace("%px: IPSec Flow deleted\n", nss_dev);
 	return true;
 }
 
@@ -1509,6 +1728,9 @@ static int nss_ipsec_klips_dev_event(struct notifier_block *this, unsigned long 
 		tunnel_map.used++;
 		tunnel_map.tbl[index].nss_dev = nss_dev;
 		tunnel_map.tbl[index].klips_dev = klips_dev;
+		tunnel_map.tbl[index].sk = NULL;
+		tunnel_map.tbl[index].sk_encap_rcv = NULL;
+		memset(&tunnel_map.tbl[index].addr, 0, sizeof(tunnel_map.tbl[index].addr));
 		dev_hold(klips_dev);
 
 		write_unlock_bh(&tunnel_map.lock);
@@ -1535,7 +1757,7 @@ static int nss_ipsec_klips_dev_event(struct notifier_block *this, unsigned long 
 
 		if (!tun->klips_dev || !tun->nss_dev) {
 			write_unlock_bh(&tunnel_map.lock);
-			nss_ipsec_klips_err("%p:Failed to find tunnel map\n", klips_dev);
+			nss_ipsec_klips_err("%px:Failed to find tunnel map\n", klips_dev);
 			return NOTIFY_DONE;
 		}
 
@@ -1560,6 +1782,15 @@ static int nss_ipsec_klips_dev_event(struct notifier_block *this, unsigned long 
 		 */
 		tun->nss_dev = NULL;
 		tun->klips_dev = NULL;
+
+		/*
+		 * Revert socket encap_rcv. Those fields are only used for NATT.
+		 */
+		if (tun->sk) {
+			nss_ipsec_klips_info("%px: Releasing socket(%px)\n", tun, tun->sk);
+			nss_ipsec_klips_unregister_natt_handler(tun, tun->sk);
+		}
+
 		tunnel_map.used--;
 
 		/*
@@ -1593,7 +1824,7 @@ static int nss_ipsec_klips_dev_event(struct notifier_block *this, unsigned long 
 
 		if (!tun->klips_dev || !tun->nss_dev) {
 			write_unlock_bh(&tunnel_map.lock);
-			nss_ipsec_klips_err("%p:Failed to find tunnel map\n", klips_dev);
+			nss_ipsec_klips_err("%px:Failed to find tunnel map\n", klips_dev);
 			return NOTIFY_DONE;
 		}
 
@@ -1665,7 +1896,7 @@ static inline bool nss_ipsec_klips_ecm_conn_to_tuple(struct ecm_notifier_connect
 		/*
                  * Shouldn't come here.
                  */
-                nss_ipsec_klips_err("%p: Invalid protocol\n", conn);
+                nss_ipsec_klips_err("%px: Invalid protocol\n", conn);
 		return false;
 	}
 
@@ -1688,11 +1919,11 @@ static int nss_ipsec_klips_ecm_conn_notify(struct notifier_block *nb, unsigned l
 		/*
 		 * Invalid event, Do nothing.
 		 */
-		nss_ipsec_klips_trace("%p: Invalid event recieved\n", nb);
+		nss_ipsec_klips_trace("%px: Invalid event recieved\n", nb);
 		return NOTIFY_OK;
 	}
 
-	nss_ipsec_klips_trace("%p: Event ECM_NOTIFIER_ACTION_CONNECTION_REMOVE recieved\n", nb);
+	nss_ipsec_klips_trace("%px: Event ECM_NOTIFIER_ACTION_CONNECTION_REMOVE recieved\n", nb);
 
 	switch (conn->tuple.protocol) {
 	case IPPROTO_ESP:
@@ -1700,7 +1931,7 @@ static int nss_ipsec_klips_ecm_conn_notify(struct notifier_block *nb, unsigned l
 		/*
 		 * Connection belongs to outer flow and it will delete when parent SA gets deref.
 		 */
-		nss_ipsec_klips_trace("%p: Connection protocol is ESP, no action required\n", nb);
+		nss_ipsec_klips_trace("%px: Connection protocol is ESP, no action required\n", nb);
 		return NOTIFY_OK;
 
 	case IPPROTO_UDP:
@@ -1709,10 +1940,10 @@ static int nss_ipsec_klips_ecm_conn_notify(struct notifier_block *nb, unsigned l
 		 * If Connection belongs to NAT-T (Outer flow) then it will delete when parent SA gets deref.
 		 */
 		if (conn->tuple.src_port == NSS_IPSECMGR_NATT_PORT_DATA) {
-			nss_ipsec_klips_trace("%p: Connection is with NAT-T source port, no action required\n", nb);
+			nss_ipsec_klips_trace("%px: Connection is with NAT-T source port, no action required\n", nb);
 			return NOTIFY_OK;
 		} else if (conn->tuple.dst_port == NSS_IPSECMGR_NATT_PORT_DATA) {
-			nss_ipsec_klips_trace("%p: Connection is with NAT-T dest port, no action required\n", nb);
+			nss_ipsec_klips_trace("%px: Connection is with NAT-T dest port, no action required\n", nb);
 			return NOTIFY_OK;
 		}
 
@@ -1725,27 +1956,27 @@ static int nss_ipsec_klips_ecm_conn_notify(struct notifier_block *nb, unsigned l
 	nss_dev = nss_ipsec_klips_get_tun_dev(conn->from_dev);
 	if (nss_dev) {
 		is_return = true;
-		nss_ipsec_klips_trace("%p: Tunnel Device found in 'from' dir\n", conn);
+		nss_ipsec_klips_trace("%px: Tunnel Device found in 'from' dir\n", conn);
 		goto found;
 	}
 
 	nss_dev = nss_ipsec_klips_get_tun_dev(conn->to_dev);
 	if (!nss_dev) {
-		nss_ipsec_klips_trace("%p: Tunnel Device not found for 'to_dev' & 'from_dev'\n", conn);
+		nss_ipsec_klips_trace("%px: Tunnel Device not found for 'to_dev' & 'from_dev'\n", conn);
 		return NOTIFY_DONE;
 	}
 
-	nss_ipsec_klips_trace("%p: Tunnel Device found in 'to' dir\n", conn);
+	nss_ipsec_klips_trace("%px: Tunnel Device found in 'to' dir\n", conn);
 
 found:
 	if (!nss_ipsec_klips_ecm_conn_to_tuple(conn, &flow_tuple, is_return)) {
-		nss_ipsec_klips_err("%p: Invalid connection data\n", conn);
+		nss_ipsec_klips_err("%px: Invalid connection data\n", conn);
 		dev_put(nss_dev);
 		return NOTIFY_DONE;
 	}
 
 	if (!nss_ipsec_klips_flow_delete(nss_dev, &flow_tuple)) {
-		nss_ipsec_klips_trace("%p: nss_ipsec_klips_flow_delete failed\n", conn);
+		nss_ipsec_klips_trace("%px: nss_ipsec_klips_flow_delete failed\n", conn);
 	}
 
 	dev_put(nss_dev);
@@ -1766,7 +1997,8 @@ static struct notifier_block nss_ipsec_klips_ecm_conn_notifier = {
 
 #if defined(NSS_L2TPV2_ENABLED)
 static struct l2tpmgr_ipsecmgr_cb nss_ipsec_klips_l2tp =  {
-	.cb = nss_ipsec_klips_get_tun_dev
+	.get_ifnum_by_dev = nss_ipsec_klips_get_inner_ifnum,
+	.get_ifnum_by_ipv4_addr = NULL
 };
 #endif
 
@@ -1805,7 +2037,7 @@ int __init nss_ipsec_klips_init_module(void)
 	ecm_interface_ipsec_register_callbacks(&nss_ipsec_klips_ecm);
 	ecm_notifier_register_connection_notify(&nss_ipsec_klips_ecm_conn_notifier);
 #if defined(NSS_L2TPV2_ENABLED)
-	l2tpmgr_register_ipsecmgr_callback(&nss_ipsec_klips_l2tp);
+	l2tpmgr_register_ipsecmgr_callback_by_netdev(&nss_ipsec_klips_l2tp);
 #endif
 	return 0;
 }
@@ -1827,7 +2059,7 @@ void __exit nss_ipsec_klips_exit_module(void)
 	ecm_notifier_unregister_connection_notify(&nss_ipsec_klips_ecm_conn_notifier);
 	ecm_interface_ipsec_unregister_callbacks();
 #if defined(NSS_L2TPV2_ENABLED)
-	l2tpmgr_unregister_ipsecmgr_callback();
+	l2tpmgr_unregister_ipsecmgr_callback_by_netdev();
 #endif
 
 	nss_cfi_ocf_unregister_ipsec();

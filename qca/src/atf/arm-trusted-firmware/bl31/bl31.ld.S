@@ -11,7 +11,7 @@
 OUTPUT_FORMAT(PLATFORM_LINKER_FORMAT)
 OUTPUT_ARCH(PLATFORM_LINKER_ARCH)
 ENTRY(bl31_entrypoint)
-#if QTI_6018_PLATFORM
+#if QTI_6018_PLATFORM || QTI_5018_PLATFORM
 ENTRY(bl31_entrypoint_qti)
 #endif
 
@@ -30,13 +30,15 @@ SECTIONS
 
     shared_imem_ro (QTI_SHARED_IMEM_RO_BASE) : {
 	   . = ALIGN(PAGE_SIZE);
+	   KEEP(* (QTI_IMEM_RESET_ENTRY))
+	   KEEP(* (QTI_SYSDBG_IMEM_CODE))
            KEEP(*(.code_imem.QTISECLIB_IMEM_CODE))
     }
     ASSERT(. <= (QTI_SHARED_IMEM_RO_BASE + QTI_SHARED_IMEM_RO_SIZE), "Shared IMEM RO region has exceeded its limit.")
 
     shared_imem_rw (QTI_SHARED_IMEM_RW_BASE):  {
 	   . = ALIGN(PAGE_SIZE);
-	   __DBG_IMEM_STACK_BASE__  = . + QTI_SHARED_IMEM_DBG_STACK_SIZE;
+	   KEEP(* (.uncached_imem.QTI_SYSDBG_IMEM_DATA))
     }
     ASSERT(. <= (QTI_SHARED_IMEM_RW_BASE +  QTI_SHARED_IMEM_RW_SIZE), "Shared IMEM RW region has exceeded its limit.")
 #endif
@@ -58,7 +60,7 @@ SECTIONS
     } >RAM
 
     .rodata . : {
-        __RODATA_START__ = .;
+        __RODATA_START__ = ALIGN(PAGE_SIZE);
         *(.rodata*)
 
         /* Ensure 8-byte alignment for descriptors and ensure inclusion */
@@ -103,7 +105,7 @@ SECTIONS
     } >RAM
 #else
     ro . : {
-        __RO_START__ = .;
+        __RO_START__ = ALIGN(PAGE_SIZE);
         *bl31_entrypoint.o(.text*)
         *(.text*)
         *(.rodata*)
@@ -319,7 +321,7 @@ SECTIONS
     } >RAM
 #endif
 
-#if QTI_6018_PLATFORM
+#if QTI_6018_PLATFORM || QTI_5018_PLATFORM
       /****************************************************************
    *  TZOS Diag
    *  Attrib.: RW, PXN=1, Uncacheable, PL1
@@ -330,8 +332,16 @@ SECTIONS
       . = . + QTI_DIAG_RG_SIZE;
      __DIAG_REGION_END__ = .;
     } >RAM
-
 #endif
+
+#if QTI_5018_PLATFORM
+    pil . : {
+     __PIL_REGION_START__ = .;
+      . = . + QTI_PIL_RG_SIZE;
+     __PIL_REGION_END__ = .;
+    } >RAM
+#endif
+
     /*
      * Define a linker symbol to mark end of the RW memory area for this
      * image.

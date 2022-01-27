@@ -48,6 +48,19 @@
 	.size \_name, . - \_name
 	.endm
 
+        /*
+         * This macro is used to place a function inside a section.
+         */
+        .macro func_in_section _name, _section _align=2
+        .cfi_sections .debug_frame
+        .section \_section, "ax"
+        .type \_name, %function
+        .cfi_startproc
+        .align \_align
+        \_name:
+        .endm
+
+
 	/*
 	 * Theses macros are used to create function labels for deprecated
 	 * APIs. If ERROR_DEPRECATED is non zero, the callers of these APIs

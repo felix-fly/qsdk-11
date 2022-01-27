@@ -21,6 +21,7 @@
 #define SCM_SVC_SSD			0x7
 #define SCM_SVC_FUSE			0x8
 #define SCM_SVC_PWR			0x9
+#define SCM_SVC_CRYPTO			0xA
 #define SCM_SVC_CP			0xC
 #define SCM_SVC_DCVS			0xD
 #define SCM_SVC_TZSCHEDULER		0xFC
@@ -32,6 +33,12 @@
 #define SCM_FLAG_COLDBOOT_CPU1		0x1
 #define SCM_SVC_ID_SHIFT		0xA
 #define IS_CALL_AVAIL_CMD		0x1
+
+#ifdef CONFIG_IPQ_BT_SUPPORT
+#define SCM_PAS_INIT_IMAGE_CMD		0x1
+#define SCM_PAS_AUTH_AND_RESET_CMD	0x5
+#define SCM_CMD_OTP  			0x15
+#endif
 
 /* scm_v8 */
 #define SCM_VAL				0x0
@@ -47,6 +54,19 @@
 #define SCM_EINVAL_ARG		-2
 #define SCM_ERROR		-1
 #define SCM_INTERRUPTED		 1
+
+/* OWNER IDs */
+#define SCM_OWNR_SIP		2
+#define SCM_OWNR_QSEE_OS	50
+#define SCM_OWNR_TEE_HLOS	51
+
+/* SVC IDs  */
+#define SCM_SVC_APP_MGR		1	/* Application service manager */
+#define SCM_SVC_LISTENER	2	/* Listener service manager */
+#define SCM_SVC_EXTERNAL	3	/* External Image loading */
+#define SCM_SVC_MON_SAT		252	/* Monitor SAT test calls */
+#define SCM_SVC_TEST_1		253	/* TZ test calls (continued). */
+#define SCM_SVC_TEST_0		254	/* TZ test calls */
 
 /* to align the pointer to the (next) page boundary */
 #define PAGE_ALIGN(addr) ALIGN(addr, PAGE_SIZE)
@@ -104,6 +124,7 @@ extern int qca_scm_call(u32 svc_id, u32 cmd_id, void *buf, size_t len);
 int qca_scm_usb_mode_write(u32, u32);
 int qca_scm_call_write(u32, u32, u32 *, u32);
 int qca_scm_call_read(u32, u32, u32 *, u32 *);
+int qca_scm_crypto(int, void *, u32);
 int qca_scm_sdi(void);
 int qca_scm_dload(u32);
 int qca_scm_fuseipq(u32, u32, void *, size_t);
@@ -112,6 +133,14 @@ int qca_scm_secure_authenticate(void *cmd_buf, size_t cmd_len);
 s32 qca_scm_call_atomic_ver2_32(u32 svc, u32 cmd, u32 arg1, u32 arg2);
 int qca_scm_auth_kernel(void *cmd_buf, size_t cmd_len);
 int is_scm_sec_auth_available(u32 svc_id, u32 cmd_id);
+#ifdef CONFIG_IPQ_TZT
+int qca_scm(u32 svc_id, u32 cmd_id, u32 ownr_id, u32 *addr, u32 len);
+#endif
+#ifdef CONFIG_IPQ_BT_SUPPORT
+int qti_scm_otp(u32 peripheral);
+int qti_scm_pas_init_image(u32 peripheral, u32 addr);
+int qti_pas_and_auth_reset(u32 peripheral);
+#endif
 #define MAX_QCA_SCM_RETS		3
 #define MAX_QCA_SCM_ARGS		10
 #define SCM_READ_OP			1
@@ -154,6 +183,9 @@ struct qca_scm_desc {
 
 #define QCA_SCM_SIP_FNID(s, c) (((((s) & 0xFF) << 8) | \
 			((c) & 0xFF)) | 0x02000000)
+
+#define QCA_SCM_FNID(s, c, o) (((((s) & 0xFF) << 8) | \
+			((c) & 0xFF)) | (((o) & 0xFF) << 24))
 
 #define QCA_SMC_ATOMIC_MASK            0x80000000
 

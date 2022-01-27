@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, 2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -42,7 +42,6 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv4/nf_defrag_ipv4.h>
@@ -61,8 +60,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_classifier_default.h"
 #include "ecm_db.h"
 
@@ -111,7 +110,7 @@ bool _ecm_db_timer_group_entry_remove(struct ecm_db_timer_group_entry *tge)
 		/*
 		 * First in the group
 		 */
-		DEBUG_ASSERT(timer_group->head == tge, "%p: bad head, expecting %p, got %p\n", timer_group, tge, timer_group->head);
+		DEBUG_ASSERT(timer_group->head == tge, "%px: bad head, expecting %px, got %px\n", timer_group, tge, timer_group->head);
 		timer_group->head = tge->next;
 	}
 
@@ -121,7 +120,7 @@ bool _ecm_db_timer_group_entry_remove(struct ecm_db_timer_group_entry *tge)
 		/*
 		 * No next so this must be the last item - we need to adjust the tail pointer
 		 */
-		DEBUG_ASSERT(timer_group->tail == tge, "%p: bad tail, expecting %p got %p\n", timer_group, tge, timer_group->tail);
+		DEBUG_ASSERT(timer_group->tail == tge, "%px: bad tail, expecting %px got %px\n", timer_group, tge, timer_group->tail);
 		timer_group->tail = tge->prev;
 	}
 
@@ -154,7 +153,7 @@ void _ecm_db_timer_group_entry_set(struct ecm_db_timer_group_entry *tge, ecm_db_
 {
 	struct ecm_db_timer_group *timer_group;
 
-	DEBUG_ASSERT(tge->group == ECM_DB_TIMER_GROUPS_MAX, "%p: already set\n", tge);
+	DEBUG_ASSERT(tge->group == ECM_DB_TIMER_GROUPS_MAX, "%px: already set\n", tge);
 
 	/*
 	 * Set group
@@ -287,7 +286,7 @@ bool ecm_db_timer_group_entry_touch(struct ecm_db_timer_group_entry *tge)
 		/*
 		 * Since there is no next this must be the tail
 		 */
-		DEBUG_ASSERT(timer_group->tail == tge, "%p: bad tail, expecting %p got %p\n", timer_group, tge, timer_group->tail);
+		DEBUG_ASSERT(timer_group->tail == tge, "%px: bad tail, expecting %px got %px\n", timer_group, tge, timer_group->tail);
 		timer_group->tail = tge->prev;
 	}
 
@@ -347,14 +346,14 @@ static uint32_t ecm_db_timer_groups_check(uint32_t time_now)
 				/*
 				 * First in the group
 				 */
-				DEBUG_ASSERT(timer_group->head == tge, "%p: bad head, expecting %p got %p\n", timer_group, tge, timer_group->head);
+				DEBUG_ASSERT(timer_group->head == tge, "%px: bad head, expecting %px got %px\n", timer_group, tge, timer_group->head);
 				timer_group->head = NULL;
 			}
 			timer_group->tail = tge->prev;
 			tge->group = ECM_DB_TIMER_GROUPS_MAX;
 			spin_unlock_bh(&ecm_db_lock);
 			expired++;
-			DEBUG_TRACE("%p: Expired\n", tge);
+			DEBUG_TRACE("%px: Expired\n", tge);
 			tge->fn(tge->arg);
 			spin_lock_bh(&ecm_db_lock);
 		}
@@ -387,7 +386,11 @@ EXPORT_SYMBOL(ecm_db_time_get);
  *	Manage expiration of connections
  * NOTE: This is softirq context
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0))
 static void ecm_db_timer_callback(unsigned long data)
+#else
+static void ecm_db_timer_callback(struct timer_list *tm)
+#endif
 {
 	uint32_t timer;
 
@@ -425,9 +428,13 @@ void ecm_db_timer_init(void)
 	/*
 	 * Set a timer to manage cleanup of expired connections
 	 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0))
 	init_timer(&ecm_db_timer);
 	ecm_db_timer.function = ecm_db_timer_callback;
 	ecm_db_timer.data = 0;
+#else
+	timer_setup(&ecm_db_timer, ecm_db_timer_callback, 0);
+#endif
 	ecm_db_timer.expires = jiffies + HZ;
 	add_timer(&ecm_db_timer);
 
@@ -450,6 +457,8 @@ void ecm_db_timer_init(void)
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT].tg = ECM_DB_TIMER_GROUPS_CONNECTION_TCP_SHORT_TIMEOUT;
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT].time = ECM_DB_CONNECTION_TCP_RST_TIMEOUT;
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT].tg = ECM_DB_TIMER_GROUPS_CONNECTION_TCP_RESET_TIMEOUT;
+	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_CLOSED_TIMEOUT].time = ECM_DB_CONNECTION_TCP_CLOSED_TIMEOUT;
+	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_CLOSED_TIMEOUT].tg = ECM_DB_TIMER_GROUPS_CONNECTION_TCP_CLOSED_TIMEOUT;
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT].time = ECM_DB_CONNECTION_TCP_LONG_TIMEOUT;
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT].tg = ECM_DB_TIMER_GROUPS_CONNECTION_TCP_LONG_TIMEOUT;
 	ecm_db_timer_groups[ECM_DB_TIMER_GROUPS_CONNECTION_PPTP_DATA_TIMEOUT].time = ECM_DB_CONNECTION_PPTP_DATA_TIMEOUT;

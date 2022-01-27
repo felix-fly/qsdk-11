@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -318,7 +318,7 @@ bool nss_ifb_reset_nexthop(struct nss_ifb_info *ifb_info)
 
 	spin_lock_bh(&nss_ifb_list_lock);
 	if (!(ifb_info->is_mapped)) {
-		nss_igs_info("%s IFB device mapped flag is not set\n", ifb_info->map_dev->name);
+		nss_igs_info("%s IFB device mapped flag is not set\n", ifb_info->ifb_dev->name);
 		spin_unlock_bh(&nss_ifb_list_lock);
 		return true;
 	}
@@ -418,7 +418,7 @@ bool nss_ifb_clear_igs_node(struct nss_ifb_info *ifb_info)
 
 	spin_lock_bh(&nss_ifb_list_lock);
 	if (!(ifb_info->is_mapped)) {
-		nss_igs_info("%s IFB device mapped flag is not set\n", ifb_info->map_dev->name);
+		nss_igs_info("%s IFB device mapped flag is not set\n", ifb_info->ifb_dev->name);
 		spin_unlock_bh(&nss_ifb_list_lock);
 		return true;
 	}
@@ -567,7 +567,7 @@ static void nss_ifb_event_cb(void *if_ctx, struct nss_cmn_msg *ncm)
 		break;
 
 	default:
-		nss_igs_error("%p: Unknown Event from NSS\n", netdev);
+		nss_igs_error("%px: Unknown Event from NSS\n", netdev);
 		break;
 	}
 }

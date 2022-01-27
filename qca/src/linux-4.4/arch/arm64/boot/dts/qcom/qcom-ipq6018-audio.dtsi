@@ -17,10 +17,6 @@
 #include <dt-bindings/sound/qcom,gpr.h>
 
 &soc {
-	aliases {
-		swr0 = &swr0;
-	};
-
 	qcom,avtimer@A22E000 {
 		compatible = "qcom,avtimer";
 		reg = <0xA22E00C 0x4>,
@@ -68,23 +64,11 @@
 };
 
 &gecko_core_platform {
-	bolero: bolero-cdc {
-		compatible = "qcom,bolero-codec";
-		tx_macro: tx-macro@A460000 {
-		};
-
-		wsa_macro: wsa-macro@A480000 {
-			swr0: wsa_swr_master {
-			};
-		};
-	};
-};
-
-&gecko_core_platform {
 	ipq6018_snd: sound {
 		compatible = "qcom,ipq6018-asoc-snd";
 		qcom,mi2s-audio-intf = <1>;
 		qcom,auxpcm-audio-intf = <1>;
+		qcom,tdm-audio-intf = <1>;
 
 		asoc-cpu = <&dai_dp>,
 				<&dai_mi2s0>, <&dai_mi2s1>,
@@ -137,13 +121,6 @@
 				"msm-dai-cdc-dma-dev.45058",
 				"msm-dai-cdc-dma-dev.45059",
 				"msm-dai-cdc-dma-dev.45061",
-				"msm-dai-cdc-dma-dev.45104",
-				"msm-dai-cdc-dma-dev.45105",
-				"msm-dai-cdc-dma-dev.45106",
-				"msm-dai-cdc-dma-dev.45107",
-				"msm-dai-cdc-dma-dev.45108",
-				"msm-dai-cdc-dma-dev.45109",
-				"msm-dai-cdc-dma-dev.45110",
 				"msm-dai-cdc-dma-dev.45111",
 				"msm-dai-cdc-dma-dev.45112",
 				"msm-dai-cdc-dma-dev.45113",

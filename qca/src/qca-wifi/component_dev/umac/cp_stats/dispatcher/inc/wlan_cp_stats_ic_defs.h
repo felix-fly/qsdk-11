@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018, 2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -297,6 +297,13 @@ struct pdev_ic_cp_stats {
  * @peer_delete_resp: no of peer delete resp rcvd from target
  * @peer_delete_all_req: no of peer delete all req sent to target
  * @peer_delete_all_resp: no of peer delete all resp rcvd from target
+ * @prob_req_drops: no of probe requests drops
+ * @oob_probe_req_count: no of out of band probe requests
+ * @wc_probe_req_drops: no of wildcard probe requests drops
+ * @cs_fils_frames_sent: fils discovery sent success count
+ * @cs_fils_frames_sent_fail: fils discovery sent success count
+ * @cs_tx_offload_prb_resp_succ_cnt: Offload probe response success count
+ * @cs_tx_offload_prb_resp_fail_cnt: Offload probe response fail count
  */
 struct vdev_80211_stats {
 	uint64_t cs_rx_wrongbss;
@@ -366,6 +373,13 @@ struct vdev_80211_stats {
 	uint64_t cs_peer_delete_resp;
 	uint64_t cs_peer_delete_all_req;
 	uint64_t cs_peer_delete_all_resp;
+	uint64_t cs_prob_req_drops;
+	uint64_t cs_oob_probe_req_count;
+	uint64_t cs_wc_probe_req_drops;
+	uint64_t cs_fils_frames_sent;
+	uint64_t cs_fils_frames_sent_fail;
+	uint64_t cs_tx_offload_prb_resp_succ_cnt;
+	uint64_t cs_tx_offload_prb_resp_fail_cnt;
 };
 
 /**
@@ -431,7 +445,7 @@ struct vdev_ic_cp_stats {
  * as interface structure with user space application
  * make sure to align this structure with ieee80211_nodestats always
  *
- *  @cs_rx_mgmt_rssi: rx mgmt rssi
+ *  @cs_rx_mgmt_snr: rx mgmt snr
  *  @cs_rx_mgmt: rx mgmt
  *  @cs_rx_noprivacy: rx no privacy
  *  @cs_rx_wepfail: rx wep failures
@@ -446,9 +460,10 @@ struct vdev_ic_cp_stats {
  *  @cs_tx_dropblock: tx dropblock
  *  @cs_tx_assoc: tx assoc success
  *  @cs_tx_assoc_fail: tx assoc failure
+ *  @cs_rx_decryptcrc: rx decrypt errors
  */
 struct peer_ic_cp_stats {
-	int8_t   cs_rx_mgmt_rssi;
+	int8_t   cs_rx_mgmt_snr;
 	uint32_t cs_rx_mgmt;
 	uint32_t cs_rx_noprivacy;
 	uint32_t cs_rx_wepfail;
@@ -466,6 +481,18 @@ struct peer_ic_cp_stats {
 	uint32_t cs_tx_assoc;
 	uint32_t cs_tx_assoc_fail;
 	uint32_t cs_is_tx_nobuf;
+	uint32_t cs_rx_decryptcrc;
+
+	/* TWT stats */
+	uint32_t cs_twt_event_type;
+	uint32_t cs_twt_flow_id:16,
+		 cs_twt_bcast:1,
+		 cs_twt_trig:1,
+		 cs_twt_announ:1;
+	uint32_t cs_twt_dialog_id;
+	uint32_t cs_twt_wake_dura_us;
+	uint32_t cs_twt_wake_intvl_us;
+	uint32_t cs_twt_sp_offset_us;
 };
 
 #endif /* QCA_SUPPORT_CP_STATS */

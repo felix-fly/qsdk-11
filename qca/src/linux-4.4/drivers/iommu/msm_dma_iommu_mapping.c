@@ -198,7 +198,7 @@ static inline int __msm_dma_map_sg(struct device *dev, struct scatterlist *sg,
 		}
 
 		ret = dma_map_sg_attrs(dev, sg, nents, dir, attrs);
-		if (ret != nents) {
+		if (!ret) {
 			kfree(iommu_map);
 			goto out_unlock;
 		}

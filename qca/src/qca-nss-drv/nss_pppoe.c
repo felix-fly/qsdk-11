@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -22,6 +22,7 @@
 #include "nss_tx_rx_common.h"
 #include "nss_pppoe_stats.h"
 #include "nss_pppoe_log.h"
+#include "nss_pppoe_strings.h"
 
 #define NSS_PPPOE_TX_TIMEOUT 3000 /* 3 Seconds */
 
@@ -79,13 +80,13 @@ static nss_tx_status_t nss_pppoe_tx_msg(struct nss_ctx_instance *nss_ctx, struct
 	 */
 	type = nss_dynamic_interface_get_type(nss_pppoe_get_context(), ncm->interface);
 	if ((ncm->interface != NSS_PPPOE_INTERFACE) && (type != NSS_DYNAMIC_INTERFACE_TYPE_PPPOE)) {
-		nss_warning("%p: tx request for not PPPoE interface: %d type: %d\n",
+		nss_warning("%px: tx request for not PPPoE interface: %d type: %d\n",
 				nss_ctx, ncm->interface, type);
 		return NSS_TX_FAILURE;
 	}
 
 	if (ncm->type >= NSS_PPPOE_MSG_MAX) {
-		nss_warning("%p: message type out of range: %d\n", nss_ctx, ncm->type);
+		nss_warning("%px: message type out of range: %d\n", nss_ctx, ncm->type);
 		return NSS_TX_FAILURE;
 	}
 
@@ -138,12 +139,12 @@ static void nss_pppoe_handler(struct nss_ctx_instance *nss_ctx, struct nss_cmn_m
 	 * Sanity check the message type
 	 */
 	if (ncm->type >= NSS_PPPOE_MSG_MAX) {
-		nss_warning("%p: message type out of range: %d\n", nss_ctx, ncm->type);
+		nss_warning("%px: message type out of range: %d\n", nss_ctx, ncm->type);
 		return;
 	}
 
 	if (nss_cmn_get_msg_len(ncm) > sizeof(struct nss_pppoe_msg)) {
-		nss_warning("%p: message length is invalid: %d\n", nss_ctx, nss_cmn_get_msg_len(ncm));
+		nss_warning("%px: message length is invalid: %d\n", nss_ctx, nss_cmn_get_msg_len(ncm));
 		return;
 	}
 
@@ -157,10 +158,14 @@ static void nss_pppoe_handler(struct nss_ctx_instance *nss_ctx, struct nss_cmn_m
 	 */
 	switch (npm->cm.type) {
 	case NSS_PPPOE_MSG_SYNC_STATS:
+		/*
+		 * Update PPPoE debug statistics and send statistics notifications to the registered modules
+		 */
 		nss_pppoe_stats_sync(nss_ctx, &npm->msg.sync_stats, ncm->interface);
+		nss_pppoe_stats_notify(nss_ctx, ncm->interface);
 		break;
 	default:
-		nss_warning("%p: Received response %d for type %d, interface %d\n",
+		nss_warning("%px: Received response %d for type %d, interface %d\n",
 				nss_ctx, ncm->response, ncm->type, ncm->interface);
 	}
 
@@ -222,7 +227,7 @@ int nss_pppoe_br_accel_mode_handler(struct ctl_table *ctl, int write, void __use
 
 	new_val = nss_pppoe_br_accel_mode;
 	if ((new_val < NSS_PPPOE_BR_ACCEL_MODE_DIS) || (new_val >= NSS_PPPOE_BR_ACCEL_MODE_MAX)) {
-		nss_warning("%p: value out of range: %d\n", nss_ctx, new_val);
+		nss_warning("%px: value out of range: %d\n", nss_ctx, new_val);
 		nss_pppoe_br_accel_mode = current_value;
 		nss_pppoe_br_help(new_val);
 		return -EINVAL;
@@ -237,7 +242,7 @@ int nss_pppoe_br_accel_mode_handler(struct ctl_table *ctl, int write, void __use
 
 	status = nss_pppoe_tx_msg_sync(nss_ctx, &npm);
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: Send acceleration mode message failed\n", nss_ctx);
+		nss_warning("%px: Send acceleration mode message failed\n", nss_ctx);
 		nss_pppoe_br_accel_mode = current_value;
 		return -EIO;
 	}
@@ -273,14 +278,14 @@ nss_tx_status_t nss_pppoe_tx_msg_sync(struct nss_ctx_instance *nss_ctx,
 
 	status = nss_pppoe_tx_msg(nss_ctx, msg);
 	if (status != NSS_TX_SUCCESS) {
-		nss_warning("%p: nss_pppoe_tx_msg failed\n", nss_ctx);
+		nss_warning("%px: nss_pppoe_tx_msg failed\n", nss_ctx);
 		up(&pppoe_pvt.sem);
 		return status;
 	}
 
 	ret = wait_for_completion_timeout(&pppoe_pvt.complete, msecs_to_jiffies(NSS_PPPOE_TX_TIMEOUT));
 	if (!ret) {
-		nss_warning("%p: PPPoE msg tx failed due to timeout\n", nss_ctx);
+		nss_warning("%px: PPPoE msg tx failed due to timeout\n", nss_ctx);
 		pppoe_pvt.response = NSS_TX_FAILURE;
 	}
 
@@ -415,6 +420,7 @@ void nss_pppoe_register_handler(void)
 	init_completion(&pppoe_pvt.complete);
 
 	nss_pppoe_stats_dentry_create();
+	nss_pppoe_strings_dentry_create();
 }
 
 /*

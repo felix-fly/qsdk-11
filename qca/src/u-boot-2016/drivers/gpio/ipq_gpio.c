@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -33,10 +33,15 @@ void gpio_tlmm_config(struct qca_gpio_config *gpio_config)
 	val |= gpio_config->func << 2;
 	val |= gpio_config->drvstr << 6;
 	val |= gpio_config->oe << 9;
+#ifdef CONFIG_IPQ5018
+	val |= gpio_config->od_en << 10;
+	val |= gpio_config->sr_en << 11;
+	val |= gpio_config->pu_res << 12;
+#else
 	val |= gpio_config->vm << 11;
 	val |= gpio_config->od_en << 12;
 	val |= gpio_config->pu_res << 13;
-
+#endif
 	unsigned int *addr =
 		(unsigned int *)GPIO_CONFIG_ADDR(gpio_config->gpio);
 	writel(val, addr);
@@ -109,7 +114,8 @@ int qca_gpio_init(int offset)
 							  offset, "od_en", 0);
 		gpio_config.pu_res	= fdtdec_get_uint(gd->fdt_blob,
 							  offset, "pu_res", 0);
-
+		gpio_config.sr_en	= fdtdec_get_uint(gd->fdt_blob,
+							  offset, "sr_en", 0);
 		gpio_tlmm_config(&gpio_config);
 	}
 	return 0;

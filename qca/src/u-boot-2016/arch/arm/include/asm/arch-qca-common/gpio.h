@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2012, 2016-2017, 2019 The Linux Foundation. All rights reserved.
  * Source : APQ8064 LK Boot
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,6 +43,7 @@ struct qca_gpio_config {
 	unsigned int vm;
 	unsigned int od_en;
 	unsigned int pu_res;
+	unsigned int sr_en;
 };
 
 void gpio_tlmm_config(struct qca_gpio_config *gpio_config);

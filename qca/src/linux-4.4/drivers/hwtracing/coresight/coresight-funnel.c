@@ -32,6 +32,8 @@
 #define FUNNEL_HOLDTIME_SHFT	0x8
 #define FUNNEL_HOLDTIME		(0x7 << FUNNEL_HOLDTIME_SHFT)
 
+#define FUNNEL_MAX_PORT		7
+
 /**
  * struct funnel_drvdata - specifics associated to a funnel component
  * @base:	memory mapped base address for this component.
@@ -160,7 +162,26 @@ static ssize_t funnel_ctrl_show(struct device *dev,
 
 	return sprintf(buf, "%#x\n", val);
 }
-static DEVICE_ATTR_RO(funnel_ctrl);
+
+static ssize_t funnel_ctrl_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t size)
+{
+	int ret, port;
+	struct funnel_drvdata *drvdata = dev_get_drvdata(dev->parent);
+
+	ret = kstrtoint(buf, 0, &port);
+	if (ret)
+		return ret;
+
+	if (port < 0 || port > FUNNEL_MAX_PORT)
+		return -EINVAL;
+
+	funnel_enable(drvdata->csdev, port, 0);
+
+	return size;
+}
+static DEVICE_ATTR_RW(funnel_ctrl);
 
 static struct attribute *coresight_funnel_attrs[] = {
 	&dev_attr_funnel_ctrl.attr,

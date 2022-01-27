@@ -13,8 +13,8 @@
 
 static const struct of_device_id machines[] __initconst = {
 	{ .compatible = "qcom,ipq4019" },
+	{ .compatible = "qcom,ipq5018" },
 	{ .compatible = "qcom,ipq807x" },
-	{ .compatible = "qcom,ipq6018" },
 
 	{ /* sentinel */ }
 };

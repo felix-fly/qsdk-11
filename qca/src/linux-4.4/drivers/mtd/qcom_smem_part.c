@@ -118,6 +118,7 @@ static int qcom_smem_get_flash_partitions(struct smem_partition_table **pparts)
 	return 0;
 }
 
+#ifdef CONFIG_SPI_MASTER
 static int of_dev_node_match(struct device *dev, void *data)
 {
 	return dev->of_node == data;
@@ -127,9 +128,7 @@ static bool is_spi_device(struct device_node *np)
 {
 	struct device *dev = NULL;
 
-#ifdef CONFIG_SPI_MASTER
 	dev = bus_find_device(&spi_bus_type, NULL, np, of_dev_node_match);
-#endif
 
 	if (!dev)
 		return false;
@@ -137,6 +136,7 @@ static bool is_spi_device(struct device_node *np)
 	put_device(dev);
 	return true;
 }
+#endif
 
 static int parse_qcom_smem_partitions(struct mtd_info *master,
 				      struct mtd_partition **pparts,
@@ -145,7 +145,9 @@ static int parse_qcom_smem_partitions(struct mtd_info *master,
 	struct smem_partition_table *smem_parts;
 	u64 *smem_flash_type, *smem_blksz;
 	struct mtd_partition *mtd_parts;
+#ifdef CONFIG_SPI_MASTER
 	struct device_node *of_node = data->of_node;
+#endif
 	int i, ret;
 
 	/*
@@ -157,7 +159,10 @@ static int parse_qcom_smem_partitions(struct mtd_info *master,
 		return ret;
 
 	if ((*smem_flash_type == SMEM_FLASH_NAND && !mtd_type_is_nand(master))
-	    || (*smem_flash_type == SMEM_FLASH_SPI && !is_spi_device(of_node)))
+#ifdef CONFIG_SPI_MASTER
+	    || (*smem_flash_type == SMEM_FLASH_SPI && !is_spi_device(of_node))
+#endif
+	   )
 		return 0;
 
 	/*

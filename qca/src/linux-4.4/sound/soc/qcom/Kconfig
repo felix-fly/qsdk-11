@@ -106,3 +106,11 @@ config SND_SOC_IPQ806X_PCM_RAW
 config SND_SOC_IPQ806X_LPAIF
 	tristate
 	depends on SND_SOC_QCOM
+
+config SND_SOC_IPQ_LPASS
+	tristate "IPQ_LPASS"
+	depends on SND_SOC_IPQ
+
+config SND_SOC_IPQ_LPASS_PCM_RAW
+	tristate "IPQ_LPASS"
+	depends on SND_SOC_IPQ && SND_SOC_IPQ_LPASS

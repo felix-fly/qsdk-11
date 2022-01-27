@@ -187,6 +187,85 @@ void update_mac_addrs(void *fdt)
 	free(mac);
 }
 
+int usb_mode_exists(char *str, char *sub, int len)
+{
+	int i = 0, j = 0, k = 0;
+	int sub_size  = strlen(sub);
+
+	while (i < len) {
+		while (sub[k] == str[j] && sub[k] != '\0') {
+			k++;
+			j++;
+		}
+		if (k == sub_size)
+			return 1;
+		i++;
+		j = i;
+		k = 0;
+	}
+	return 0;
+}
+
+void update_usb_mode(void *fdt)
+{
+	int index, nodeoff, ret;
+	unsigned int node;
+	unsigned long long off;
+	char *appsblenv_part;
+	char usb_mode[20] = "usb_mode=peripheral";
+	const char *usb_node[] = {"/soc/usb3@8A00000/dwc3@8A00000"};
+	const char *usb_dr_mode = "peripheral"; /* Supported mode */
+	const char *usb_max_speed = "high-speed";/* Supported speed */
+
+	index = partition_get_index("0:APPSBLENV");
+	if (index == INVALID_PTN) {
+		critical("APPSBLENV partition not found\n");
+		return;
+	}
+
+	off = partition_get_offset(index);
+	if (off == 0ull) {
+		critical("APPSBLENV partition offset invalid\n");
+		return;
+	}
+
+	appsblenv_part = memalign(BLOCK_SIZE, BLOCK_SIZE * 2);
+	if (appsblenv_part == NULL) {
+		critical("Could not allocate sufficient memory to read env variables\n");
+		return;
+	}
+	if (mmc_read(off, (unsigned int *)appsblenv_part, BLOCK_SIZE * 2)) {
+		critical("Could not read APPSBLENV partition\n");
+		return;
+	}
+
+	if (usb_mode_exists((char *)appsblenv_part, usb_mode, BLOCK_SIZE * 2)) {
+		for (node = 0; node < ARRAY_SIZE(usb_node); node++) {
+			nodeoff = fdt_path_offset(fdt, usb_node[node]);
+			if (nodeoff < 0) {
+				critical("fixup_usb: unable to find node '%s'\n",
+						usb_node[node]);
+				return;
+			}
+			ret = fdt_setprop(fdt, nodeoff, "dr_mode",
+					usb_dr_mode,
+					(strlen(usb_dr_mode) + 1));
+			if (ret)
+				critical("fixup_usb: 'dr_mode' cannot be set");
+
+			/* if mode is peripheral restricting to high-speed */
+			ret = fdt_setprop(fdt, nodeoff, "maximum-speed",
+					usb_max_speed,
+					(strlen(usb_max_speed) + 1));
+			if (ret)
+				critical("fixup_usb: 'maximum-speed' cannot be set");
+			critical("Setting up USB dr_mode = %s for dt node = %s based \
+				 on env variable usb_mode\n", usb_dr_mode, usb_node[node]);
+		}
+	}
+	free(appsblenv_part);
+}
+
 void fdt_fixup_version(void *fdt)
 {
 	int offset, ret;
@@ -213,62 +292,4 @@ void fdt_fixup_version(void *fdt)
 	}
 
 	return;
-}
-int set_uuid_bootargs(char *boot_args, char *part_name, int buflen, bool gpt_flag)
-{
-	disk_partition_t disk_info;
-	int ret;
-	int len;
-
-	if (!boot_args || !part_name || buflen <=0 || buflen > MAX_BOOT_ARGS_SIZE)
-		return ERR_INVALID_ARGS;
-
-	ret = get_partition_info_efi_by_name(part_name, &disk_info);
-	if (ret) {
-		dprintf(INFO, "%s : name not found in gpt table.\n", part_name);
-		return ERR_INVALID_ARGS;
-	}
-
-	if ((len = strlcpy(boot_args, "root=PARTUUID=", buflen)) >= buflen)
-		return ERR_INVALID_ARGS;
-
-	boot_args += len;
-	buflen -= len;
-
-	if ((len = strlcpy(boot_args, disk_info.uuid, buflen)) >= buflen)
-		return ERR_INVALID_ARGS;
-
-	boot_args += len;
-	buflen -= len;
-
-	if (gpt_flag && (len = strlcpy(boot_args, " gpt rootwait nosmp", buflen)) >= buflen)
-		return ERR_INVALID_ARGS;
-
-	return 0;
-}
-
-int update_uuid(char *bootargs)
-{
-	int ret;
-
-	if (smem_bootconfig_info() == 0) {
-		ret = get_rootfs_active_partition();
-		if (ret) {
-			strlcpy(bootargs, "rootfsname=rootfs_1 gpt", MAX_BOOT_ARGS_SIZE);
-			ret  = set_uuid_bootargs(bootargs, "rootfs_1", MAX_BOOT_ARGS_SIZE, true);
-		} else {
-			strlcpy(bootargs, "rootfsname=rootfs gpt", MAX_BOOT_ARGS_SIZE);
-			ret  = set_uuid_bootargs(bootargs, "rootfs", MAX_BOOT_ARGS_SIZE, true);
-		}
-	} else {
-		strlcpy(bootargs, "rootfsname=rootfs gpt", MAX_BOOT_ARGS_SIZE);
-		ret  = set_uuid_bootargs(bootargs, "rootfs", MAX_BOOT_ARGS_SIZE, true);
-	}
-
-	if (ret) {
-		dprintf(INFO, "Error in updating UUID. using device name to mountrootfs\n");
-		return 0;
-	}
-
-	return 1;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2017, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,10 +24,11 @@
 #include <sdhci.h>
 
 DECLARE_GLOBAL_DATA_PTR;
-
+#ifdef CONFIG_ENV_IS_IN_NAND
 extern int nand_env_device;
 extern env_t *nand_env_ptr;
 extern char *nand_env_name_spec;
+#endif
 extern char *sf_env_name_spec;
 extern int nand_saveenv(void);
 extern int sf_saveenv(void);
@@ -107,6 +108,8 @@ int board_init(void)
         report_l2err(l2esr);
 #endif
 
+	qgic_init();
+
 	qca_smem_flash_info_t *sfi = &qca_smem_flash_info;
 
 	gd->bd->bi_boot_params = QCA_BOOT_PARAMS_ADDR;
@@ -136,11 +139,16 @@ int board_init(void)
 
 #ifndef CONFIG_ENV_IS_NOWHERE
 	switch (sfi->flash_type) {
+#ifdef CONFIG_ENV_IS_IN_NAND
 	case SMEM_BOOT_NAND_FLASH:
+	case SMEM_BOOT_QSPI_NAND_FLASH:
 		nand_env_device = CONFIG_NAND_FLASH_INFO_IDX;
 		break;
+#endif
 	case SMEM_BOOT_SPI_FLASH:
+#ifdef CONFIG_ENV_IS_IN_NAND
 		nand_env_device = CONFIG_SPI_FLASH_INFO_IDX;
+#endif
 		break;
 	case SMEM_BOOT_MMC_FLASH:
 	case SMEM_BOOT_NO_FLASH:
@@ -163,6 +171,7 @@ int board_init(void)
 
 	switch (sfi->flash_type) {
 	case SMEM_BOOT_NAND_FLASH:
+	case SMEM_BOOT_QSPI_NAND_FLASH:
 		board_env_range = CONFIG_ENV_SIZE_MAX;
 		BUG_ON(board_env_size < CONFIG_ENV_SIZE_MAX);
 		break;
@@ -172,10 +181,12 @@ int board_init(void)
 		break;
 #ifdef CONFIG_QCA_MMC
 	case SMEM_BOOT_MMC_FLASH:
-	case SMEM_BOOT_NO_FLASH:
 		board_env_range = CONFIG_ENV_SIZE_MAX;
 		break;
 #endif
+	case SMEM_BOOT_NO_FLASH:
+		board_env_range = CONFIG_ENV_SIZE_MAX;
+		break;
 	default:
 		printf("BUG: unsupported flash type : %d\n", sfi->flash_type);
 		BUG();
@@ -192,14 +203,22 @@ int board_init(void)
 		env_name_spec = mmc_env_name_spec;
 #endif
 	} else {
+#ifdef CONFIG_ENV_IS_IN_NAND
 		saveenv = nand_saveenv;
 		env_ptr = nand_env_ptr;
 		env_name_spec = nand_env_name_spec;
+#else
+		saveenv = sf_saveenv;
+		env_name_spec = sf_env_name_spec;
+
+#endif
 	}
 #endif
-	ret = ipq_board_usb_init();
-	if (ret < 0) {
-		printf("WARN: ipq_board_usb_init failed\n");
+	if (sfi->flash_type != SMEM_BOOT_NO_FLASH) {
+		ret = ipq_board_usb_init();
+		if (ret < 0) {
+			printf("WARN: ipq_board_usb_init failed\n");
+		}
 	}
 
 	aquantia_phy_reset_init();
@@ -228,7 +247,8 @@ int get_current_flash_type(uint32_t *flash_type)
 
 	if (*flash_type == SMEM_BOOT_SPI_FLASH) {
 		if (get_which_flash_param("rootfs") ||
-		    sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH)
+		    ((sfi->flash_secondary_type == SMEM_BOOT_NAND_FLASH) ||
+			(sfi->flash_secondary_type == SMEM_BOOT_QSPI_NAND_FLASH)))
 			*flash_type = SMEM_BOOT_NORPLUSNAND;
 		else {
 			if ((sfi->rootfs.offset == 0xBAD0FF5E) ||
@@ -334,11 +354,17 @@ void board_flash_protect(void)
 }
 #endif
 
+__weak int get_soc_hw_version(void)
+{
+	return 0;
+}
+
 int board_late_init(void)
 {
 	unsigned int machid;
 	uint32_t flash_type;
 	uint32_t soc_ver_major, soc_ver_minor;
+	uint32_t soc_hw_version;
 	int ret;
 	char *s = NULL;
 
@@ -366,6 +392,10 @@ int board_late_init(void)
 		setenv_ulong("soc_version_major", (unsigned long)soc_ver_major);
 		setenv_ulong("soc_version_minor", (unsigned long)soc_ver_minor);
 	}
+
+	soc_hw_version = get_soc_hw_version();
+	if (soc_hw_version)
+		setenv_hex("soc_hw_version", (unsigned long)soc_hw_version);
 #ifdef CONFIG_FLASH_PROTECT
 	board_flash_protect();
 #endif

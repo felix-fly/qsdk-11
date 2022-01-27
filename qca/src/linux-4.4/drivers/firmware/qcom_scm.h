@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2018, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,6 +13,8 @@
 #define __QCOM_SCM_INT_H
 
 #include <linux/qcom_scm.h>
+#include <soc/qcom/secure_buffer.h>
+#include <linux/dma-mapping.h>
 #define QCOM_SCM_SVC_BOOT			0x1
 #define CLEAR_MAGIC				0x0
 #define SET_MAGIC				0x1
@@ -31,7 +33,11 @@
 
 #define QCOM_SCM_CMD_PIL_PROTECT_MEM_SUBSYS_ID	0x0C
 #define QCOM_SCM_CMD_PIL_CLEAR_PROTECT_MEM_SUBSYS_ID	0x0D
+#define TCSR_Q6SS_BOOT_TRIG_REG			0x193d204ull
 
+extern int __qcom_scm_aes(struct device *dev,
+				struct scm_cmd_buf_t *scm_cmd_buf,
+				size_t buf_size, u32 cmd_id);
 extern int __qcom_scm_tls_hardening(struct device *dev,
 				   struct scm_cmd_buf_t *scm_cmd_buf,
 				   size_t buf_size, u32 cmd_id);
@@ -87,8 +93,14 @@ extern void __qcom_scm_cpu_power_down(u32 flags);
 #define QCOM_IS_CALL_AVAIL_CMD		0x1
 extern int __qcom_scm_is_call_available(struct device *dev, u32 svc_id,
 		u32 cmd_id);
+extern int __qcom_remove_xpu_scm_call_available(struct device *dev, u32 svc_id,
+		u32 cmd_id);
+
+extern int __qti_is_smc_id_available(struct device *dev, u32 smc_id);
 
 #define SCM_SIP_FNID(s, c) (((((s) & 0xFF) << 8) | ((c) & 0xFF)) | 0x02000000)
+#define SCM_QSEEOS_FNID(s, c) (((((s) & 0xFF) << 8) | ((c) & 0xFF)) | \
+			      0x32000000)
 #define QCOM_SMC_ATOMIC_MASK		0x80000000
 #define SCM_ARGS_IMPL(num, a, b, c, d, e, f, g, h, i, j, ...) (\
 			(((a) & 0xff) << 4) | \
@@ -154,6 +166,8 @@ extern void __qcom_scm_init(void);
 #define QCOM_QFPROM_ROW_READ_CMD                     0x8
 #define QCOM_QFPROM_ROW_WRITE_CMD                    0x9
 #define QCOM_SCM_PAS_MSS_RESET		0xa
+#define QCOM_SCM_SVC_RESETTYPE_CMD	0x18
+
 extern bool __qcom_scm_pas_supported(struct device *dev, u32 peripheral);
 extern int  __qcom_scm_pas_init_image(struct device *dev, u32 peripheral,
 		dma_addr_t metadata_phys);
@@ -181,6 +195,23 @@ extern int __qcom_scm_extwdt(struct device *, u32 svc_id, u32 cmd_id,
 extern int __qcom_scm_dload(struct device *, u32 svc_id, u32 cmd_id,
 				void *cmd_buf);
 extern int qcom_scm_dload(u32 svc_id, u32 cmd_id, void *cmd_buf);
+extern int __qcom_scm_wcss_boot(struct device *, u32 svc_id, u32 cmd_id,
+				void *cmd_buf);
+extern int qcom_scm_wcss_boot(u32 svc_id, u32 cmd_id, void *cmd_buf);
+
+extern int __qcom_scm_pdseg_memcpy_v2(struct device *, u32 peripheral,
+				int phno, dma_addr_t dma, int seg_cnt);
+extern int qcom_scm_pdseg_memcpy_v2(u32 peripheral, int phno, dma_addr_t dma,
+								int seg_cnt);
+extern int __qcom_scm_pdseg_memcpy(struct device *, u32 peripheral,
+				int phno, dma_addr_t dma, size_t size);
+extern int qcom_scm_pdseg_memcpy(u32 peripheral, int phno, dma_addr_t dma,
+								size_t size);
+extern int __qcom_scm_int_radio_powerup(struct device *dev, u32 peripheral);
+extern int qcom_scm_int_radio_powerup(u32 peripheral);
+extern int __qcom_scm_int_radio_powerdown(struct device *dev, u32 peripheral);
+extern int qcom_scm_int_radio_powerdown(u32 peripheral);
+
 extern int __qcom_scm_tcsr(struct device *, u32 svc_id, u32 cmd_id,
 			struct qcom_scm_tcsr_req *tcsr_cmd);
 
@@ -198,9 +229,17 @@ extern int qcom_scm_pshold(void);
 #define SCM_SVC_TZSCHEDULER	0xFC
 #define SCM_CMD_TZSCHEDULER	0x1
 
+#define PD_LOAD_SVC_ID		0x2
+#define PD_LOAD_CMD_ID		0x16
+#define PD_LOAD_V2_CMD_ID	0x19
+#define INT_RAD_PWR_UP_CMD_ID	0x17
+#define INT_RAD_PWR_DN_CMD_ID	0x18
 s32 __qcom_scm_pinmux_read(u32 svc_id, u32 cmd_id, u32 arg1);
 s32 __qcom_scm_pinmux_write(u32 svc_id, u32 cmd_id, u32 arg1, u32 arg2);
 s32 __qcom_scm_usb_mode_write(u32 svc_id, u32 cmd_id, u32 arg1, u32 arg2);
+
+extern int __qcom_scm_tcsr_reg_write(struct device *dev, u32 arg1, u32 arg2);
+extern int qcom_scm_tcsr_reg_write(u32 arg1, u32 arg2);
 
 extern int __qcom_scm_cache_dump(u32 cpu);
 extern int qcom_scm_cache_dump(u32 cpu);
@@ -219,11 +258,13 @@ extern int __qcom_scm_mem_prot_assign(struct device *, struct sg_table *,
 				struct dest_vm_and_perm_info *,
 				size_t dest_size,
 				struct mem_prot_info *sg_table_copy,
-				size_t copy_size, u32 *resp, size_t resp_size);
+				u32 *resp, size_t resp_size);
 
 extern int __qcom_scm_mem_protect_lock(struct device *,
 				struct cp2_lock_req *req, size_t req_size,
 				u32 *resp, size_t resp_size);
+
+extern int __qcom_scm_qseecom_remove_xpu(struct device *);
 
 extern int __qcom_scm_qseecom_notify(struct device *,
 				    struct qsee_notify_app *req,
@@ -267,6 +308,8 @@ extern int __qcom_scm_tz_log(struct device *dev, u32 svc_id, u32 cmd_id,
 extern int __qcom_scm_hvc_log(struct device *dev, u32 svc_id, u32 cmd_id,
 				void *ker_buf, u32 buf_len);
 
+extern int __qti_scm_tz_log_is_encrypted(struct device *dev);
+extern int __qti_scm_tz_log_encrypted(struct device *dev, void *ker_buf, u32 buf_len, u32 log_id);
 extern int __qcom_los_scm_call(struct device *, u32 svc_id, u32 cmd_id,
 			void *cmd_buf, size_t size);
 
@@ -304,4 +347,20 @@ static inline int qcom_scm_remap_error(long err)
 	return -EINVAL;
 }
 
+extern int  __qcom_scm_set_resettype(struct device *dev, u32 reset_type);
+extern int  __qcom_scm_get_smmustate(struct device *dev);
+
+struct qcom_scm_cmd_ids {
+	u32 smmu_state_cmd_id;
+};
+
+#define QCOM_SCM_SVC_OTP	0x2
+#define QCOM_SCM_CMD_OTP	0x15
+
+extern int  __qcom_scm_load_otp(struct device *dev, u32 peripheral);
+
+#define QCOM_SCM_SVC_XO_TCXO 0x2
+#define QCOM_SCM_CMD_XO_TCXO 0x20
+
+extern int __qcom_scm_pil_cfg(struct device *dev, u32 peripheral, u32 arg);
 #endif

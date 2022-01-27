@@ -585,6 +585,7 @@ int ZEXPORT deflate (strm, flush)
 {
     int old_flush; /* value of flush param for previous deflate call */
     deflate_state *s;
+    int hdr = 0;
 
     if (strm == Z_NULL || strm->state == Z_NULL ||
         flush > Z_BLOCK || flush < 0) {
@@ -603,6 +604,7 @@ int ZEXPORT deflate (strm, flush)
 
     /* Write the header */
     if (s->status == INIT_STATE) {
+	hdr = 1;
 #ifdef GZIP
         if (s->wrap == 2) {
             strm->adler = crc32(0L, Z_NULL, 0);
@@ -782,7 +784,7 @@ int ZEXPORT deflate (strm, flush)
 #endif
 
     /* Flush as much pending output as possible */
-    if (s->pending != 0) {
+    if ((s->pending != 0) && (hdr != 1)) {
         flush_pending(strm);
         if (strm->avail_out == 0) {
             /* Since avail_out is 0, deflate will be called again with
@@ -818,6 +820,15 @@ int ZEXPORT deflate (strm, flush)
         bstate = s->strategy == Z_HUFFMAN_ONLY ? deflate_huff(s, flush) :
                     (s->strategy == Z_RLE ? deflate_rle(s, flush) :
                         (*(configuration_table[s->level].func))(s, flush));
+
+	/*****Flush header now to dst, which is src pointer after src data are read in previous step*****/
+	if ((s->pending != 0) && (hdr == 1)) {
+		flush_pending(strm);
+		if (strm->avail_out == 0) {
+			s->last_flush = -1;
+			return Z_OK;
+		}
+	}
 
         if (bstate == finish_started || bstate == finish_done) {
             s->status = FINISH_STATE;

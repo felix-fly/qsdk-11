@@ -17,43 +17,13 @@
 #ifndef __NSS_NLGRE_REDIR_IF_H
 #define __NSS_NLGRE_REDIR_IF_H
 
-/**
- * @file nss_nlgre_redir_if.h
- *	NSS Netlink gre_redir headers
- */
 #define NSS_NLGRE_REDIR_TUN_TYPE_MAX_SZ 16		/**< Maximum length of tunnel type */
 #define NSS_NLGRE_REDIR_MODE_MAX_SZ 16			/**< Maximum length of mode */
-#define NSS_NLGRE_REDIR_NEEDED_HEADROOM 192		/**< Maximum headroom available */
-#define NSS_NLGRE_REDIR_RADIO_ID_MAX 2			/**< Radio Id max size */
-#define NSS_NLGRE_REDIR_RADIO_ID_MIN 0			/**< Radio Id min size */
-#define NSS_NLGRE_REDIR_VAP_ID_MAX 16			/**< Vap Id max size */
-#define NSS_NLGRE_REDIR_VAP_ID_MIN 0			/**< Vap Id min size */
-#define NSS_NLGRE_REDIR_MAX_TUNNELS 24			/**< Maximum number of tunnels allowed */
 #define NSS_NLGRE_REDIR_FAMILY "nss_nlgre_redir"	/**< Family */
 #define NSS_NLGRE_REDIR_MCAST_GRP "nss_nlgrerdr_mc"	/**< Multicast group */
 
 /**
- * @brief netdevice private data
- */
-struct nss_gre_redir_ndev_priv {
-	uint32_t gre_seq;				/**< Sequence number */
-};
-
-/**
- * @brief context need to be maintained globally for GRE redirect tunnel.
- */
-struct nss_nlgre_redir_pvt_data {
-	struct net_device *dev;				/**< Net device */
-	int32_t host_inner_ifnum;			/**< Interface no. of pnode host inner */
-	int32_t wifi_offl_inner_ifnum;			/**< Interface no. of pnode wifi offld inner */
-	int32_t sjack_inner_ifnum;			/**< Interface no. of pnode sjack inner */
-	int32_t outer_ifnum;				/**< Interface no. of pnode outer */
-	int32_t vap_nss_if;				/**< Interface no. of vap */
-	bool enable;					/**< Device is enabled or not */
-};
-
-/**
- * @brief enumeration for all command types.
+ * @brief Enumeration for all command types.
  */
 enum nss_nlgre_redir_cmd_type {
 	NSS_NLGRE_REDIR_CMD_TYPE_UNKNOWN,		/**< Unknown command type */
@@ -62,17 +32,24 @@ enum nss_nlgre_redir_cmd_type {
 	NSS_NLGRE_REDIR_CMD_TYPE_MAP,			/**< Map the vap interface to tunnel id */
 	NSS_NLGRE_REDIR_CMD_TYPE_UNMAP,			/**< Unmap vap and tunnel id */
 	NSS_NLGRE_REDIR_CMD_TYPE_SET_NEXT_HOP,		/**< Set the next hop of inner interface */
+	NSS_NLGRE_REDIR_CMD_TYPE_ADD_HASH,		/**< Add a hash entry*/
+	NSS_NLGRE_REDIR_CMD_TYPE_DEL_HASH,		/**< Delete a hash entry */
 	NSS_NLGRE_REDIR_CMD_TYPE_MAX,			/**< Max number of commands */
 };
 
 /**
- * @brief parameters to create a tunnel.
+ * @brief Parameters to create a tunnel.
  */
 struct nss_nlgre_redir_create_tun {
-	uint32_t sip[4];				/**< Src IP address */
-	uint32_t dip[4];				/**< Dest IP address */
-	uint16_t iptype;				/**< Ip version */
-	uint8_t res[2];					/**< Padding to make size multiple of 4 */
+	uint32_t sip[4];				/**< Src address of tunnel */
+	uint32_t dip[4];				/**< Dest address of tunnel */
+	uint32_t ssip[4];				/**< Src address of second tunnel */
+	uint32_t sdip[4];				/**< Dest address of second tunnel */
+	uint8_t hash_mode;				/**< Indicates how the traffic should be mapped */
+	uint8_t iptype;					/**< IPv4 = 1 and IPV6 = 2 */
+	char mode[NSS_NLGRE_REDIR_MODE_MAX_SZ];		/**< Mode can be sjack or wifi */
+	bool lag_enable;				/**< Indicates whether lag is enabled or not */
+	uint8_t res;					/**< Padding to make size multiple of 4 */
 };
 
 /**
@@ -114,6 +91,18 @@ struct nss_nlgre_redir_set_next {
 };
 
 /**
+ * @brief parameters to perform hash operations.
+ */
+struct nss_nlgre_redir_hash_ops {
+	uint16_t slave;					/**< Tunnel to which the traffic should be mapped */
+	uint8_t smac[6];				/**< Source mac address */
+	uint8_t dmac[6];				/**< Destination mac address */
+	char mode[NSS_NLGRE_REDIR_MODE_MAX_SZ];    	/**< Sjack or wifi */
+};
+
+/**@}*/
+
+/**
  * @brief gre_redir message
  */
 struct nss_nlgre_redir_rule {
@@ -128,6 +117,7 @@ struct nss_nlgre_redir_rule {
 		struct nss_nlgre_redir_map map;			/**< Map the interface */
 		struct nss_nlgre_redir_unmap unmap;		/**< Unmap the interface */
 		struct nss_nlgre_redir_set_next snext;		/**< Set next hop */
+		struct nss_nlgre_redir_hash_ops hash_ops;	/**< Add and del hash value(s) */
 	} msg;
 };
 

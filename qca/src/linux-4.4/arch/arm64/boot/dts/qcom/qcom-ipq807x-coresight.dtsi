@@ -33,6 +33,8 @@
 		coresight-ctis = <&cti0 &cti8>;
 		coresight-name = "coresight-tmc-etr";
 
+		funnel-address = <0x6021000 0x1000>;
+
 		clocks = <&gcc GCC_QDSS_DAP_CLK>,
 			 <&gcc GCC_QDSS_AT_CLK>;
 		clock-names = "apb_pclk", "core_a_clk";

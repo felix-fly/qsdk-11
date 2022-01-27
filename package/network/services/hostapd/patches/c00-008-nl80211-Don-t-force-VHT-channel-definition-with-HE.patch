@@ -18,37 +18,16 @@ Signed-off-by: Sven Eckelmann <seckelmann@datto.com>
  src/drivers/driver_nl80211.c | 13 ++++++++++++-
  1 file changed, 12 insertions(+), 1 deletion(-)
 
-diff --git a/src/drivers/driver_nl80211.c b/src/drivers/driver_nl80211.c
-index 5ad509b1fd70..0c64f68baa52 100644
 --- a/src/drivers/driver_nl80211.c
 +++ b/src/drivers/driver_nl80211.c
-@@ -4369,6 +4369,10 @@ fail:
- static int nl80211_put_freq_params(struct nl_msg *msg,
- 				   const struct hostapd_freq_params *freq)
- {
-+	enum hostapd_hw_mode hw_mode;
-+	int is_24ghz;
-+	u8 channel;
-+
- 	wpa_printf(MSG_DEBUG, "  * freq=%d", freq->freq);
- 	if (nla_put_u32(msg, NL80211_ATTR_WIPHY_FREQ, freq->freq))
- 		return -ENOBUFS;
-@@ -4377,7 +4381,14 @@ static int nl80211_put_freq_params(struct nl_msg *msg,
- 	wpa_printf(MSG_DEBUG, "  * vht_enabled=%d", freq->vht_enabled);
+@@ -4406,8 +4406,8 @@ static int nl80211_put_freq_params(struc
  	wpa_printf(MSG_DEBUG, "  * ht_enabled=%d", freq->ht_enabled);
  
--	if (freq->vht_enabled || freq->he_enabled) {
-+	hw_mode = ieee80211_freq_to_chan(freq->freq, &channel);
-+	if (hw_mode == HOSTAPD_MODE_IEEE80211B ||
-+	    hw_mode == HOSTAPD_MODE_IEEE80211G)
-+		is_24ghz = 1;
-+	else
-+		is_24ghz = 0;
-+
-+	if (freq->vht_enabled || (freq->he_enabled && !is_24ghz)) {
- 		enum nl80211_chan_width cw;
+ 	hw_mode = ieee80211_freq_to_chan(freq->freq, &channel);
+-	is_24ghz = hw_mode == HOSTAPD_MODE_IEEE80211G ||
+-		hw_mode == HOSTAPD_MODE_IEEE80211B;
++	is_24ghz = ((hw_mode == HOSTAPD_MODE_IEEE80211G) ||
++		(hw_mode == HOSTAPD_MODE_IEEE80211B));
  
- 		wpa_printf(MSG_DEBUG, "  * bandwidth=%d", freq->bandwidth);
--- 
-2.1.2
-
+ 	if (freq->vht_enabled || (freq->he_enabled && !is_24ghz)) {
+ 		enum nl80211_chan_width cw;

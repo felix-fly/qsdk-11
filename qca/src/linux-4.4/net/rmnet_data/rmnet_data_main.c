@@ -1,5 +1,4 @@
-/*
- * Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,6 +33,10 @@ MODULE_PARM_DESC(log_level, "Logging level");
 unsigned int rmnet_data_log_module_mask;
 module_param(rmnet_data_log_module_mask, uint,  S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(rmnet_data_log_module_mask, "Logging module mask");
+
+/* ***************** Callback Hooks ***************************************** */
+struct rmnet_nss_cb *rmnet_nss_callbacks __rcu __read_mostly;
+EXPORT_SYMBOL(rmnet_nss_callbacks);
 
 /* ***************** Startup/Shutdown *************************************** */
 

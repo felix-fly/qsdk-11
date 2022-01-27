@@ -8,17 +8,15 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=lxc
-PKG_VERSION:=1.1.3
-PKG_RELEASE:=1
+PKG_VERSION:=2.1.1
+PKG_RELEASE:=4
 
-PKG_LICENSE:=LGPL-2.1+ BSD-2-Clause GPL-2.0
-PKG_MAINTAINER:=Luka Perkov <luka@openwrt.org>
+PKG_LICENSE:=LGPL-2.1-or-later BSD-2-Clause GPL-2.0
+PKG_MAINTAINER:=Marko Ratkaj <marko.ratkaj@sartura.hr>
 
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=git://codeaurora.org/quic/qsdk/lxc
-PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
-PKG_SOURCE_VERSION:=b7a1093e1ed790360bd122c6e8d38509de906196
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION)-$(PKG_SOURCE_VERSION).tar.gz
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=https://linuxcontainers.org/downloads/lxc/
+PKG_HASH:=68663a67450a8d6734e137eac54cc7077209fb15c456eec401a2c26e6386eff6
 
 PKG_BUILD_DEPENDS:=lua
 PKG_BUILD_PARALLEL:=1
@@ -29,21 +27,19 @@ PKG_FIXUP:=autoreconf
 include $(INCLUDE_DIR)/package.mk
 
 LXC_APPLETS_BIN += \
-	attach autostart cgroup clone config console create destroy execute \
-	freeze info monitor snapshot start stop unfreeze unshare usernsexec wait
+	attach autostart cgroup copy config console create destroy device \
+	execute freeze info monitor snapshot start stop unfreeze unshare \
+	usernsexec wait top ls
 
 LXC_APPLETS_LIB += \
 	monitord user-nic
 
 LXC_SCRIPTS += \
-	checkconfig ls top
+	checkconfig
 
 DEPENDS_APPLETS = +libpthread +libcap +liblxc
 
-DEPENDS_create = +lxc-configs +lxc-hooks +lxc-templates
-DEPENDS_ls = +lxc-config
-DEPENDS_top = +lxc-lua +luafilesystem @BROKEN
-
+DEPENDS_create = +lxc-configs +lxc-hooks +lxc-templates +flock
 
 define Package/lxc/Default
   SECTION:=utils
@@ -55,6 +51,39 @@ endef
 define Package/lxc
   $(call Package/lxc/Default)
   MENU:=1
+endef
+
+define Package/lxc-auto
+  $(call Package/lxc/Default)
+  TITLE:= (initscript)
+  DEPENDS:=+lxc-start +lxc-stop
+endef
+
+define Package/lxc-auto/description
+ LXC is the userspace control package for Linux Containers, a lightweight
+ virtual system mechanism sometimes described as "chroot on steroids".
+ This package adds and initscript for starting and stopping the containers
+ on boot and shutdown.
+endef
+
+define Package/lxc-auto/conffiles
+/etc/config/lxc-auto
+endef
+
+define Package/lxc-unprivileged
+  $(call Package/lxc/Default)
+  TITLE:=Helper script for unprivileged containers support
+  DEPENDS:=+shadow-utils +shadow-newuidmap +shadow-newgidmap
+endef
+
+define Package/lxc-unprivileged/description
+ Support for unprivileged containers requires newuidmap and newguidmap.
+ This package makes sure they are available & have correct permissions.
+endef
+
+define Package/lxc-unprivileged/install
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_DATA) ./files/lxc-unprivileged.defaults $(1)/etc/uci-defaults/lxc-unprivileged
 endef
 
 define Package/lxc/config
@@ -95,13 +124,13 @@ define Package/liblxc
   SECTION:=libs
   CATEGORY:=Libraries
   TITLE:=LXC userspace library
-  DEPENDS:= lxc +libcap +libpthread
+  DEPENDS:= lxc +libcap +libpthread +LXC_SECCOMP:libseccomp
 endef
 
 define Package/lxc-lua
   $(call Package/lxc/Default)
   TITLE:=LXC Lua bindings
-  DEPENDS:= lxc +liblua +liblxc +luafilesystem
+  DEPENDS:= lxc +liblua +liblxc
 endef
 
 define Package/lxc-init
@@ -112,11 +141,20 @@ endef
 
 CONFIGURE_ARGS += \
 	--disable-apparmor \
+	--disable-cgmanager \
 	--disable-doc \
 	--disable-examples \
-	--disable-seccomp
+	--disable-gnutls \
+	--disable-selinux \
+	--disable-python \
 	--enable-lua=yes \
-	--with-lua-pc="$(STAGING_DIR)/usr/lib/pkgconfig/lua.pc" \
+	--with-lua-pc="$(STAGING_DIR)/usr/lib/pkgconfig/lua.pc"
+
+ifeq ($(CONFIG_LXC_SECCOMP),y)
+CONFIGURE_ARGS += --enable-seccomp
+else
+CONFIGURE_ARGS += --disable-seccomp
+endif
 
 MAKE_FLAGS += \
 	LUA_INSTALL_CMOD="/usr/lib/lua" \
@@ -145,6 +183,12 @@ define Package/lxc/install
 	true
 endef
 
+define Package/lxc-auto/install
+	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d
+	$(INSTALL_CONF) ./files/lxc-auto.config $(1)/etc/config/lxc-auto
+	$(INSTALL_BIN) ./files/lxc-auto.init $(1)/etc/init.d/lxc-auto
+endef
+
 define Package/lxc-common/conffiles
 /etc/lxc/default.conf
 /etc/lxc/lxc.conf
@@ -171,12 +215,7 @@ define Package/lxc-common/install
 		./files/lxc.conf \
 		$(1)/etc/lxc/lxc.conf
 
-	$(INSTALL_DIR) $(1)/etc/init.d/
-	$(CP) \
-		./files/lxc \
-		$(1)/etc/init.d/lxc
-
-	$(INSTALL_DIR) $(1)/lxc/
+	$(INSTALL_DIR) $(1)/srv/lxc/
 endef
 
 define Package/lxc-hooks/install
@@ -192,11 +231,10 @@ define Package/lxc-templates/install
 		$(PKG_INSTALL_DIR)/usr/share/lxc/templates/lxc-* \
 		$(1)/usr/share/lxc/templates/
 
-	 $(INSTALL_DIR) $(1)/usr/share/lxc/templates/
+	$(INSTALL_DIR) $(1)/usr/share/lxc/templates/
 	$(CP) \
 		./files/lxc-qsdk \
 		$(1)/usr/share/lxc/templates/lxc-qsdk
-
 endef
 
 define Package/lxc-configs/install
@@ -257,6 +295,8 @@ $(eval $(call BuildPackage,lxc-templates))
 $(eval $(call BuildPackage,liblxc))
 $(eval $(call BuildPackage,lxc-lua))
 $(eval $(call BuildPackage,lxc-init))
+$(eval $(call BuildPackage,lxc-auto))
+$(eval $(call BuildPackage,lxc-unprivileged))
 $(foreach u,$(LXC_APPLETS_BIN),$(eval $(call GenPlugin,$(u),$(DEPENDS_APPLETS),"/usr/bin")))
 $(foreach u,$(LXC_APPLETS_LIB),$(eval $(call GenPlugin,$(u),$(DEPENDS_APPLETS),"/usr/lib/lxc")))
 $(foreach u,$(LXC_SCRIPTS),$(eval $(call GenPlugin,$(u),,"/usr/bin")))

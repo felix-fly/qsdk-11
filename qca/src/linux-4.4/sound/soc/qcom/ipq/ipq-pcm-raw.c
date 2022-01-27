@@ -623,6 +623,7 @@ static int ipq_pcm_driver_probe(struct platform_device *pdev)
 	struct device_node *np = NULL;
 	const struct of_device_id *match;
 	int ret;
+	bool adss_init = false;
 
 	match = of_match_device(qca_raw_match_table, &pdev->dev);
 	if (!match)
@@ -707,6 +708,21 @@ static int ipq_pcm_driver_probe(struct platform_device *pdev)
 		voice_free_dma_buffer(&pcm_pdev->dev, rx_dma_buffer);
 		return -ENOMEM;
 	}
+
+	/*
+	 * By default ipq_audio_adss_init is called from audio sound card probe,
+	 * If suppose anyone wants to only use PCM, then it is not necessary for
+	 * them to enable audio node, this below boolean can be added in the pcm
+	 * node in such a case to do the necessary ipq_audio_adss_init during
+	 * pcm probe
+	 *
+	 * Note that this boolean should only be added if audio node is disabled
+	 */
+	if (np)
+		adss_init = of_property_read_bool(np, "adss_init");
+
+	if (adss_init)
+		ipq_audio_adss_init();
 
 	memset(&context, 0, sizeof(struct pcm_context));
 	spin_lock_init(&pcm_lock);

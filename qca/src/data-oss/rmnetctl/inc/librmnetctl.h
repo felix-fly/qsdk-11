@@ -2,7 +2,8 @@
 
 			  L I B R M N E T C T L . H
 
-Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+Copyright (c) 2013-2015, 2018, 2020-2021
+The Linux Foundation. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -129,6 +130,10 @@ enum rmnetctl_error_codes_e {
 	/* TC handle is full */
 	RMNETCTL_KERNEL_ERR_TC_HANDLE_FULL = 24,
 
+	RMNETCTL_API_THIRD_ERR = 25,
+	/* Failed to copy data into netlink message */
+	RMNETCTL_API_ERR_RTA_FAILURE = RMNETCTL_API_THIRD_ERR,
+
 	/* This should always be the last element */
 	RMNETCTL_API_ERR_ENUM_LENGTH
 };
@@ -138,6 +143,7 @@ enum rmnetctl_error_codes_e {
 /*!
 * @brief Contains a list of error message from API
 */
+#ifndef RMNETCTL_NO_ERR_CODE
 char rmnetctl_error_code_text
 [RMNETCTL_API_ERR_ENUM_LENGTH][RMNETCTL_ERR_MSG_SIZE] = {
 	"ERROR: API succeeded\n",
@@ -165,7 +171,35 @@ char rmnetctl_error_code_text
 	"ERROR: Device doesn't exist\n",
 	"ERROR: One or more of the arguments is invalid\n",
 	"ERROR: Egress device is invalid\n",
-	"ERROR: TC handle is full\n"
+	"ERROR: TC handle is full\n",
+	/* New Rmnet Driver Errors */
+	"ERROR: Netlink message is too small to hold all data\n",
+};
+#endif /* RMNETCTL_NO_ERR_CODE */
+
+#define RMNETCTL_FILTER_MASK_SADDR 0x1
+#define RMNETCTL_FILTER_MASK_DADDR 0x2
+#define RMNETCTL_FILTER_MASK_SPORT 0x4
+#define RMNETCTL_FILTER_MASK_DPORT 0x8
+#define RMNETCTL_FILTER_MASK_PROTO 0x10
+#define RMNETCTL_FILTER_MASK_TOS   0x20
+
+struct rmnetctl_filter {
+	uint32_t saddr[4];
+	uint32_t smask[4];
+	uint32_t daddr[4];
+	uint32_t dmask[4];
+	uint16_t sport;
+	uint16_t sport_range;
+	uint16_t dport;
+	uint16_t dport_range;
+	uint16_t precedence;
+	uint8_t tos;
+	uint8_t tos_mask;
+	uint8_t xport_protocol;
+	uint8_t filter_mask;
+	uint8_t pad1;
+	uint8_t pad2;
 };
 
 /*===========================================================================
@@ -450,6 +484,28 @@ int rmnet_new_vnd_prefix(rmnetctl_hndl_t *hndl,
 			 uint16_t *error_code,
 			 uint8_t new_vnd,
 			 const char *prefix);
+
+/*!
+ * @brief Public API to create a new virtual device node with a custom prefix
+ * @details Message type is RMNET_NETLINK_NEW_VND or
+ * RMNETCTL_FREE_VND based on the flag for new_vnd
+ * @param hndl RmNet handle for the Netlink message
+ * @param id Node number to create the virtual network device node
+ * @param error_code Status code of this operation returned from the kernel
+ * @param new_vnd creates a new virtual network device if  RMNETCTL_NEW_VND or
+ * frees the device if RMNETCTL_FREE_VND
+ * @param name Name to be used when naming the network interface
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rmnet_new_vnd_name(rmnetctl_hndl_t *hndl,
+			 uint32_t id,
+			 uint16_t *error_code,
+			 const char *name);
+
 /*!
  * @brief API to get the ASCII name of a virtual network device from its ID
  * @param hndl RmNet handle for the Netlink message
@@ -494,6 +550,355 @@ int rmnet_add_del_vnd_tc_flow(rmnetctl_hndl_t *hndl,
 			      uint32_t tc_flow_id,
 			      uint8_t set_flow,
 			      uint16_t *error_code);
+
+/* @brief Public API to initialize the RTM_NETLINK RMNET control driver
+ * @details Allocates memory for the RmNet handle. Creates and binds to a
+ * netlink socket if successful
+ * @param **rmnetctl_hndl_t_val RmNet handle to be initialized
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_init(rmnetctl_hndl_t **hndl, uint16_t *error_code);
+
+/* @brief Public API to clean up the RTM_NETLINK RmNeT control handle
+ * @details Close the socket and free the RmNet handle
+ * @param *rmnetctl_hndl_t_val RmNet handle to be initialized
+ * @return void
+ */
+int rtrmnet_ctl_deinit(rmnetctl_hndl_t *hndl);
+
+/* @brief Public API to create a new virtual device node
+ * @details Message type is RTM_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param dev_name Device name new node will be connected to
+ * @param vnd_name Name of virtual device to be created
+ * @param error_code Status code of this operation returned from the kernel
+ * @param index Index node will have
+ * @param flagconfig Flag configuration device will have
+ * @param offload Offload capability
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_newvnd(rmnetctl_hndl_t *hndl, char *devname, char *vndname,
+		       uint16_t *error_code, uint8_t  index,
+		       uint32_t flagconfig, uint8_t offload);
+
+/* @brief Public API to delete a virtual device node
+ * @details Message type is RTM_DELLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param vnd_name Name of virtual device to be deleted
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_delvnd(rmnetctl_hndl_t *hndl, char *vndname,
+		       uint16_t *error_code);
+
+/* @brief Public API to change flag's of a virtual device node
+ * @details Message type is RTM_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param dev_name Name of device node is connected to
+ * @param vnd_name Name of virtual device to be changed
+ * @param error_code Status code of this operation returned from the kernel
+ * @param flagconfig New flag config vnd should have
+ * @param offload Offload capability
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_changevnd(rmnetctl_hndl_t *hndl, char *devname, char *vndname,
+			  uint16_t *error_code, uint8_t  index,
+			  uint32_t flagconfig, uint8_t offload);
+
+/* @brief Public API to retrieve configuration of a virtual device node
+ * @details Message type is RTM_GETLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param vndname Name of virtual device to query
+ * @param error_code Status code of this operation returned from the kernel
+ * @param mux_id Where to store the value of the node's mux id
+ * @param flagconfig Where to store the value of the node's data format flags
+ * @param agg_count Where to store the value of the node's maximum packet count
+ * for uplink aggregation
+ * @param agg_size Where to store the value of the node's maximum byte count
+ * for uplink aggregation
+ * @param agg_time Where to store the value of the node's maximum time limit
+ * for uplink aggregation
+ * @param agg_time Where to store the value of the node's features
+ * for uplink aggregation
+ * @param offload Offload capability
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARF if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_getvnd(rmnetctl_hndl_t *hndl, char *vndname,
+		       uint16_t *error_code, uint16_t *mux_id,
+		       uint32_t *flagconfig, uint8_t *agg_count,
+		       uint16_t *agg_size, uint32_t *agg_time,
+		       uint8_t *features, uint8_t *offload);
+
+/* @brief Public API to bridge a vnd and device
+ * @details Message type is RTM_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param dev_name device to bridge msg will be sent to
+ * @param vnd_name vnd name of device that will be dev_name's master
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMNETCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_ctl_bridgevnd(rmnetctl_hndl_t *hndl, char *devname, char *vndname,
+			  uint16_t *error_code);
+
+/* @brief Public API to configure the uplink aggregation parameters
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param packet_count Maximum number of packets to aggregate
+ * @param byte_count Maximum number of bytes to aggregate
+ * @param time_limit Maximum time to aggregate
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_set_uplink_aggregation_params(rmnetctl_hndl_t *hndl,
+					  char *devname,
+					  char *vndname,
+					  uint8_t packet_count,
+					  uint16_t byte_count,
+					  uint32_t time_limit,
+					  uint8_t features,
+					  uint16_t *error_code);
+
+/* @brief Public API to add flow control information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param bearer_id Bearer information
+ * @param flow_id Flow information
+ * @param ip_type IP family
+ * @param tcm_handle Flow related information
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_activate_flow(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint8_t bearer_id,
+			  uint32_t flow_id,
+			  int ip_type,
+			  uint32_t tcm_handle,
+			  uint16_t *error_code);
+
+/* @brief Public API to delete flow control information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param bearer_id Bearer information
+ * @param flow_id Flow information
+ * @param ip_type IP family
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_delete_flow(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint8_t bearer_id,
+			  uint32_t flow_id,
+			  int ip_type,
+			  uint16_t *error_code);
+
+/* @brief Public API to specify flow control information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param bearer_id Bearer information
+ * @param sequence Sequence id
+ * @param grantsize Number of grant bytes
+ * @param ack Acknowledgement indication
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_control_flow(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint8_t bearer_id,
+			  uint16_t sequence,
+			  uint32_t grantsize,
+			  uint8_t ack,
+			  uint16_t *error_code);
+
+/* @brief Public API to specify flow state down information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param bearer_id Bearer information
+ * @param sequence Sequence id
+ * @param grantsize Number of grant bytes
+ * @param ack Acknowledgement indication
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_flow_state_down(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint32_t instance,
+			  uint16_t *error_code);
+
+/* @brief Public API to specify flow state up information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param instance Instance information
+ * @param ep_type Endpoint type
+ * @param ifaceid Endpoint id
+ * @param flags Flags
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_flow_state_up(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint32_t instance,
+			  uint32_t ep_type,
+			  uint32_t ifaceid,
+			  int flags,
+			  uint16_t *error_code);
+
+/* @brief Public API to specify acknowledgement scaling
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param scale Acknowledgement scaling
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_set_qmi_scale(rmnetctl_hndl_t *hndl,
+			  char *devname,
+			  char *vndname,
+			  uint32_t scale,
+			  uint16_t *error_code);
+
+/* @brief Public API to specify powersave polling information
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param freq Powersave polling frequency
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_set_wda_freq(rmnetctl_hndl_t *hndl,
+			 char *devname,
+			 char *vndname,
+			 uint32_t freq,
+			 uint16_t *error_code);
+
+/* @brief Public API to add filter for a flow
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param flow_id Flow information
+ * @param ip_type IP family
+ * @param filter RMNETCTL filter
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_add_filter(rmnetctl_hndl_t *hndl,
+		       char *devname,
+		       char *vndname,
+		       uint32_t flow_id,
+		       int ip_type,
+		       struct rmnetctl_filter *filter,
+		       uint16_t *error_code);
+
+/* @brief Public API to delete filters for a flow
+ * used by the RmNet driver
+ * @details Message type is RMN_NEWLINK
+ * @param hndl RmNet handle for the Netlink message
+ * @param devname Name of device node is connected to
+ * @param vndname Name of virtual device
+ * @param flow_id Flow information
+ * @param ip_type IP family
+ * @param error_code Status code of this operation returned from the kernel
+ * @return RMNETCTL_SUCCESS if successful
+ * @return RMENTCTL_LIB_ERR if there was a library error. Check error_code
+ * @return RMNETCTL_KERNEL_ERR if there was an error in the kernel.
+ * Check error_code
+ * @return RMNETCTL_INVALID_ARG if invalid arguments were passed to the API
+ */
+int rtrmnet_remove_filters(rmnetctl_hndl_t *hndl,
+			   char *devname,
+			   char *vndname,
+			   uint32_t flow_id,
+			   int ip_type,
+			   uint16_t *error_code);
 
 #endif /* not defined LIBRMNETCTL_H */
 

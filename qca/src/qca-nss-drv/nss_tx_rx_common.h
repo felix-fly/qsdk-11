@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -25,6 +25,7 @@
 #include <nss_hal.h>
 #include <linux/module.h>
 #include <linux/vmalloc.h>
+#include <linux/kmemleak.h>
 #include "nss_tx_msg_sync.h"
 
 /*
@@ -88,11 +89,17 @@ extern void nss_portid_register_handler(void);
 extern void nss_oam_register_handler(void);
 extern void nss_dtls_register_handler(void);
 extern void nss_dtls_cmn_register_handler(void);
+extern void nss_tls_register_handler(void);
 extern void nss_gre_tunnel_register_handler(void);
 extern void nss_trustsec_tx_register_handler(void);
 extern void nss_wifili_register_handler(void);
 extern void nss_ppe_register_handler(void);
 extern void nss_gre_redir_mark_register_handler(void);
+extern void nss_ppe_vp_register_handler(void);
+extern void nss_wifi_mac_db_register_handler(void);
+extern void nss_wifi_ext_vdev_register_handler(void);
+extern void nss_wifili_thread_scheme_db_init(uint8_t core_id);
+extern void nss_wifi_mesh_init(void);
 
 /*
  * nss_if_msg_handler()

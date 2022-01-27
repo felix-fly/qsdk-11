@@ -28,26 +28,26 @@
 &CPU0 {
 	operating-points-v2 = <&cpu0_opp_table>;
 	voltage-tolerance = <1>;
-	cpu0-supply = <&dummy_reg>;
+	cpu0-supply = <&apc_vreg>;
 	enable-cpu-regulator;
 };
 
 &CPU1 {
 	operating-points-v2 = <&cpu0_opp_table>;
 	voltage-tolerance = <1>;
-	cpu-supply = <&dummy_reg>;
+	cpu-supply = <&apc_vreg>;
 };
 
 &CPU2 {
 	operating-points-v2 = <&cpu0_opp_table>;
 	voltage-tolerance = <1>;
-	cpu-supply = <&dummy_reg>;
+	cpu-supply = <&apc_vreg>;
 };
 
 &CPU3 {
 	operating-points-v2 = <&cpu0_opp_table>;
 	voltage-tolerance = <1>;
-	cpu-supply = <&dummy_reg>;
+	cpu-supply = <&apc_vreg>;
 };
 
 &cpus {
@@ -56,13 +56,13 @@
 		opp-shared;
 
 		opp00 {
-			opp-hz = /bits/ 64 <0>;
-			opp-microvolt = <0>;
+			opp-hz = /bits/ 64 <1017600000>;
+			opp-microvolt = <1>;
 			clock-latency-ns = <200000>;
 		};
 		opp01 {
-			opp-hz = /bits/ 64 <1017600000>;
-			opp-microvolt = <848000>;
+			opp-hz = /bits/ 64 <1382400000>;
+			opp-microvolt = <2>;
 			clock-latency-ns = <200000>;
 		};
 	};

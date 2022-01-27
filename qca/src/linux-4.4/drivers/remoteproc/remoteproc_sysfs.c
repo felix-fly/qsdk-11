@@ -23,7 +23,7 @@ static ssize_t firmware_show(struct device *dev, struct device_attribute *attr,
 {
 	struct rproc *rproc = to_rproc(dev);
 
-	return sprintf(buf, "%s\n", rproc->firmware);
+	return snprintf(buf, PAGE_SIZE, "%s\n", rproc->firmware);
 }
 
 /* Change firmware name via sysfs */
@@ -90,7 +90,7 @@ static ssize_t state_show(struct device *dev, struct device_attribute *attr,
 	unsigned int state;
 
 	state = rproc->state > RPROC_LAST ? RPROC_LAST : rproc->state;
-	return sprintf(buf, "%s\n", rproc_state_string[state]);
+	return snprintf(buf, PAGE_SIZE, "%s\n", rproc_state_string[state]);
 }
 
 /* Change remote processor state via sysfs */

@@ -358,7 +358,10 @@ ipt_do_table(struct sk_buff *skb,
 
 	/* Initialization */
 	IP_NF_ASSERT(table->valid_hooks & (1 << hook));
+
 	local_bh_disable();
+	rcu_read_lock();
+
 	private = table->private;
 	cpu        = smp_processor_id();
 	/*
@@ -374,7 +377,9 @@ ipt_do_table(struct sk_buff *skb,
 
 		counter = xt_get_this_cpu_counter(&e->counters);
 		ADD_COUNTER(*counter, skb->len, 1);
+		rcu_read_unlock();
 		local_bh_enable();
+
 		return verdict;
 	}
 
@@ -499,6 +504,8 @@ ipt_do_table(struct sk_buff *skb,
 	pr_debug("Exiting %s; sp at %u\n", __func__, stackidx);
 
 	xt_write_recseq_end(addend);
+	rcu_read_unlock();
+
 	local_bh_enable();
 
 #ifdef DEBUG_ALLOW_ALL
@@ -1338,6 +1345,7 @@ __do_replace(struct net *net, const char *name, unsigned int valid_hooks,
 	xt_entry_foreach(iter, oldinfo->entries, oldinfo->size)
 		cleanup_entry(iter, net);
 
+	synchronize_rcu();
 	xt_free_table_info(oldinfo);
 	if (copy_to_user(counters_ptr, counters,
 			 sizeof(struct xt_counters) * num_counters) != 0) {

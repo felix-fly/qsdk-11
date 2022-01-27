@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -34,9 +34,6 @@
 #define QDF_NBUF_CB_RX_LRO_CTX(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.lro_ctx)
 
-#define QDF_NBUF_CB_RX_PEER_LOCAL_ID(skb) \
-	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.peer_local_id)
-
 #define QDF_NBUF_CB_TX_IPA_OWNED(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.tx.dev.priv_cb_m.ipa.owned)
 #define QDF_NBUF_CB_TX_IPA_PRIV(skb) \
@@ -48,6 +45,9 @@
 #define QDF_NBUF_CB_TX_DMA_BI_MAP(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.tx.dev.priv_cb_m. \
 	dma_option.bi_map)
+#define QDF_NBUF_CB_TX_EXTRA_FRAG_FLAGS_NOTIFY_COMP(skb) \
+	(((struct qdf_nbuf_cb *)((skb)->cb))->u.tx.dev.priv_cb_m. \
+	flag_notify_comp)
 
 #define QDF_NBUF_CB_RX_PEER_ID(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.dp. \
@@ -60,6 +60,33 @@
 #define QDF_NBUF_CB_RX_MAP_IDX(skb) \
 	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.dp. \
 	wifi2.map_index)
+
+#define  QDF_NBUF_CB_RX_PEER_CACHED_FRM(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	 peer_cached_buf_frm)
+
+#define  QDF_NBUF_CB_RX_FLUSH_IND(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m.flush_ind)
+
+#define  QDF_NBUF_CB_RX_PACKET_BUFF_POOL(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	 packet_buf_pool)
+
+#define  QDF_NBUF_CB_RX_PACKET_L3_HDR_PAD(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	 l3_hdr_pad)
+
+#define  QDF_NBUF_CB_RX_PACKET_EXC_FRAME(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	 exc_frm)
+
+#define  QDF_NBUF_CB_RX_PACKET_IPA_SMMU_MAP(skb) \
+	 (((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	 ipa_smmu_map)
+
+#define  QDF_NBUF_CB_RX_PACKET_REO_DEST_IND(skb) \
+	(((struct qdf_nbuf_cb *)((skb)->cb))->u.rx.dev.priv_cb_m. \
+	reo_dest_ind)
 
 #define __qdf_nbuf_ipa_owned_get(skb) \
 	QDF_NBUF_CB_TX_IPA_OWNED(skb)
@@ -77,16 +104,16 @@
 	(QDF_NBUF_CB_TX_IPA_PRIV(skb) = (priv))
 
 /**
- * qdf_nbuf_cb_update_peer_local_id() - update peer local id in skb cb
- * @skb: skb pointer whose cb is updated with peer local id information
- * @peer_local_id: peer local id to be update in cb
+ * qdf_nbuf_cb_update_vdev_id() - update vdev id in skb cb
+ * @skb: skb pointer whose cb is updated with vdev id information
+ * @vdev_id: vdev id to be updated in cb
  *
  * Return: void
  */
-static inline void qdf_nbuf_cb_update_peer_local_id(struct sk_buff *skb,
-						    uint16_t peer_local_id)
+static inline void
+qdf_nbuf_cb_update_vdev_id(struct sk_buff *skb, uint8_t vdev_id)
 {
-	QDF_NBUF_CB_RX_PEER_LOCAL_ID(skb) = peer_local_id;
+	QDF_NBUF_CB_RX_VDEV_ID(skb) = vdev_id;
 }
 
 void __qdf_nbuf_init_replenish_timer(void);
@@ -150,5 +177,8 @@ qdf_nbuf_deinit_replenish_timer(void)
 {
 	__qdf_nbuf_deinit_replenish_timer();
 }
+
+static inline void
+__qdf_nbuf_dma_inv_range(const void *buf_start, const void *buf_end) {}
 
 #endif /*_I_QDF_NBUF_M_H */

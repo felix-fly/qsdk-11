@@ -57,10 +57,10 @@ const char linux_proc_banner[] =
 const char *linux_banner_ptr = linux_banner;
 uint64_t linux_banner_size = sizeof(linux_banner);
 
-void get_linux_buf_info(uint64_t *plinux_buf, uint64_t *plinux_buf_len)
+void minidump_get_linux_buf_info(uint64_t *plinux_buf, uint64_t *plinux_buf_len)
 {
 	*plinux_buf = (uint64_t)((uintptr_t)linux_banner_ptr);
 	*plinux_buf_len = linux_banner_size;
 }
-EXPORT_SYMBOL(get_linux_buf_info);
+EXPORT_SYMBOL(minidump_get_linux_buf_info);
 #endif

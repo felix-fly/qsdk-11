@@ -72,8 +72,13 @@ typedef struct {
 #define SCM_SVC_WR                      0x10
 #define SCM_SVC_RD                      0x12
 #define QFPROM_IS_AUTHENTICATE_CMD      0x7
+#ifndef PLATFORM_IPQ6018
 #define SCM_CMD_SEC_AUTH                0x15
+#else
+#define SCM_CMD_SEC_AUTH                0x1F
+#endif
 #define SCM_SVC_ID_SHIFT                0xA
+#define SCM_SVC_RESETTYPE_CMD		0x18
 
 static uint32 smc(uint32 cmd_addr);
 
@@ -238,5 +243,8 @@ int qca_scm_sdi_v8(uint32_t dump_id);
 int qca_scm_call(uint32_t svc_id, uint32_t cmd_id, void *buf, size_t len);
 int qca_scm_secure_authenticate(void *cmd_buf, size_t cmd_len);
 int is_scm_sec_auth_available(uint32_t svc_id, uint32_t cmd_id);
+int qca_scm_set_resettype(uint32_t reset_type);
+int qca_scm_tz_log(uint32_t svc_id, uint32_t cmd_id, void *ker_buf, uint32_t buf_len);
+int qca_scm_fuseipq(uint32_t svc_id, uint32_t cmd_id, void *buf, size_t len);
 
 #endif

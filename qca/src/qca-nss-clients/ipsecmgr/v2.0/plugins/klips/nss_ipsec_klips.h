@@ -22,6 +22,11 @@
 /**
  * @file klips plugin for ipsec manager.
  */
+
+#define NSS_IPSEC_KLIPS_NON_ESP_MARKER 0x0000
+
+typedef int (*sk_encap_rcv_method_t)(struct sock *sk, struct sk_buff *skb);
+
 #define NSS_IPSEC_KLIPS_DEBUG_LVL_ERROR 1
 #define NSS_IPSEC_KLIPS_DEBUG_LVL_WARN 2
 #define NSS_IPSEC_KLIPS_DEBUG_LVL_INFO 3

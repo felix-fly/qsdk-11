@@ -335,8 +335,8 @@ static void sfe_cmn_msg_init(struct sfe_cmn_msg *ncm, u16 if_num, u32 type,  u32
 	ncm->version = SFE_MESSAGE_VERSION;
 	ncm->type = type;
 	ncm->len = len;
-	ncm->cb = (u32)cb;
-	ncm->app_data = (u32)app_data;
+	ncm->cb = (sfe_ptr_t)cb;
+	ncm->app_data = (sfe_ptr_t)app_data;
 }
 
 /*
@@ -1162,6 +1162,10 @@ int sfe_drv_recv(struct sk_buff *skb)
 
 	dev = skb->dev;
 
+/*
+ * TODO: Remove the check when INgress Qdisc is ported to 5.4 kernel.
+ */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 #ifdef CONFIG_NET_CLS_ACT
 	/*
 	 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
@@ -1170,6 +1174,7 @@ int sfe_drv_recv(struct sk_buff *skb)
 	if (dev->ingress_queue && !(skb->tc_verd & TC_NCLS)) {
 		return 0;
 	}
+#endif
 #endif
 
 	/*

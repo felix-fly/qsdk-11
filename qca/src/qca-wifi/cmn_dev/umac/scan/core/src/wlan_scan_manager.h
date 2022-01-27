@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018, 2020-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -27,12 +27,7 @@
 #define _WLAN_SCAN_MANAGER_API_H_
 
 #include "wlan_scan_main.h"
-
-/*
- * Maximum numbers of callback functions that may be invoked
- * for a particular scan event.
- */
-#define MAX_SCAN_EVENT_LISTENERS (MAX_SCAN_EVENT_HANDLERS_PER_PDEV + 1)
+#include "wlan_scan_manager_6ghz.h"
 
 /**
  * struct scan_event_listners - listeners interested in a particular scan event
@@ -132,5 +127,15 @@ QDF_STATUS scm_scan_start_flush_callback(struct scheduler_msg *msg);
  * Return: QDF_STATUS
  */
 QDF_STATUS scm_scan_cancel_flush_callback(struct scheduler_msg *msg);
+
+/**
+ * scm_disable_obss_pdev_scan() - Public API to disable pdev obss scan
+ * @psoc: psoc pointer
+ * @pdev: pdev pointer
+ *
+ * Return: void
+ */
+void scm_disable_obss_pdev_scan(struct wlan_objmgr_psoc *psoc,
+				struct wlan_objmgr_pdev *pdev);
 
 #endif

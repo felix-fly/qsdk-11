@@ -443,7 +443,7 @@ int uart_getc(int port, bool wait)
 
 	byte = (int)word & 0xff;
 	word = word >> 8;
-	/* NULL character to be stripped off*/
+	/* Skip NUL characters */
 	if (byte == 0x0)
 		return -1;
 

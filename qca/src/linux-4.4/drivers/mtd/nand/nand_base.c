@@ -1676,6 +1676,25 @@ static int nand_setup_read_retry(struct mtd_info *mtd, int retry_mode)
 	return chip->setup_read_retry(mtd, retry_mode);
 }
 
+static int get_read_page_count(struct mtd_info *mtd,
+		struct mtd_oob_ops *ops, loff_t to, uint32_t oob_per_page)
+{
+	struct nand_chip *chip = mtd->priv;
+	uint32_t start_page, end_page;
+
+	if (ops->datbuf != NULL) {
+		start_page = to >> chip->page_shift;
+		end_page = (to + ops->len - 1) >> chip->page_shift;
+		return end_page - start_page + 1;
+	} else {
+		if (oob_per_page == 0)
+			return 0;
+		return (ops->ooblen + oob_per_page - 1) / oob_per_page;
+	}
+
+	return 0;
+}
+
 /**
  * nand_do_read_ops - [INTERN] Read data with ECC
  * @mtd: MTD device structure
@@ -1696,7 +1715,7 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 		mtd->oobavail : mtd->oobsize;
 
 	uint8_t *bufpoi, *oob, *buf;
-	int use_bufpoi;
+	int use_bufpoi, num_pages, req_pages;
 	unsigned int max_bitflips = 0;
 	int retry_mode = 0;
 	bool ecc_fail = false;
@@ -1713,11 +1732,61 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 	oob = ops->oobbuf;
 	oob_required = oob ? 1 : 0;
 
+	if (readlen > mtd->writesize)
+		num_pages = get_read_page_count(mtd, ops, from, max_oobsize);
+	else
+		num_pages = 1;
+	pr_debug("Total no of pages :%d\n",num_pages);
+	req_pages = num_pages;
+
 	while (1) {
 		unsigned int ecc_failures = mtd->ecc_stats.failed;
-
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+		int rem = 0;
+		if (num_pages == MAX_MULTI_PAGE) {
+			/* fully multi page alinged page */
+			rem = (readlen % mtd->writesize);
+			req_pages = MAX_MULTI_PAGE;
+			bytes = (req_pages * mtd->writesize);
+			if (rem) {
+				req_pages = MAX_MULTI_PAGE - 1;
+				bytes = readlen;
+			}
+			aligned = (bytes == (mtd->writesize * req_pages));
+		} else if (num_pages > MAX_MULTI_PAGE) {
+			req_pages = MAX_MULTI_PAGE;
+			bytes = (MAX_MULTI_PAGE * mtd->writesize);
+			if (num_pages == MAX_MULTI_PAGE + 1) {
+				rem = (readlen % mtd->writesize);
+				if (rem) {
+					req_pages = MAX_MULTI_PAGE - 1;
+					bytes = readlen;
+				}
+			}
+			aligned = (bytes == (mtd->writesize * MAX_MULTI_PAGE));
+		} else if (num_pages > 1 && num_pages < MAX_MULTI_PAGE) {
+			/* this check, to not break the page scope read */
+			req_pages = num_pages;
+			bytes = readlen;
+			rem = (readlen % mtd->writesize);
+			aligned = (bytes == (mtd->writesize * req_pages));
+			if (rem) {
+				if (col != 0) {
+					req_pages = 1;
+					bytes = min(mtd->writesize - col, readlen);
+					aligned = (bytes == mtd->writesize);
+				}
+			}
+		} else if (num_pages == 1 || num_pages == 0) {
+			bytes = min(mtd->writesize - col, readlen);
+			aligned = (bytes == mtd->writesize);
+		} else {
+			pr_info("Wrong number of pages:%d\n", num_pages);
+		}
+#else
 		bytes = min(mtd->writesize - col, readlen);
 		aligned = (bytes == mtd->writesize);
+#endif
 
 		if (!aligned)
 			use_bufpoi = 1;
@@ -1750,6 +1819,11 @@ read_retry:
 				ret = chip->ecc.read_subpage(mtd, chip,
 							col, bytes, bufpoi,
 							page);
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+			else if (num_pages > 1)
+				ret = chip->ecc.read_multi_page(mtd, chip, bufpoi,
+						oob_required, page, req_pages);
+#endif
 			else
 				ret = chip->ecc.read_page(mtd, chip, bufpoi,
 							  oob_required, page);
@@ -1829,14 +1903,25 @@ read_retry:
 			retry_mode = 0;
 		}
 
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+		if (!readlen || (int)readlen < 0)
+			break;
+#else
 		if (!readlen)
 			break;
-
+#endif
 		/* For subsequent reads align to page boundary */
 		col = 0;
 		/* Increment page address */
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+		num_pages -= req_pages;
+		if (num_pages == 0)
+			realpage++;
+		else
+			realpage += req_pages;
+#else
 		realpage++;
-
+#endif
 		page = realpage & chip->pagemask;
 		/* Check, if we cross a chip boundary */
 		if (!page) {
@@ -4114,14 +4199,18 @@ int nand_scan_tail(struct mtd_info *mtd)
 	struct nand_chip *chip = mtd->priv;
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
 	struct nand_buffers *nbuf;
+	int page_count = 1;
 
 	/* New bad blocks should be marked in OOB, flash-based BBT, or both */
 	BUG_ON((chip->bbt_options & NAND_BBT_NO_OOB_BBM) &&
 			!(chip->bbt_options & NAND_BBT_USE_FLASH));
-
+#if IS_ENABLED(CONFIG_PAGE_SCOPE_MULTI_PAGE_READ)
+	page_count = (MAX_MULTI_PAGE + 1);
+#endif
 	if (!(chip->options & NAND_OWN_BUFFERS)) {
-		nbuf = kzalloc(sizeof(*nbuf) + mtd->writesize
-				+ mtd->oobsize * 3, GFP_KERNEL);
+
+		nbuf = kzalloc(page_count * (sizeof(*nbuf) + mtd->writesize
+				+ mtd->oobsize * 3), GFP_KERNEL);
 		if (!nbuf)
 			return -ENOMEM;
 		nbuf->ecccalc = (uint8_t *)(nbuf + 1);

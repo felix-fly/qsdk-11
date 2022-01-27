@@ -49,6 +49,7 @@
 #include <platform.h>
 #include <crypto_hash.h>
 #include <malloc.h>
+#include <err.h>
 
 #ifdef MMC_SDHCI_SUPPORT
 #include <mmc_wrapper.h>
@@ -115,6 +116,7 @@ void write_device_info_mmc(device_info *dev);
 void write_device_info_flash(device_info *dev);
 uint32_t* target_dev_tree_mem(uint32_t * num_of_entries);
 void update_mac_addrs(void *fdt);
+void update_usb_mode(void *fdt);
 void fdt_fixup_version(void *fdt);
 
 /* fastboot command function pointer */
@@ -343,6 +345,112 @@ extern int emmc_recovery_init(void);
 
 #if NO_KEYPAD_DRIVER
 extern int fastboot_trigger(void);
+#endif
+
+#ifdef CONFIG_IPQ_ELF_AUTH
+#define NO_OF_PROGRAM_HDRS	3
+#define ELF_HDR_PLUS_PHDR_SIZE	sizeof(Elf32_Ehdr) + \
+		(NO_OF_PROGRAM_HDRS * sizeof(Elf32_Phdr))
+
+#define EI_NIDENT	16		/* Size of e_ident[] */
+#define ET_EXEC		2		/* executable file */
+#define PT_LOAD		1		/* loadable segment */
+
+typedef struct {
+	unsigned int img_offset;
+	unsigned int img_load_addr;
+	unsigned int img_size;
+} image_info;
+
+typedef uint32_t	Elf32_Addr;	/* Unsigned program address */
+typedef uint32_t	Elf32_Off;	/* Unsigned file offset */
+typedef int32_t		Elf32_Sword;	/* Signed large integer */
+typedef uint32_t	Elf32_Word;	/* Unsigned large integer */
+typedef uint16_t	Elf32_Half;	/* Unsigned medium integer */
+
+/* e_ident[] identification indexes */
+#define EI_MAG0		0		/* file ID */
+#define EI_MAG1		1		/* file ID */
+#define EI_MAG2		2		/* file ID */
+#define EI_MAG3		3		/* file ID */
+
+/* e_ident[] magic number */
+#define	ELFMAG0		0x7f		/* e_ident[EI_MAG0] */
+#define	ELFMAG1		'E'		/* e_ident[EI_MAG1] */
+#define	ELFMAG2		'L'		/* e_ident[EI_MAG2] */
+#define	ELFMAG3		'F'		/* e_ident[EI_MAG3] */
+
+/* e_ident */
+#define IS_ELF(ehdr) ((ehdr).e_ident[EI_MAG0] == ELFMAG0 && \
+		      (ehdr).e_ident[EI_MAG1] == ELFMAG1 && \
+		      (ehdr).e_ident[EI_MAG2] == ELFMAG2 && \
+		      (ehdr).e_ident[EI_MAG3] == ELFMAG3)
+
+/* ELF Header */
+typedef struct elfhdr{
+	unsigned char	e_ident[EI_NIDENT]; /* ELF Identification */
+	Elf32_Half	e_type;		/* object file type */
+	Elf32_Half	e_machine;	/* machine */
+	Elf32_Word	e_version;	/* object file version */
+	Elf32_Addr	e_entry;	/* virtual entry point */
+	Elf32_Off	e_phoff;	/* program header table offset */
+	Elf32_Off	e_shoff;	/* section header table offset */
+	Elf32_Word	e_flags;	/* processor-specific flags */
+	Elf32_Half	e_ehsize;	/* ELF header size */
+	Elf32_Half	e_phentsize;	/* program header entry size */
+	Elf32_Half	e_phnum;	/* number of program header entries */
+	Elf32_Half	e_shentsize;	/* section header entry size */
+	Elf32_Half	e_shnum;	/* number of section header entries */
+	Elf32_Half	e_shstrndx;	/* section header table's "section
+					   header string table" entry offset */
+} Elf32_Ehdr;
+
+/* Program Header */
+typedef struct {
+	Elf32_Word	p_type;		/* segment type */
+	Elf32_Off	p_offset;	/* segment offset */
+	Elf32_Addr	p_vaddr;	/* virtual address of segment */
+	Elf32_Addr	p_paddr;	/* physical address - ignored? */
+	Elf32_Word	p_filesz;	/* number of bytes in file for seg. */
+	Elf32_Word	p_memsz;	/* number of bytes in mem. for seg. */
+	Elf32_Word	p_flags;	/* flags */
+	Elf32_Word	p_align;	/* memory alignment */
+} Elf32_Phdr;
+
+static int parse_elf_image_phdr(image_info *img_info, void * addr)
+{
+	Elf32_Ehdr *ehdr; /* Elf header structure pointer */
+	Elf32_Phdr *phdr; /* Program header structure pointer */
+	int i;
+
+	ehdr = (Elf32_Ehdr *)addr;
+	phdr = (Elf32_Phdr *)(addr + ehdr->e_phoff);
+
+	if (!IS_ELF(*ehdr)) {
+		printf("It is not a elf image \n");
+		return -1;
+	}
+
+	if (ehdr->e_type != ET_EXEC) {
+		printf("Not a valid elf image\n");
+		return -1;
+	}
+
+	/* Load each program header */
+	for (i = 0; i < NO_OF_PROGRAM_HDRS; ++i) {
+		printf("Parsing phdr load addr 0x%x offset 0x%x size 0x%x type 0x%x\n",
+		      phdr->p_paddr, phdr->p_offset, phdr->p_filesz, phdr->p_type);
+		if(phdr->p_type == PT_LOAD) {
+			img_info->img_offset = phdr->p_offset;
+			img_info->img_load_addr = phdr->p_paddr;
+			img_info->img_size =  phdr->p_filesz;
+			return 0;
+		}
+		++phdr;
+	}
+
+	return -1;
+}
 #endif
 
 static void ptentry_to_tag(unsigned **ptr, struct ptentry *ptn)
@@ -653,6 +761,65 @@ void generate_atags(unsigned *ptr, const char *cmdline,
 	}
 }
 
+int set_uuid_bootargs(char *boot_args, char *part_name, int buflen, bool gpt_flag)
+{
+	disk_partition_t disk_info;
+	int ret;
+	int len;
+
+	if (!boot_args || !part_name || buflen <=0 || buflen > MAX_BOOT_ARGS_SIZE)
+		return ERR_INVALID_ARGS;
+
+	ret = get_partition_info_efi_by_name(part_name, &disk_info);
+	if (ret) {
+		dprintf(INFO, "%s : name not found in gpt table.\n", part_name);
+		return ERR_INVALID_ARGS;
+	}
+
+	if ((len = strlcpy(boot_args, "root=PARTUUID=", buflen)) >= buflen)
+		return ERR_INVALID_ARGS;
+
+	boot_args += len;
+	buflen -= len;
+
+	if ((len = strlcpy(boot_args, disk_info.uuid, buflen)) >= buflen)
+		return ERR_INVALID_ARGS;
+
+	boot_args += len;
+	buflen -= len;
+
+	if (gpt_flag && (len = strlcpy(boot_args, " gpt rootwait", buflen)) >= buflen)
+		return ERR_INVALID_ARGS;
+
+	return 0;
+}
+
+int update_uuid(char *bootargs)
+{
+	int ret;
+
+	if (smem_bootconfig_info() == 0) {
+		ret = get_rootfs_active_partition();
+		if (ret) {
+			strlcpy(bootargs, "rootfsname=rootfs_1 gpt", MAX_BOOT_ARGS_SIZE);
+			ret  = set_uuid_bootargs(bootargs, "rootfs_1", MAX_BOOT_ARGS_SIZE, true);
+		} else {
+			strlcpy(bootargs, "rootfsname=rootfs gpt", MAX_BOOT_ARGS_SIZE);
+			ret  = set_uuid_bootargs(bootargs, "rootfs", MAX_BOOT_ARGS_SIZE, true);
+		}
+	} else {
+		strlcpy(bootargs, "rootfsname=rootfs gpt", MAX_BOOT_ARGS_SIZE);
+		ret  = set_uuid_bootargs(bootargs, "rootfs", MAX_BOOT_ARGS_SIZE, true);
+	}
+
+	if (ret) {
+		dprintf(INFO, "Error in updating UUID. using device name to mountrootfs\n");
+		return 0;
+	}
+
+	return 1;
+}
+
 typedef void entry_func_ptr(unsigned, unsigned, unsigned*);
 void boot_linux(void *kernel, unsigned *tags,
 		const char *cmdline, unsigned machtype,
@@ -897,11 +1064,15 @@ int boot_linux_from_mmc(void)
 	unsigned dtb_size = 0;
 #endif
 
-	mbn_header_t mbn_header;
 	char status = 0;
 	int ret;
 	unsigned int kernel_size = 0;
 	unsigned int active_part = 0;
+#ifdef CONFIG_IPQ_ELF_AUTH
+	image_info img_info;
+#else
+	mbn_header_t mbn_header;
+#endif
 
 	uhdr = (struct boot_img_hdr *)EMMC_BOOT_IMG_HEADER_ADDR;
 	if (!memcmp(uhdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE)) {
@@ -969,7 +1140,13 @@ int boot_linux_from_mmc(void)
 
 		dprintf(INFO, "Secure image authentication successful\n");
 
+#ifdef CONFIG_IPQ_ELF_AUTH
+		if (parse_elf_image_phdr(&img_info, (void*)image_addr) != 0)
+			return -1;
+		offset = img_info.img_offset;
+#else
 		offset = sizeof(mbn_header);
+#endif
 
 		memmove((void*) image_addr, (char *)(image_addr + offset), kernel_size - offset);
 
@@ -1000,6 +1177,7 @@ int boot_linux_from_mmc(void)
 
 	kernel_actual  = ROUND_TO_PAGE(hdr->kernel_size,  page_mask);
 	ramdisk_actual = ROUND_TO_PAGE(hdr->ramdisk_size, page_mask);
+	second_actual  = ROUND_TO_PAGE(hdr->second_size, page_mask);
 
 	/* Check if the addresses in the header are valid. */
 	if (check_aboot_addr_range_overlap(hdr->kernel_addr, kernel_actual) ||
@@ -1031,7 +1209,16 @@ int boot_linux_from_mmc(void)
 
 #if DEVICE_TREE
 		dt_actual = ROUND_TO_PAGE(hdr->dt_size, page_mask);
-		imagesize_actual = (page_size + kernel_actual + ramdisk_actual + dt_actual);
+		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual
+			+ (uint64_t)second_actual + (uint64_t)dt_actual
+			+ page_size)) {
+			dprintf(CRITICAL, "Integer overflow detected in"
+				" bootimage header fields at %u in %s\n",
+				__LINE__,__FILE__);
+			return -1;
+		}
+		imagesize_actual = (page_size + kernel_actual + ramdisk_actual
+					+ second_actual + dt_actual);
 
 		if (check_aboot_addr_range_overlap(hdr->tags_addr, hdr->dt_size))
 		{
@@ -1039,7 +1226,14 @@ int boot_linux_from_mmc(void)
 			return -1;
 		}
 #else
-		imagesize_actual = (page_size + kernel_actual + ramdisk_actual);
+		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual
+			+ (uint64_t)second_actual + page_size)) {
+			dprintf(CRITICAL, "Integer overflow detected in"
+				" bootimage header fields at %u in %s\n",
+				__LINE__,__FILE__);
+			return -1;
+		}
+		imagesize_actual = (page_size + kernel_actual + ramdisk_actual + second_actual);
 #endif
 
 		dprintf(INFO, "Loading boot image (%d): start\n", imagesize_actual);
@@ -1267,7 +1461,7 @@ int boot_linux_from_flash(void)
 	unsigned kernel_actual;
 	unsigned ramdisk_actual;
 	unsigned imagesize_actual;
-	unsigned second_actual;
+	unsigned second_actual = 0;
 	unsigned dt_actual;
 
 	if (target_is_emmc_boot()) {
@@ -1350,12 +1544,14 @@ int boot_linux_from_flash(void)
 #if DEVICE_TREE
 		dt_actual = ROUND_TO_PAGE(hdr->dt_size, page_mask);
 
-		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ (uint64_t)dt_actual + page_size)) {
+		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual + (uint64_t)second_actual
+				+ (uint64_t)dt_actual + page_size)) {
 			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
 			return -1;
 		}
 
-		imagesize_actual = (page_size + kernel_actual + ramdisk_actual + dt_actual);
+		imagesize_actual = (page_size + kernel_actual + second_actual +
+					ramdisk_actual + dt_actual);
 
 		if (check_aboot_addr_range_overlap(hdr->tags_addr, hdr->dt_size))
 		{
@@ -1363,11 +1559,12 @@ int boot_linux_from_flash(void)
 			return -1;
 		}
 #else
-		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ page_size)) {
+		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual +
+				(uint64_t)second_actual +page_size)) {
 			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
 			return -1;
 		}
-		imagesize_actual = (page_size + kernel_actual + ramdisk_actual);
+		imagesize_actual = (page_size + kernel_actual + second_actual + ramdisk_actual);
 #endif
 
 		dprintf(INFO, "Loading boot image (%d): start\n", imagesize_actual);
@@ -1427,22 +1624,37 @@ int boot_linux_from_flash(void)
 		dprintf(INFO, "Loading boot image (%d): start\n",
 				kernel_actual + ramdisk_actual);
 
+		if (UINT_MAX - offset < kernel_actual)
+		{
+			dprintf(CRITICAL, "ERROR: Integer overflow in boot image header %s\t%d\n",__func__,__LINE__);
+			return -1;
+		}
 		if (read_kernel((unsigned long)(ptn + offset), hdr, NULL, kernel_actual)) {
 			dprintf(CRITICAL, "ERROR: Cannot read kernel image\n");
 			return -1;
 		}
 		offset += kernel_actual;
-
+		if (UINT_MAX - offset < ramdisk_actual)
+		{
+			dprintf(CRITICAL, "ERROR: Integer overflow in boot image header %s\t%d\n",__func__,__LINE__);
+			return -1;
+		}
 		if (flash_read(ptn, offset, (void *)hdr->ramdisk_addr, ramdisk_actual)) {
 			dprintf(CRITICAL, "ERROR: Cannot read ramdisk image\n");
 			return -1;
 		}
+
 		offset += ramdisk_actual;
 
 		dprintf(INFO, "Loading boot image (%d): done\n",
 				kernel_actual + ramdisk_actual);
 
 		if(hdr->second_size != 0) {
+			if (UINT_MAX - offset < second_actual)
+			{
+				dprintf(CRITICAL, "ERROR: Integer overflow in boot image header %s\t%d\n",__func__,__LINE__);
+				return -1;
+			}
 			offset += second_actual;
 			/* Second image loading not implemented. */
 			ASSERT(0);
@@ -1513,7 +1725,8 @@ continue_boot:
 	return 0;
 }
 
-unsigned char info_buf[4096];
+#define BOOT_IMG_MAX_PAGE_SIZE 4096
+unsigned char info_buf[BOOT_IMG_MAX_PAGE_SIZE];
 void write_device_info_mmc(device_info *dev)
 {
 	struct device_info *info = (void*) info_buf;
@@ -1592,6 +1805,7 @@ void write_device_info_flash(device_info *dev)
 			return;
 	}
 
+	memset(info, 0, BOOT_IMG_MAX_PAGE_SIZE);
 	memcpy(info, dev, sizeof(device_info));
 
 	if (flash_write(ptn, 0, (void *)info_buf, page_size))
@@ -1753,6 +1967,7 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
 {
 	unsigned kernel_actual;
 	unsigned ramdisk_actual;
+	unsigned second_actual;
 	uint32_t image_actual;
 	uint32_t dt_actual = 0;
 	struct boot_img_hdr *hdr;
@@ -1776,12 +1991,14 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
 
 	kernel_actual = ROUND_TO_PAGE(hdr->kernel_size, page_mask);
 	ramdisk_actual = ROUND_TO_PAGE(hdr->ramdisk_size, page_mask);
+	second_actual = ROUND_TO_PAGE(hdr->second_size, page_mask);
 #if DEVICE_TREE
 	dt_actual = ROUND_TO_PAGE(hdr->dt_size, page_mask);
 #endif
 
 	image_actual = ADD_OF(page_size, kernel_actual);
 	image_actual = ADD_OF(image_actual, ramdisk_actual);
+	image_actual = ADD_OF(image_actual, second_actual);
 	image_actual = ADD_OF(image_actual, dt_actual);
 
 	/* sz should have atleast raw boot image */
@@ -2538,6 +2755,8 @@ int update_device_tree(const void * fdt, char *cmdline,
 
 	fdt_fixup_version((void*)fdt);
 
+	fdt_fixup_atf((void*)fdt);
+
 	/* Get Value of address-cells and size-cells*/
 	addr_cells = fdt_getprop((void *)fdt, offset, "#address-cells", &prop_len);
 	if(addr_cells && prop_len == sizeof(*addr_cells))
@@ -2599,6 +2818,8 @@ int update_device_tree(const void * fdt, char *cmdline,
 	}
 
 	update_mac_addrs((void*)fdt);
+
+	update_usb_mode((void*)fdt);
 
 	if (!ramdisk || ramdisk_size == 0)
 		goto no_initrd;

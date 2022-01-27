@@ -474,6 +474,7 @@ static struct sysrq_key_op *sysrq_key_table[36] = {
 	/* x: May be registered on sparc64 for global PMU dump */
 	NULL,				/* x */
 	/* y: May be registered on sparc64 for global register dump */
+	/* y: May be registered for mini dump */
 	NULL,				/* y */
 	&sysrq_ftrace_dump_op,		/* z */
 };

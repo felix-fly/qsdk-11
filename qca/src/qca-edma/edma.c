@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 - 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014 - 2018, 2020 - 2021, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -24,6 +24,7 @@ extern struct net_device *edma_netdev[EDMA_MAX_PORTID_SUPPORTED];
 extern u32 edma_disable_queue_stop;
 
 bool edma_stp_rstp;
+bool edma_jumbo_multi_segment;
 u16 edma_ath_eth_type;
 extern u8 edma_dscp2ac_tbl[EDMA_PRECEDENCE_MAX];
 extern u8 edma_per_prec_stats_enable;
@@ -195,14 +196,10 @@ static int edma_alloc_rx_buf(struct edma_common_info
 	struct edma_sw_desc *sw_desc;
 	struct sk_buff *skb;
 	unsigned int i;
-	u16 prod_idx, length;
+	u16 prod_idx, length, alloc_length;
 	u32 reg_data;
 
-	if (cleaned_count > erdr->count) {
-		dev_err(&pdev->dev, "Incorrect cleaned_count %d",
-		       cleaned_count);
-		return -1;
-	}
+	BUG_ON(cleaned_count > erdr->count);
 
 	i = erdr->sw_next_to_fill;
 
@@ -217,7 +214,16 @@ static int edma_alloc_rx_buf(struct edma_common_info
 			sw_desc->flags &= ~EDMA_SW_DESC_FLAG_SKB_REUSE;
 		} else {
 			/* alloc skb */
-			skb = netdev_alloc_skb(edma_netdev[0], length);
+			alloc_length = length;
+
+			/*
+			 * if jumbo multi segment is enabled, then we need to ensure that
+			 * all packets are crossing 1K address boundary
+			 */
+			if (unlikely(edma_jumbo_multi_segment && !edma_cinfo->page_mode))
+				alloc_length += 0x400;
+
+			skb = netdev_alloc_skb(edma_netdev[0], alloc_length);
 			if (!skb) {
 				/* Better luck next round */
 				sw_desc->flags = 0;
@@ -226,23 +232,32 @@ static int edma_alloc_rx_buf(struct edma_common_info
 		}
 
 		if (!edma_cinfo->page_mode) {
+			/*
+			 * if jumbo multi segment is enabled, then we need to ensure that
+			 * all packets are crossing 1K address boundary
+			 */
+			if (unlikely(edma_jumbo_multi_segment)) {
+				u32 addr = (u32)skb->data;
+				skb->data = (u8 *)(((addr + 0x400) & ~0x3FF) - 32);
+			}
+
 			sw_desc->dma = dma_map_single(&pdev->dev, skb->data,
 							length, DMA_FROM_DEVICE);
-				if (dma_mapping_error(&pdev->dev, sw_desc->dma)) {
-					WARN_ONCE(0, "EDMA DMA mapping failed for linear address %x", sw_desc->dma);
-					sw_desc->flags = 0;
-					sw_desc->skb = NULL;
-					dev_kfree_skb_any(skb);
-					break;
-				}
+			if (dma_mapping_error(&pdev->dev, sw_desc->dma)) {
+				WARN_ONCE(0, "EDMA DMA mapping failed for linear address %x", sw_desc->dma);
+				sw_desc->flags = 0;
+				sw_desc->skb = NULL;
+				dev_kfree_skb_any(skb);
+				break;
+			}
 
-				/*
-				 * We should not exit from here with REUSE flag set
-				 * This is to avoid re-using same sk_buff for next
-				 * time around
-				 */
-				sw_desc->flags = EDMA_SW_DESC_FLAG_SKB_HEAD;
-				sw_desc->length = length;
+			/*
+			 * We should not exit from here with REUSE flag set
+			 * This is to avoid re-using same sk_buff for next
+			 * time around
+			 */
+			sw_desc->flags = EDMA_SW_DESC_FLAG_SKB_HEAD;
+			sw_desc->length = length;
 		} else {
 			struct page *pg = alloc_page(GFP_ATOMIC);
 
@@ -806,7 +821,7 @@ static u16 edma_rx_complete(struct edma_common_info *edma_cinfo,
 			 * We increment per-precedence counters for the rx packets
 			 */
 			if (edma_per_prec_stats_enable) {
-				atomic_inc(&edma_cinfo->edma_ethstats.rx_prec[priority]);
+				atomic64_inc(&edma_cinfo->edma_ethstats.rx_prec[priority]);
 				edma_cinfo->edma_ethstats.rx_ac[edma_dscp2ac_tbl[priority]]++;
 
 				if (edma_iad_stats_enable) {
@@ -1491,7 +1506,7 @@ static int edma_tx_map_and_fill(struct edma_common_info *edma_cinfo,
 			/* Increment per-precedence counters for tx packets
 			 * and set the precedence in the TPD.
 			 */
-			atomic_inc(&edma_cinfo->edma_ethstats.tx_prec[precedence]);
+			atomic64_inc(&edma_cinfo->edma_ethstats.tx_prec[precedence]);
 			edma_cinfo->edma_ethstats.tx_ac[edma_dscp2ac_tbl[precedence]]++;
 			if (tpd)
 				tpd->word3 |= precedence << EDMA_TPD_PRIO_SHIFT;
@@ -1687,12 +1702,12 @@ netdev_tx_t edma_xmit(struct sk_buff *skb,
 		goto netdev_okay;
 	}
 
-	/* Update SW producer index */
-	edma_tx_update_hw_idx(edma_cinfo, skb, queue_id);
-
 	/* update tx statistics */
 	adapter->stats.tx_packets++;
 	adapter->stats.tx_bytes += skb->len;
+
+	/* Update SW producer index */
+	edma_tx_update_hw_idx(edma_cinfo, skb, queue_id);
 
 netdev_okay:
 	local_bh_enable();
@@ -2278,6 +2293,14 @@ int edma_set_mac_addr(struct net_device *netdev, void *p)
 void edma_set_stp_rstp(bool rstp)
 {
 	edma_stp_rstp = rstp;
+}
+
+/* edma_set_jumbo_multi_segment()
+ *	Enable jumbo multi segment
+ */
+void edma_set_jumbo_multi_segment(bool jumbo_multi_segment)
+{
+	edma_jumbo_multi_segment = jumbo_multi_segment;
 }
 
 /* edma_assign_ath_hdr_type()

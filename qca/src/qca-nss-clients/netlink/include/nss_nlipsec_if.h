@@ -74,6 +74,7 @@ struct nss_nlipsec_rule_flow {
 struct nss_nlipsec_rule {
 	struct nss_nlcmn cm;				/**< Common message header. */
 	char ifname[IFNAMSIZ];				/**< IPSec interface name. */
+	uint8_t ifnum;					/**< Interface Number. */
 
 	union {
 		struct nss_nlipsec_rule_flow flow;	/**< Flow rule. */

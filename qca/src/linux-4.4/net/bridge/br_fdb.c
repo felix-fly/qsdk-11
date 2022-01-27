@@ -1084,6 +1084,95 @@ static int __br_fdb_delete(struct net_bridge_port *p,
 	return err;
 }
 
+/* This function creates a new FDB entry.
+ * The caller can specify the FDB entry type like static,
+ * local or external entry.
+ * This has to be called only for bridge-port netdevs.
+ */
+int br_fdb_add_or_refresh_by_netdev(struct net_device *dev,
+				    const unsigned char *addr, u16 vid,
+				    u16 state)
+{
+	struct net_bridge_fdb_entry *fdb = NULL;
+	struct net_bridge *br = NULL;
+	struct hlist_head *head = NULL;
+	int err = 0;
+	u16 nlh_flags = NLM_F_CREATE;
+	struct net_bridge_port *p = NULL;
+
+	if (!dev) {
+		pr_info("bridge: netdevice is NULL\n");
+		return -EINVAL;
+	}
+
+	rcu_read_lock();
+	p = br_port_get_check_rcu(dev);
+	if (!p) {
+		rcu_read_unlock();
+		pr_info("bridge: %s not a bridge port\n",
+			dev->name);
+		return -EINVAL;
+	}
+
+	br = p->br;
+	head = &br->hash[br_mac_hash(addr, vid)];
+
+	spin_lock_bh(&p->br->hash_lock);
+	fdb = fdb_find(head, addr, vid);
+	if (!fdb) {
+		err = fdb_add_entry(p, addr, state,
+				    nlh_flags, vid);
+	} else {
+		fdb->updated = jiffies;
+	}
+	spin_unlock_bh(&p->br->hash_lock);
+	rcu_read_unlock();
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(br_fdb_add_or_refresh_by_netdev);
+
+/* This function has to be called only for bridge-port netdevs.*/
+/* For bridge netdev br_fdb_delete has to be called.*/
+int br_fdb_delete_by_netdev(struct net_device *dev,
+			    const unsigned char *addr, u16 vid)
+{
+	int err;
+	struct net_bridge_vlan_group *vg;
+	struct net_bridge_vlan *v;
+	struct net_bridge_port *p = br_port_get_rcu(dev);
+
+	if (!p) {
+		pr_info("bridge: %s not a bridge port\n",
+			dev->name);
+		return -EINVAL;
+	}
+	vg = nbp_vlan_group(p);
+
+	if (vid) {
+		v = br_vlan_find(vg, vid);
+		if (!v) {
+			pr_info("bridge: with unconfigured vlan %d on %s\n"
+				, vid, dev->name);
+			return -EINVAL;
+		}
+
+		return __br_fdb_delete(p, addr, vid);
+	}
+	err = __br_fdb_delete(p, addr, 0);
+
+	if (!vg || !vg->num_vlans)
+		return err;
+
+	list_for_each_entry(v, &vg->vlan_list, vlist) {
+		if (!br_vlan_should_use(v))
+			continue;
+		err &= __br_fdb_delete(p, addr, v->vid);
+	}
+	return err;
+}
+EXPORT_SYMBOL_GPL(br_fdb_delete_by_netdev);
+
 /* Remove neighbor entry with RTM_DELNEIGH */
 int br_fdb_delete(struct ndmsg *ndm, struct nlattr *tb[],
 		  struct net_device *dev,

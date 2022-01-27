@@ -17,6 +17,18 @@ ORIG_CFLAGS := $(KBUILD_CFLAGS)
 KBUILD_CFLAGS = $(subst $(CC_FLAGS_FTRACE),,$(ORIG_CFLAGS))
 endif
 
+# These files are disabled because they produce lots of non-interesting and/or
+# flaky coverage that is not a function of syscall inputs. For example,
+# rbtree can be global and individual rotations don't correlate with inputs.
+KCOV_INSTRUMENT_string.o := n
+KCOV_INSTRUMENT_rbtree.o := n
+KCOV_INSTRUMENT_list_debug.o := n
+KCOV_INSTRUMENT_debugobjects.o := n
+KCOV_INSTRUMENT_dynamic_debug.o := n
+# Kernel does not boot if we instrument this file as it uses custom calling
+# convention (see CONFIG_ARCH_HWEIGHT_CFLAGS).
+KCOV_INSTRUMENT_hweight.o := n
+
 lib-y := ctype.o string.o vsprintf.o cmdline.o \
 	 rbtree.o radix-tree.o dump_stack.o timerqueue.o\
 	 idr.o int_sqrt.o extable.o \
@@ -80,6 +92,7 @@ obj-$(CONFIG_ASSOCIATIVE_ARRAY) += assoc_array.o
 obj-$(CONFIG_DEBUG_PREEMPT) += smp_processor_id.o
 obj-$(CONFIG_DEBUG_LIST) += list_debug.o
 obj-$(CONFIG_DEBUG_OBJECTS) += debugobjects.o
+obj-$(CONFIG_DEBUG_MEM_USAGE) += debug_mem_usage.o
 
 ifneq ($(CONFIG_HAVE_DEC_LOCK),y)
   lib-y += dec_and_lock.o

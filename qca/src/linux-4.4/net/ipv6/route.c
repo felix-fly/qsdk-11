@@ -412,14 +412,12 @@ static void ip6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 	struct net_device *loopback_dev =
 		dev_net(dev)->loopback_dev;
 
-	if (dev != loopback_dev) {
-		if (idev && idev->dev == dev) {
-			struct inet6_dev *loopback_idev =
-				in6_dev_get(loopback_dev);
-			if (loopback_idev) {
-				rt->rt6i_idev = loopback_idev;
-				in6_dev_put(idev);
-			}
+	if (idev && idev->dev != loopback_dev) {
+		struct inet6_dev *loopback_idev = in6_dev_get(loopback_dev);
+
+		if (loopback_idev) {
+			rt->rt6i_idev = loopback_idev;
+			in6_dev_put(idev);
 		}
 	}
 }
@@ -2037,9 +2035,6 @@ int ip6_route_add(struct fib6_config *cfg)
 		goto out;
 
 	err = __ip6_ins_rt(rt, &cfg->fc_nlinfo, &mxc);
-	if (!err)
-		atomic_notifier_call_chain(&ip6route_chain,
-					   RTM_NEWROUTE, rt);
 
 	kfree(mxc.mx);
 
@@ -2067,10 +2062,6 @@ static int __ip6_del_rt(struct rt6_info *rt, struct nl_info *info)
 	write_lock_bh(&table->tb6_lock);
 	err = fib6_del(rt, info);
 	write_unlock_bh(&table->tb6_lock);
-
-	if (!err)
-		atomic_notifier_call_chain(&ip6route_chain,
-					   RTM_DELROUTE, rt);
 out:
 	ip6_rt_put(rt);
 	return err;
@@ -2461,6 +2452,10 @@ int ipv6_route_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 			err = -EINVAL;
 		}
 		rtnl_unlock();
+
+		if (!err)
+			atomic_notifier_call_chain(&ip6route_chain,
+						   SIOCADDRT ? RTM_NEWROUTE:RTM_DELROUTE, &cfg);
 
 		return err;
 	}
@@ -3049,9 +3044,15 @@ static int inet6_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return err;
 
 	if (cfg.fc_mp)
-		return ip6_route_multipath_del(&cfg);
+		err = ip6_route_multipath_del(&cfg);
 	else
-		return ip6_route_del(&cfg);
+		err = ip6_route_del(&cfg);
+
+	if (!err)
+		atomic_notifier_call_chain(&ip6route_chain,
+					   RTM_DELROUTE, &cfg);
+
+	return err;
 }
 
 static int inet6_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh)
@@ -3064,9 +3065,15 @@ static int inet6_rtm_newroute(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return err;
 
 	if (cfg.fc_mp)
-		return ip6_route_multipath_add(&cfg);
+		err = ip6_route_multipath_add(&cfg);
 	else
-		return ip6_route_add(&cfg);
+		err = ip6_route_add(&cfg);
+
+	if (!err)
+		atomic_notifier_call_chain(&ip6route_chain,
+					   RTM_NEWROUTE, &cfg);
+
+	return err;
 }
 
 static inline size_t rt6_nlmsg_size(struct rt6_info *rt)

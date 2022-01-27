@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: ISC
 /*
- * Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/etherdevice.h>
@@ -731,7 +731,7 @@ static int wil_ring_init_tx_edma(struct wil6210_vif *vif, int ring_id,
 		     "init TX ring: ring_id=%u, cid=%u, tid=%u, sring_id=%u\n",
 		     ring_id, cid, tid, wil->tx_sring_idx);
 
-	wil_tx_data_init(txdata);
+	wil_tx_data_init(wil, txdata);
 	ring->size = size;
 	rc = wil_ring_alloc_desc_ring(wil, ring, true);
 	if (rc)
@@ -774,6 +774,104 @@ static int wil_tx_ring_modify_edma(struct wil6210_vif *vif, int ring_id,
 	wil_err(wil, "ring modify is not supported for EDMA\n");
 
 	return -EOPNOTSUPP;
+}
+
+static int wil_check_amsdu(struct wil6210_priv *wil, void *msg, int cid,
+			   struct wil_ring_rx_data *rxdata,
+			   struct sk_buff *skb)
+{
+	u8 *sa, *da;
+	int mid, tid;
+	u16 seq;
+	struct wil6210_vif *vif;
+	struct net_device *ndev;
+	struct wil_sta_info *sta;
+
+	/* drop all WDS packets - not supported */
+	if (wil_rx_status_get_ds_type(wil, msg) == WIL_RX_EDMA_DS_TYPE_WDS) {
+		wil_dbg_txrx(wil, "WDS is not supported");
+		return -EAGAIN;
+	}
+
+	/* check amsdu packets */
+	sta = &wil->sta[cid];
+	if (!wil_rx_status_is_basic_amsdu(msg)) {
+		if (sta->amsdu_drop_sn != -1)
+			wil_sta_info_amsdu_init(sta);
+		return 0;
+	}
+
+	mid = wil_rx_status_get_mid(msg);
+	tid = wil_rx_status_get_tid(msg);
+	seq = le16_to_cpu(wil_rx_status_get_seq(wil, msg));
+	vif = wil->vifs[mid];
+
+	if (unlikely(!vif)) {
+		wil_dbg_txrx(wil, "amsdu with invalid mid %d", mid);
+		return -EAGAIN;
+	}
+
+	if (unlikely(sta->amsdu_drop)) {
+		if (sta->amsdu_drop_sn == seq && sta->amsdu_drop_tid == tid) {
+			wil_dbg_txrx(wil, "Drop AMSDU sub frame, sn=%d\n",
+				     seq);
+			return -EAGAIN;
+		}
+
+		/* previous AMSDU finished - clear drop amsdu flag */
+		sta->amsdu_drop = 0;
+	}
+
+	da = wil_skb_get_da(skb);
+	/* for all sub frame of the AMSDU, check that the SA or DA are valid
+	 * compared with client/AP mac addresses
+	 */
+	switch (vif->wdev.iftype) {
+	case NL80211_IFTYPE_STATION:
+	case NL80211_IFTYPE_P2P_CLIENT:
+		/* check if the MSDU (a sub-frame of AMSDU) is multicast */
+		if (is_multicast_ether_addr(da))
+			return 0;
+
+		/* check if the current AMSDU (MPDU) frame is a multicast.
+		 * If so we have unicast sub frame as part of a multicast
+		 * AMSDU. Current frame and all sub frames should be dropped.
+		 */
+		if (wil_rx_status_get_mcast(msg)) {
+			wil_dbg_txrx(wil,
+				     "Found unicast sub frame in a multicast mpdu. Drop it\n");
+			goto out;
+		}
+
+		/* On client side, DA should be the client mac address */
+		ndev = vif_to_ndev(vif);
+		if (ether_addr_equal(ndev->dev_addr, da))
+			return 0;
+		break;
+
+	case NL80211_IFTYPE_P2P_GO:
+	case NL80211_IFTYPE_AP:
+		sa = wil_skb_get_sa(skb);
+		/* On AP side, the packet SA should be the client mac address.
+		 * check also the DA is not rfc 1042 header
+		 */
+		if (ether_addr_equal(sta->addr, sa) &&
+		    !ether_addr_equal(rfc1042_header, da))
+			return 0;
+		break;
+	default:
+		return 0;
+	}
+
+out:
+	sta->amsdu_drop_sn = seq;
+	sta->amsdu_drop_tid = tid;
+	sta->amsdu_drop = 1;
+	wil_dbg_txrx(wil,
+		     "Drop AMSDU frame, sn=%d tid=%d. Drop this and all next sub frames\n",
+		     seq, tid);
+
+	return -EAGAIN;
 }
 
 /* This function is used only for RX SW reorder */
@@ -1040,6 +1138,8 @@ skipping:
 		stats->last_mcs_rx = wil_rx_status_get_mcs(msg);
 		if (stats->last_mcs_rx < ARRAY_SIZE(stats->rx_per_mcs))
 			stats->rx_per_mcs[stats->last_mcs_rx]++;
+
+		stats->last_cb_mode_rx  = wil_rx_status_get_cb_mode(msg);
 	}
 
 	if (!wil->use_rx_hw_reordering && !wil->use_compressed_rx_status &&
@@ -1063,6 +1163,12 @@ skipping:
 
 	wil_hex_dump_txrx("Rx ", DUMP_PREFIX_OFFSET, 16, 1,
 			  skb->data, skb_headlen(skb), false);
+
+	if (!wil->use_compressed_rx_status &&
+	    wil_check_amsdu(wil, msg, cid, rxdata, skb)) {
+		kfree_skb(skb);
+		goto again;
+	}
 
 	/* Has to be done after dma_unmap_single as skb->cb is also
 	 * used for holding the pa
@@ -1253,6 +1359,9 @@ int wil_tx_sring_handler(struct wil6210_priv *wil,
 					  (const void *)&msg, sizeof(msg),
 					  false);
 
+			if (ctx->flags & WIL_CTX_FLAG_RESERVED_USED)
+				txdata->tx_reserved_count++;
+
 			wil_tx_desc_unmap_edma(dev,
 					       (union wil_tx_desc *)d,
 					       ctx);
@@ -1415,7 +1524,7 @@ static int __wil_tx_ring_tso_edma(struct wil6210_priv *wil,
 	struct wil_ring_tx_data *txdata = &wil->ring_tx_data[ring_index];
 	int nr_frags = skb_shinfo(skb)->nr_frags;
 	int min_desc_required = nr_frags + 2; /* Headers, Head, Fragments */
-	int used, avail = wil_ring_avail_tx(ring);
+	int used, avail = wil_ring_avail_tx(ring) - txdata->tx_reserved_count;
 	int f, hdrlen, headlen;
 	int gso_type;
 	bool is_ipv4;
@@ -1563,7 +1672,7 @@ static int wil_ring_init_bcast_edma(struct wil6210_vif *vif, int ring_id,
 
 	lockdep_assert_held(&wil->mutex);
 
-	wil_tx_data_init(txdata);
+	wil_tx_data_init(wil, txdata);
 	ring->size = size;
 	ring->is_rx = false;
 	rc = wil_ring_alloc_desc_ring(wil, ring, true);

@@ -58,7 +58,6 @@ static inline int hyfi_br_pass_frame_up(struct sk_buff *skb)
 #endif
 }
 
-
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
 #include <linux/moduleparam.h>
 #include <linux/export.h>
@@ -81,7 +80,13 @@ static inline unsigned long hyfi_updated_time_get(const struct net_bridge_fdb_en
 }
 static inline void hyfi_br_forward(const struct net_bridge_port *to, struct sk_buff *skb)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+       // fasle: packet will be received locally after forwarding
+       // false: packet is locally originated
+        br_forward(to, skb, false, false);
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	br_forward(to, skb, NULL);
+#endif
 }
 static inline void hyfi_ipv6_addr_copy(struct in6_addr *a1, const struct in6_addr *a2)
 {
@@ -103,9 +108,7 @@ static inline struct net_bridge_port *hyfi_br_port_get(const struct net_device *
 	if (!dev)
 		return NULL;
 
-	rcu_read_lock();
 	br_port = rcu_dereference(dev->br_port);
-	rcu_read_unlock();
 
 	return br_port;
 }
@@ -191,7 +194,6 @@ static inline int hyfi_ipv6_skip_exthdr(const struct sk_buff *skb, int start,
 }
 #endif
 
-
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0))
 #define os_hlist_for_each_entry_rcu(tpos, pos, head, member) \
 	(void)pos; \
@@ -205,7 +207,12 @@ static inline int hyfi_ipv6_skip_exthdr(const struct sk_buff *skb, int start,
 	(void)pos; \
 	hlist_for_each_entry(tpos, head, member)
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+#define os_br_fdb_get(a,b) br_fdb_find_rcu(a,b,0)
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 #define os_br_fdb_get(a,b) __br_fdb_get(a,b,0)
+#endif
+
 #else
 
 #define os_hlist_for_each_entry_rcu(tpos, pos, head, member) \

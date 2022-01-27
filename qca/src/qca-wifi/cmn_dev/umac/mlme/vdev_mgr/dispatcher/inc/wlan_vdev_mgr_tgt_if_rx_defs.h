@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -27,6 +27,9 @@
 #define __WLAN_VDEV_MGR_TGT_IF_RX_DEFS_H__
 
 #include <qdf_timer.h>
+#include <qdf_atomic.h>
+#include <qdf_util.h>
+#include <wlan_cmn.h>
 #ifdef FEATURE_RUNTIME_PM
 #include <wlan_pmo_common_public_struct.h>
 #endif
@@ -73,24 +76,30 @@ static inline char *string_from_rsp_bit(enum wlan_vdev_mgr_tgt_if_rsp_bit bit)
 #define DELETE_RESPONSE_TIMER          (4000 + PMO_RESUME_TIMEOUT)
 #define PEER_DELETE_ALL_RESPONSE_TIMER (6000 + PMO_RESUME_TIMEOUT)
 #else
-#define START_RESPONSE_TIMER           6000
-#define STOP_RESPONSE_TIMER            4000
+#define START_RESPONSE_TIMER           8000
+#define STOP_RESPONSE_TIMER            6000
 #define DELETE_RESPONSE_TIMER          4000
 #define PEER_DELETE_ALL_RESPONSE_TIMER 6000
 #endif
 
 /**
  * struct vdev_response_timer - vdev mgmt response ops timer
+ * @psoc: Object manager psoc
  * @rsp_timer: VDEV MLME mgmt response timer
  * @rsp_status: variable to check response status
  * @expire_time: time to expire timer
  * @timer_status: status of timer
+ * @rsp_timer_inuse: Status bit to inform whether the rsp timer is inuse
+ * @vdev_id: vdev object id
  */
 struct vdev_response_timer {
+	struct wlan_objmgr_psoc *psoc;
 	qdf_timer_t rsp_timer;
 	unsigned long rsp_status;
 	uint32_t expire_time;
 	QDF_STATUS timer_status;
+	qdf_atomic_t rsp_timer_inuse;
+	uint8_t vdev_id;
 };
 
 /**
@@ -104,6 +113,7 @@ struct vdev_response_timer {
  * @mac_id: mac id
  * @cfgd_tx_streams: configured tx streams
  * @cfgd_rx_streams: configured rx streams
+ * @max_allowed_tx_power: max tx power allowed
  */
 struct vdev_start_response {
 	uint8_t vdev_id;
@@ -115,6 +125,7 @@ struct vdev_start_response {
 	uint32_t mac_id;
 	uint32_t cfgd_tx_streams;
 	uint32_t cfgd_rx_streams;
+	uint32_t max_allowed_tx_power;
 };
 
 /**
@@ -141,6 +152,18 @@ struct vdev_delete_response {
 struct peer_delete_all_response {
 	uint8_t vdev_id;
 	uint8_t status;
+};
+
+/**
+ * struct multi_vdev_restart_resp - multi-vdev restart response structure
+ * @pdev_id: pdev id
+ * @status: FW status for multi vdev restart request
+ * @vdev_id_bmap: Bitmap of vdev_ids
+ */
+struct multi_vdev_restart_resp {
+	uint8_t pdev_id;
+	uint8_t status;
+	qdf_bitmap(vdev_id_bmap, WLAN_UMAC_PSOC_MAX_VDEVS);
 };
 
 #endif /* __WLAN_VDEV_MGR_TGT_IF_RX_DEFS_H__ */

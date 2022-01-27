@@ -1,6 +1,6 @@
 /dts-v1/;
 /*
- * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -634,8 +634,8 @@
 		device_type = "network";
 		compatible = "qcom,nss-dp";
 		qcom,id = <6>;
-		reg = <0x3a007000 0x3fff>;
-		qcom,mactype = <1>;
+		reg = <0x3a001a00 0x200>;
+		qcom,mactype = <0>;
 		local-mac-address = [000000000000];
 		qcom,link-poll = <1>;
 		qcom,phy-mdio-addr = <28>;

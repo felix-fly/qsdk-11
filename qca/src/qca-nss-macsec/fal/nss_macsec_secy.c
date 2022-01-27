@@ -550,7 +550,7 @@ u32 nss_macsec_secy_special_pkt_ctrl_get(u32 secy_id,
 			else if (packet_type == FAL_PACKET_LLDP)
 				secy_packet_type = PACKET_LLDP;
 			else
-				rv = ERROR_NOT_SUPPORT;
+				return ERROR_NOT_SUPPORT;
 
 			rv = secy_drv->secy_special_pkt_ctrl_get(secy_id,
 				secy_packet_type, &secy_packet_action);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -63,6 +63,8 @@ static void hif_target_dump_access_log(void);
 
 /* Maximum number of Copy Engine's supported */
 #define CE_HTT_H2T_MSG_SRC_NENTRIES 2048
+#define CE_HTT_H2T_MSG_SRC_NENTRIES_QCA6390 256
+#define CE_HTT_H2T_MSG_SRC_NENTRIES_QCA6490 256
 #define CE_HTT_H2T_MSG_SRC_NENTRIES_AR900B 4096
 #define CE_HTT_H2T_MSG_SRC_NENTRIES_QCN7605 4096
 
@@ -71,6 +73,12 @@ static void hif_target_dump_access_log(void);
 
 #define CE_ATTR_DIAG_FLAGS \
 	(CE_ATTR_FLAGS | CE_ATTR_DIAG)
+
+#ifdef ENABLE_CE4_COMP_DISABLE_HTT_HTC_MISC_LIST
+#define CE4_COMP_HTT_HTC CE_ATTR_FLAGS
+#else
+#define CE4_COMP_HTT_HTC (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR)
+#endif
 
 #ifdef QCN7605_SUPPORT
 
@@ -81,7 +89,7 @@ static struct CE_attr host_ce_config_wlan_qcn7605[] = {
 	/* target->host HTT + HTC control */
 	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
 	/* target->host WMI */
-	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  2048, 128, NULL,},
+	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
 	/* target->host HTT */
 	{ /* CE3 */ CE_ATTR_FLAGS, 0, 0, 2048, 512, NULL,},
 	/* host->target HTT */
@@ -97,8 +105,13 @@ static struct CE_attr host_ce_config_wlan_qcn7605[] = {
 #endif
 	/* Target autonomous HIF_memcpy */
 	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+#ifdef REMOVE_PKT_LOG
+	/* unused */
+	{ /* CE7 */ 0, 0, 0, 0, 0, NULL,},
+#else
 	/* target->host PKTLOG */
 	{ /* CE7 */ CE_ATTR_FLAGS, 0, 0, 2048, 512, NULL,},
+#endif
 #ifdef IPA_OFFLOAD
 	/* Target to uMC */
 	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
@@ -124,7 +137,7 @@ static struct CE_pipe_config target_ce_config_wlan_qcn7605[] = {
 	/* NB: 50% of src nentries, since tx has 2 frags */
 #ifdef IPA_OFFLOAD
 	/* ipa_uc->target */
-	{ /* CE5 */ 5, PIPEDIR_OUT, 512,   64,
+	{ /* CE5 */ 5, PIPEDIR_OUT, 128, 256,
 		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
 #else
 	/* unused */
@@ -132,11 +145,16 @@ static struct CE_pipe_config target_ce_config_wlan_qcn7605[] = {
 #endif
 	/* Reserved for target autonomous HIF_memcpy */
 	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+#ifdef REMOVE_PKT_LOG
+	/* unused */
+	{ /* CE7 */ 7, PIPEDIR_IN,  2, 2048, CE_ATTR_FLAGS, 0,},
+#else
 	/* Target -> host PKTLOG */
 	{ /* CE7 */ 7, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+#endif
 #ifdef IPA_OFFLOAD
 	/* CE8 used only by IPA */
-	{ /* CE8 */ 8, PIPEDIR_IN, 32, 2048, CE_ATTR_FLAGS, 0,},
+	{ /* CE8 */ 8, PIPEDIR_IN, 128, 4096, CE_ATTR_FLAGS, 0,},
 #else
 	/* target->host HTT*/
 	{ /* CE8 */ 8, PIPEDIR_IN, 32, 2048, CE_ATTR_FLAGS, 0,},
@@ -207,6 +225,7 @@ static struct CE_pipe_config target_ce_config_wlan[] = {
 };
 
 #ifdef WLAN_FEATURE_EPPING
+#define EPPING_HOST_CE_COUNT 8
 static struct CE_attr host_ce_config_wlan_epping_poll[] = {
 	/* host->target HTC control and raw streams */
 	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
@@ -359,6 +378,7 @@ static struct CE_pipe_config target_ce_config_wlan[] = {
 };
 
 #ifdef WLAN_FEATURE_EPPING
+#define EPPING_HOST_CE_COUNT 12
 static struct CE_attr host_ce_config_wlan_epping_poll[] = {
 	/* host->target HTC control and raw streams */
 	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 256, 0, NULL,},
@@ -688,7 +708,7 @@ static struct CE_attr host_ce_config_wlan_qca8074[] = {
 	/* host->target WMI (mac1) */
 	{ /* CE7 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
 	/* Target to uMC */
-	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	{ /* CE8 */ CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR, 0, 0, 0, 0, NULL,},
 	/* host->target WMI (mac2) */
 	{ /* CE9 */ CE_ATTR_FLAGS, 0, 32,  2048, 0, NULL,},
 	/* target->host HTT */
@@ -794,6 +814,71 @@ static struct CE_pipe_config target_ce_config_wlan_qca8074_pci[] = {
 	{ /* CE10 */ 10, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
 	/* Target -> host PKTLOG */
 	{ /* CE11 */ 11, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+};
+
+static struct CE_attr host_ce_config_wlan_qca9574[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	/* target->host WMI */
+	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	/* host->target WMI (mac0) */
+	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{ /* CE4 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 0, 0, 0, 0, 0, NULL,},
+#else
+	{ /* CE5 */ CE_ATTR_FLAGS, 0, 0, 2048, 512, NULL,},
+#endif
+	/* Target autonomous HIF_memcpy */
+	{ /* CE6 */ CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR, 0, 0,
+		0, 0, NULL,},
+	/* host->target WMI (mac1) */
+	{ /* CE7 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* Target to uMC */
+	{ /* CE8 */ CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR, 0, 0, 0, 0, NULL,},
+	/* host->target WMI (mac2) */
+	{ /* CE9 */ CE_ATTR_FLAGS, 0, 32,  2048, 0, NULL,},
+	/* target->host HTT */
+	{ /* CE10 unused */ 0, 0, 0, 0, 0, NULL,},
+	{ /* CE11 unused */ 0, 0, 0, 0, 0, NULL,},
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qca9574[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  T2H_WMI_RING_SIZE, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* NB: 50% of src nentries, since tx has 2 frags */
+	/* Target -> host PKTLOG */
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 5, PIPEDIR_NONE,  0, 0, 0, 0,},
+#else
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, 0, 0,},
+#endif
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 65535, 64, 0,},
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_OUT, 32, 2048,
+		8192, 0,},
+	/* CE8 used only by IPA */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 65535, 112, 0,},
+	/* CE9 target->host HTT */
+	{ /* CE9 */ 9, PIPEDIR_OUT,  32, 2048, 8192, 0,},
+	/* CE10 target->host HTT */
+	{/* CE10 unused */10, PIPEDIR_NONE, 0, 0, 0, 0,},
+	{/* CE11 unused */11, PIPEDIR_NONE, 0, 0, 0, 0,},
 };
 
 static struct CE_attr host_lowdesc_ce_config_wlan_adrastea_nopktlog[] = {
@@ -919,31 +1004,147 @@ static struct CE_pipe_config target_ce_config_wlan_adrastea[] = {
 	{ /* CE11 */ 11, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
 };
 
-#define QCN_9000_CE_COUNT 9
+#define QCN_6122_CE_COUNT 6
+static struct CE_attr host_ce_config_wlan_qcn6122[] = {
+	/* host->target HTC control and raw streams */
+	{/*CE0*/ (CE_ATTR_FLAGS), 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{/*CE1*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		512, NULL,},
+	/* target->host WMI */
+	{/*CE2*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		128, NULL,},
+	/* host->target WMI */
+	{/*CE3*/ (CE_ATTR_FLAGS), 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{/*CE4*/ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+	{/*CE5*/ (CE_ATTR_FLAGS), 0, 0, 2048,
+		512, NULL,},
+	/* Target autonomous HIF_memcpy */
+	{/*CE6*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* host->target WMI (mac1) */
+	{/*CE7*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Reserved for target */
+	{/*CE8*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qcn6122[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_OUT, 32, 2048,
+		8192, 0,},
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+#ifdef QCA_LOWMEM_CONFIG
+#define PKTLOG_DST_ENTRIES 128
+#else
+#define PKTLOG_DST_ENTRIES 512
+#endif
+
+#define QCA_5018_CE_COUNT 6
+static struct CE_attr host_ce_config_wlan_qca5018[] = {
+	/* host->target HTC control and raw streams */
+	{/*CE0*/ (CE_ATTR_FLAGS), 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{/*CE1*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		512, NULL,},
+	/* target->host WMI */
+	{/*CE2*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		128, NULL,},
+	/* host->target WMI */
+	{/*CE3*/ (CE_ATTR_FLAGS), 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{/*CE4*/ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 0, 0, 0, 0, 0, NULL,},
+#else
+	{/*CE5*/ (CE_ATTR_FLAGS), 0, 0, 2048,
+		PKTLOG_DST_ENTRIES, NULL,},
+#endif
+	/* Target autonomous HIF_memcpy */
+	{/*CE6*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* host->target WMI (mac1) */
+	{/*CE7*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Reserved for target */
+	{/*CE8*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qca5018[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_OUT, 32, 2048,
+		8192, 0,},
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+#define QCN_9000_CE_COUNT 6
 /* QCN9000 enable polling mode */
 static struct CE_attr host_ce_config_wlan_qcn9000[] = {
 	/* host->target HTC control and raw streams */
-	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
+	{/*CE0*/ (CE_ATTR_FLAGS), 0, 16, 2048, 0, NULL,},
 	/* target->host HTT + HTC control */
-	{ /* CE1 */ (CE_ATTR_FLAGS | CE_ATTR_ENABLE_POLL), 0, 0,  2048,
+	{/*CE1*/ (CE_ATTR_FLAGS), 0, 0,  2048,
 		512, NULL,},
 	/* target->host WMI */
-	{ /* CE2 */ (CE_ATTR_FLAGS | CE_ATTR_ENABLE_POLL), 0, 0,  2048,
-		32, NULL,},
+	{/*CE2*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		128, NULL,},
 	/* host->target WMI */
-	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	{/*CE3*/ (CE_ATTR_FLAGS), 0, 32, 2048, 0, NULL,},
 	/* host->target HTT */
-	{ /* CE4 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+	{/*CE4*/ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
 		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
 	/* target -> host PKTLOG */
-	{ /* CE5 */ (CE_ATTR_FLAGS | CE_ATTR_ENABLE_POLL), 0, 0, 2048,
-		512, NULL,},
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 0, 0, 0, 0, 0, NULL,},
+#else
+	{/*CE5*/ (CE_ATTR_FLAGS), 0, 0, 2048,
+		PKTLOG_DST_ENTRIES, NULL,},
+#endif
 	/* Target autonomous HIF_memcpy */
-	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
-	/* host->target WMI (mac1) */
-	{ /* CE7 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	{/*CE6*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Target CV prefetch */
+	{/*CE7*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
 	/* Reserved for target */
-	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	{/*CE8*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
 	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
 };
 
@@ -963,7 +1164,7 @@ static struct CE_pipe_config target_ce_config_wlan_qcn9000[] = {
 	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
 	/* Reserved for target autonomous HIF_memcpy */
 	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
-	/* CE7 used only by Host */
+	/* Target CV prefetch */
 	{ /* CE7 */ 7, PIPEDIR_OUT, 32, 2048,
 		8192, 0,},
 	/* Reserved for target */
@@ -1077,16 +1278,25 @@ static struct CE_attr host_ce_config_wlan_qca6390[] = {
 	/* host->target HTC control and raw streams */
 	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
 	/* target->host HTT + HTC control */
+#ifdef REMOVE_PKT_LOG
 	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+#else
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 256, NULL,},
+#endif
 	/* target->host WMI */
 	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  2048, 32, NULL,},
 	/* host->target WMI */
 	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
 	/* host->target HTT */
 	{ /* CE4 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
-		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+		CE_HTT_H2T_MSG_SRC_NENTRIES_QCA6390, 256, 0, NULL,},
 	/* target -> host PKTLOG */
-	{ /* CE5 */ CE_ATTR_FLAGS, 0, 0, 2048, 512, NULL,},
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 0, 0, 0, 0, 0, NULL,},
+#else
+	{ /* CE5 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0, 0, 2048, 512,
+		NULL,},
+#endif
 	/* Target autonomous HIF_memcpy */
 	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
 	/* ce_diag, the Diagnostic Window */
@@ -1110,6 +1320,60 @@ static struct CE_pipe_config target_ce_config_wlan_qca6390[] = {
 	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
 		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
 	/* Target -> host PKTLOG */
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 5, PIPEDIR_IN,  2, 2048, CE_ATTR_FLAGS, 0,},
+#else
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+#endif
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_INOUT_H2H, 0, 0,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+#define QCA_6490_CE_COUNT 9
+static struct CE_attr host_ce_config_wlan_qca6490[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	/* target->host WMI */
+	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  3200, 64, NULL,},
+	/* host->target WMI */
+	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{ /* CE4 */ CE4_COMP_HTT_HTC, 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES_QCA6490, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+	{ /* CE5 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0, 0, 2048, 512,
+		NULL,},
+	/* Target autonomous HIF_memcpy */
+	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* ce_diag, the Diagnostic Window */
+	{ /* CE7 */ (CE_ATTR_DIAG_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		0, DIAG_TRANSFER_LIMIT, 0, NULL,},
+	/* Reserved for target */
+	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qca6490[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 3200, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
 	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
 	/* Reserved for target autonomous HIF_memcpy */
 	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
@@ -1120,4 +1384,188 @@ static struct CE_pipe_config target_ce_config_wlan_qca6390[] = {
 	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
 	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
 };
+
+#define QCA_6750_CE_COUNT 9
+static struct CE_attr host_ce_config_wlan_qca6750[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	/* target->host WMI */
+	{ /* CE2 */ CE_ATTR_FLAGS | CE_ATTR_HI_TASKLET, 0, 0,  2048, 32, NULL,},
+	/* host->target WMI */
+	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{ /* CE4 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+	{ /* CE5 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0, 0, 2048, 512,
+		NULL,},
+	/* Target autonomous HIF_memcpy */
+	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+#ifdef WLAN_FEATURE_WMI_DIAG_OVER_CE7
+	/* target->host WMI_DIAG */
+	{ /* CE7 */ CE_ATTR_FLAGS, 0, 0,  2048, 32, NULL,},
+#else
+	/* ce_diag, the Diagnostic Window */
+	{ /* CE7 */ (CE_ATTR_DIAG_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		0, DIAG_TRANSFER_LIMIT, 0, NULL,},
+#endif
+	/* Reserved for target */
+	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qca6750[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+#ifdef WLAN_FEATURE_WMI_DIAG_OVER_CE7
+	/* target->host WMI_DIAG */
+	{ /* CE7 */ 7, PIPEDIR_IN, 32, 2048, CE_ATTR_FLAGS, 0,},
+#else
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_INOUT_H2H, 0, 0,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+#endif
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+#define WCN_7850_CE_COUNT 9
+static struct CE_attr host_ce_config_wlan_wcn7850[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ CE_ATTR_FLAGS, 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{ /* CE1 */ CE_ATTR_FLAGS, 0, 0,  2048, 512, NULL,},
+	/* target->host WMI */
+	{ /* CE2 */ CE_ATTR_FLAGS, 0, 0,  3200, 64, NULL,},
+	/* host->target WMI */
+	{ /* CE3 */ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{ /* CE4 */ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		256, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+	{ /* CE5 */ CE_ATTR_FLAGS, 0, 0, 2048, 512, NULL,},
+	/* Target autonomous HIF_memcpy */
+	{ /* CE6 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* ce_diag, the Diagnostic Window */
+	{ /* CE7 */ (CE_ATTR_DIAG_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		0, DIAG_TRANSFER_LIMIT, 0, NULL,},
+	/* Reserved for target */
+	{ /* CE8 */ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+static struct CE_pipe_config target_ce_config_wlan_wcn7850[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI  + HTC control */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 3200, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE7 used only by Host */
+	{ /* CE7 */ 7, PIPEDIR_INOUT_H2H, 0, 0,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+};
+
+#ifdef QCA_WIFI_QCN9224
+#define QCN_9224_CE_COUNT 16
+static struct CE_attr host_ce_config_wlan_qcn9224[] = {
+	/* host->target HTC control and raw streams */
+	{/*CE0*/ (CE_ATTR_FLAGS), 0, 16, 2048, 0, NULL,},
+	/* target->host HTT + HTC control */
+	{/*CE1*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		512, NULL,},
+	/* target->host WMI */
+	{/*CE2*/ (CE_ATTR_FLAGS), 0, 0,  2048,
+		128, NULL,},
+	/* host->target WMI (mac0) */
+	{/*CE3*/ (CE_ATTR_FLAGS), 0, 32, 2048, 0, NULL,},
+	/* host->target HTT */
+	{/*CE4*/ (CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,
+		CE_HTT_H2T_MSG_SRC_NENTRIES, 256, 0, NULL,},
+	/* target -> host PKTLOG */
+#ifdef REMOVE_PKT_LOG
+	{ /* CE5 */ 0, 0, 0, 0, 0, NULL,},
+#else
+	{/*CE5*/ (CE_ATTR_FLAGS), 0, 0, 2048,
+		PKTLOG_DST_ENTRIES, NULL,},
+#endif
+	/* Target autonomous HIF_memcpy */
+	{/*CE6*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* host->target WMI (mac1) */
+	{/*CE7*/ CE_ATTR_FLAGS, 0, 32, 2048, 0, NULL,},
+	/* Reserved for target (Generic HiF memcpy */
+	{/*CE8*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+	{/*CE9*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	{/*CE10*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	{/*CE11*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Target CV prefetch */
+	{/*CE12*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Target CV prefetch */
+	{/*CE13*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* target->host WMI logging, Direc-DMA */
+	{/*CE14*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+	/* Reserved for customer use */
+	{/*CE15*/ CE_ATTR_FLAGS, 0, 0, 0, 0, NULL,},
+};
+
+static struct CE_pipe_config target_ce_config_wlan_qcn9224[] = {
+	/* host->target HTC control and raw streams */
+	{ /* CE0 */ 0, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host HTT */
+	{ /* CE1 */ 1, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* target->host WMI */
+	{ /* CE2 */ 2, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE3 */ 3, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* host->target HTT */
+	{ /* CE4 */ 4, PIPEDIR_OUT, 256, 256,
+		(CE_ATTR_FLAGS | CE_ATTR_DISABLE_INTR), 0,},
+	/* Target -> host PKTLOG */
+	{ /* CE5 */ 5, PIPEDIR_IN,  32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target autonomous HIF_memcpy */
+	{ /* CE6 */ 6, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* host->target WMI */
+	{ /* CE7 */ 7, PIPEDIR_OUT, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/* Reserved for target */
+	{ /* CE8 */ 8, PIPEDIR_INOUT, 32, 16384, CE_ATTR_FLAGS, 0,},
+	/* CE 9, 10, 11 belong to CoreBsp & MHI driver */
+	/* CV prefetch */
+	{ /* CE12 */ 12, PIPEDIR_OUT, 32, 2048, 8192, 0,},
+	/* CV prefetch */
+	{ /* CE13 */ 13, PIPEDIR_OUT, 32, 2048, 8192, 0,},
+	/* target->host WMI logging + DirectDMA events */
+	{ /* CE14 */ 14, PIPEDIR_IN, 32, 2048, CE_ATTR_FLAGS, 0,},
+	/*CE 15 - Reserved for customer use */
+};
+#endif
+
 #endif /* __HIF_PCI_INTERNAL_H__ */

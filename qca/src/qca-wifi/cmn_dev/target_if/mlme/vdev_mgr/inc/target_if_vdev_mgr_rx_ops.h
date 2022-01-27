@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -51,31 +51,6 @@ static inline bool target_if_vdev_mgr_is_panic_allowed(void)
 }
 #endif
 
-/**
- * target_if_vdev_mgr_delete_response_handler() - API to handle vdev delete
- * response
- * @scn: pointer to scan object
- * @data: pointer to data
- * @datalen: length of data
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_** on error
- */
-int target_if_vdev_mgr_delete_response_handler(ol_scn_t scn,
-					       uint8_t *data,
-					       uint32_t datalen);
-
-/**
- * target_if_vdev_mgr_stop_response_handler() - API to handle vdev stop
- * response
- * @scn: pointer to scan object
- * @data: pointer to data
- * @datalen: length of data
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_** on error
- */
-int target_if_vdev_mgr_stop_response_handler(ol_scn_t scn,
-					     uint8_t *data,
-					     uint32_t datalen);
 
 /**
  * target_if_vdev_mgr_offload_bcn_tx_status_handler() - API to handle beacon
@@ -139,7 +114,15 @@ static inline bool target_if_vdev_mgr_is_panic_on_bug(void)
 static inline struct wlan_lmac_if_mlme_rx_ops *
 target_if_vdev_mgr_get_rx_ops(struct wlan_objmgr_psoc *psoc)
 {
-	return &psoc->soc_cb.rx_ops.mops;
+	struct wlan_lmac_if_rx_ops *rx_ops;
+
+	rx_ops = wlan_psoc_get_lmac_if_rxops(psoc);
+	if (!rx_ops) {
+		qdf_err("rx_ops is NULL");
+		return NULL;
+	}
+
+	return &rx_ops->mops;
 }
 
 /**
@@ -172,5 +155,13 @@ QDF_STATUS target_if_vdev_mgr_wmi_event_register(
  */
 QDF_STATUS target_if_vdev_mgr_wmi_event_unregister(
 					struct wlan_objmgr_psoc *psoc);
+
+/**
+ * target_if_vdev_mgr_rsp_timer_cb() - function to handle vdev related timeouts
+ * @arg: pointer to argument
+ *
+ * Return: none
+ */
+void target_if_vdev_mgr_rsp_timer_cb(void *arg);
 
 #endif /* __TARGET_IF_VDEV_MGR_RX_OPS_H__ */

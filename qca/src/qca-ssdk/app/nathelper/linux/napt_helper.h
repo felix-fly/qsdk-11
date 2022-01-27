@@ -34,28 +34,28 @@ void
 napt_ct_list_lock(void);
 void
 napt_ct_list_unlock(void);
-uint32_t
-napt_ct_list_iterate(uint32_t *hash, uint32_t *pos) ;
+uintptr_t
+napt_ct_list_iterate(uint32_t *hash, uintptr_t *pos) ;
 void
-napt_ct_to_hw_entry(uint32_t ct_addr, void *napt);
+napt_ct_to_hw_entry(uintptr_t ct_addr, void *napt);
 void
-napt_ct_aging_enable(uint32_t ct_addr);
+napt_ct_aging_enable(uintptr_t ct_addr);
 void
-napt_ct_aging_disable(uint32_t ct_addr);
+napt_ct_aging_disable(uintptr_t ct_addr);
 int
-napt_ct_aging_is_enable(uint32_t ct_addr);
+napt_ct_aging_is_enable(uintptr_t ct_addr);
 uint64_t
-napt_ct_pkts_get(uint32_t ct_addr);
+napt_ct_pkts_get(uintptr_t ct_addr);
 int
-napt_ct_type_is_nat(uint32_t ct_addr);
+napt_ct_type_is_nat(uintptr_t ct_addr);
 int
-napt_ct_type_is_nat_alg(uint32_t ct_addr);
+napt_ct_type_is_nat_alg(uintptr_t ct_addr);
 int
-napt_ct_status_is_estab(uint32_t ct_addr);
+napt_ct_status_is_estab(uintptr_t ct_addr);
 uint32_t
-napt_ct_priv_ip_get(uint32_t ct_addr);
+napt_ct_priv_ip_get(uintptr_t ct_addr);
 int
-napt_ct_intf_is_expected(uint32_t ct_addr);
+napt_ct_intf_is_expected(uintptr_t ct_addr);
 
 
 

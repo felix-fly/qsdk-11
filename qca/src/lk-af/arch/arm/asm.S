@@ -68,7 +68,6 @@ FUNCTION(arm_context_switch)
 FUNCTION(arm_save_mode_regs)
 	mrs		r1, cpsr
 
-#if ARM_ISA_ARMv6
 	cps		#0x11			/* fiq */
 	str		r13, [r0], #4
 	str		r14, [r0], #4
@@ -87,10 +86,6 @@ FUNCTION(arm_save_mode_regs)
 	cps		#0x1f			/* sys */
 	str		r13, [r0], #4
 	str		r14, [r0], #4
-#else
-	// XXX implement
-	b		.
-#endif
 	
 	msr		cpsr_c, r1
 

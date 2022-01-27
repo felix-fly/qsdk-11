@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -19,10 +19,16 @@
 #include <linux/of.h>
 
 /*
+ * Constant used with constructing acceleration rules.
+ */
+#define ECM_FRONT_END_VLAN_ID_NOT_CONFIGURED 0xFFF
+
+/*
  * Bridge device macros
  */
 #define ecm_front_end_is_bridge_port(dev) (dev && (dev->priv_flags & IFF_BRIDGE_PORT))
 #define ecm_front_end_is_bridge_device(dev) (dev->priv_flags & IFF_EBRIDGE)
+#define ecm_front_end_is_ovs_bridge_device(dev) (dev->priv_flags & IFF_OPENVSWITCH)
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
 /*
@@ -98,6 +104,7 @@ typedef int32_t (*ecm_front_end_connection_ae_interface_number_by_dev_get_method
 typedef int32_t (*ecm_front_end_connection_ae_interface_number_by_dev_type_get_method_t)(struct net_device *dev, uint32_t type);
 typedef int32_t (*ecm_front_end_connection_ae_interface_type_get_method_t)(struct ecm_front_end_connection_instance *feci, struct net_device *dev);
 typedef void (*ecm_front_end_connection_regenerate_method_t)(struct ecm_front_end_connection_instance *feci, struct ecm_db_connection_instance *ci);
+typedef void (*ecm_front_end_connection_multicast_update_method_t)(ip_addr_t ip_grp_addr, struct net_device *brdev);
 
 /*
  * Acceleration limiting modes.
@@ -122,6 +129,7 @@ struct ecm_front_end_connection_mode_stats {
 	uint32_t ae_nack_total;		/* Total times accel engine NAK's an accel command */
 	uint32_t ae_nack;			/* Count of consecutive times driver failed to ack */
 	uint32_t ae_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
+	uint64_t slow_path_packets;		/* The number of slow packets before the acceleration starts */
 	unsigned long cmd_time_begun;		/* Time captured when an accel or decel request begun */
 	unsigned long cmd_time_completed;	/* Time captured when request finished */
 };
@@ -148,6 +156,7 @@ struct ecm_front_end_connection_instance {
 #ifdef ECM_STATE_OUTPUT_ENABLE
 	ecm_front_end_connection_state_get_callback_t state_get;		/* Obtain state for this object */
 #endif
+	ecm_front_end_connection_multicast_update_method_t multicast_update;	/* Update existing multicast connection */
 
 	/*
 	 * Accel/decel mode statistics.
@@ -162,6 +171,7 @@ struct ecm_front_end_connection_instance {
 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
 	bool can_accel;						/* RO: True when the connection can be accelerated */
 	bool is_defunct;					/* True if the connection has become defunct */
+	bool destroy_fail_handle_pending;			/* Set while handling the connection destroy failure */
 	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
 	spinlock_t lock;					/* Lock for structure data */
 	int refs;						/* Integer to trap we never go negative */
@@ -187,6 +197,13 @@ struct ecm_front_end_interface_construct_instance {
 	ip_addr_t to_nat_mac_lookup_ip_addr;
 };
 
+struct ecm_front_end_ovs_params {
+	ip_addr_t src_ip;
+	ip_addr_t dest_ip;
+	int src_port;
+	int dest_port;
+};
+
 extern void ecm_front_end_ipv6_interface_construct_netdev_put(struct ecm_front_end_interface_construct_instance *efeici);
 extern void ecm_front_end_ipv6_interface_construct_netdev_hold(struct ecm_front_end_interface_construct_instance *efeici);
 extern bool ecm_front_end_ipv6_interface_construct_set_and_hold(struct sk_buff *skb, ecm_tracker_sender_type_t sender, ecm_db_direction_t ecm_dir, bool is_routed,
@@ -201,6 +218,8 @@ extern bool ecm_front_end_ipv4_interface_construct_set_and_hold(struct sk_buff *
 							ip_addr_t ip_src_addr, ip_addr_t ip_src_addr_nat,
 							ip_addr_t ip_dest_addr, ip_addr_t ip_dest_addr_nat,
 							struct ecm_front_end_interface_construct_instance *efeici);
+void ecm_front_end_ipv4_fill_ovs_params(struct ecm_front_end_ovs_params ovs_params[], ip_addr_t ip_src_addr, ip_addr_t ip_src_addr_nat, ip_addr_t ip_dest_addr,
+					ip_addr_t ip_dest_addr_nat, int src_port, int src_port_nat, int dest_port, int dest_port_nat);
 
 /*
  * Detect which front end to run
@@ -224,7 +243,9 @@ static inline enum ecm_front_end_type ecm_front_end_type_get(void)
 	bool nss_supported = of_machine_is_compatible("qcom,ipq8064") ||
 				of_machine_is_compatible("qcom,ipq8062") ||
 				of_machine_is_compatible("qcom,ipq807x") ||
-				of_machine_is_compatible("qcom,ipq6018");
+				of_machine_is_compatible("qcom,ipq8074") ||
+				of_machine_is_compatible("qcom,ipq6018") ||
+				of_machine_is_compatible("qcom,ipq5018");
 #else
 	bool nss_supported = true;
 #endif

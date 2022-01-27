@@ -29,7 +29,8 @@
 
 #define PCIE_PHY_SW_RESET			0x600
 #define PCIE_PHY_POWER_DOWN_CONTROL		0x604
-#define PCIE_PHY_PCS_STATUS			0x6c8
+#define PCIE_GEN3_PHY_PCS_STATUS		0x814
+#define PCIE_GEN2_PHY_PCS_STATUS		0x974
 
 #define PHY_DELAY_MS				0xFFFFFFFF
 #define PHY_DELAY_TIME				1000
@@ -48,7 +49,7 @@
 #define QSERDES_COM_LOCK_CMP_EN				0xC8
 #define QSERDES_COM_VCO_TUNE_MAP			0x128
 #define QSERDES_COM_VCO_TUNE_TIMER1			0x144
-#define QSERDES_COM_VCO_TUNE_TIMER2			0x144
+#define QSERDES_COM_VCO_TUNE_TIMER2			0x148
 #define QSERDES_COM_CMN_CONFIG				0x194
 #define QSERDES_COM_PLL_IVCO				0x48
 #define QSERDES_COM_HSCLK_SEL				0x178
@@ -74,7 +75,6 @@
 #define QSERDES_COM_INTEGLOOP_GAIN1_MODE0		0x10C
 #define QSERDES_COM_INTEGLOOP_GAIN0_MODE0		0x108
 #define QSERDES_COM_BIAS_EN_CTRL_BY_PSM			0xA8
-#define QSERDES_COM_VCO_TUNE_CTRL			0xC
 #define QSERDES_COM_SSC_EN_CENTER			0x10
 #define QSERDES_COM_SSC_PER1				0x1C
 #define QSERDES_COM_SSC_PER2				0x20
@@ -269,7 +269,7 @@ static const struct phy_regs pcie_phy_regs[] = {
 	{ QSERDES_COM_CORE_CLK_EN,				0x00000020 },
 	{ QSERDES_COM_CORECLK_DIV,				0x0000000a },
 	{ QSERDES_COM_RESETSM_CNTRL,				0x00000020 },
-	{ QSERDES_COM_BG_TIMER,					0x00000009 },
+	{ QSERDES_COM_BG_TIMER,					0x0000000a },
 	{ QSERDES_COM_SYSCLK_EN_SEL,				0x0000000a },
 	{ QSERDES_COM_DEC_START_MODE0,				0x00000082 },
 	{ QSERDES_COM_DIV_FRAC_START3_MODE0,			0x00000003 },
@@ -287,7 +287,6 @@ static const struct phy_regs pcie_phy_regs[] = {
 	{ QSERDES_COM_INTEGLOOP_GAIN1_MODE0,			0x00000000 },
 	{ QSERDES_COM_INTEGLOOP_GAIN0_MODE0,			0x00000080 },
 	{ QSERDES_COM_BIAS_EN_CTRL_BY_PSM,			0x00000001 },
-	{ QSERDES_COM_VCO_TUNE_CTRL,				0x0000000a },
 	{ QSERDES_COM_SSC_EN_CENTER,				0x00000001 },
 	{ QSERDES_COM_SSC_PER1,					0x00000031 },
 	{ QSERDES_COM_SSC_PER2,					0x00000001 },
@@ -490,7 +489,12 @@ static int qca_pcie_qmp_phy_v2_init(struct qca_pcie_qmp_phy *pcie)
 
 static bool qca_pcie_qmp_phy_is_ready(struct qca_pcie_qmp_phy *pcie)
 {
-	u32 val = readl(pcie->base + PCIE_PHY_PCS_STATUS);
+	u32 val;
+
+	if (pcie->is_phy_gen3)
+		val = readl(pcie->base + PCIE_GEN3_PHY_PCS_STATUS);
+	else
+		val = readl(pcie->base + PCIE_GEN2_PHY_PCS_STATUS);
 
 	return val & BIT(6) ? false : true;
 }
@@ -578,7 +582,7 @@ static int qca_pcie_qmp_phy_probe(struct platform_device *pdev)
 	struct qca_pcie_qmp_phy *pcie;
 	struct resource *res;
 	struct phy *phy;
-	const int *soc_version_major;
+	u32 soc_version_major;
 	const char *name;
 	int size = 0, ret;
 
@@ -596,12 +600,12 @@ static int qca_pcie_qmp_phy_probe(struct platform_device *pdev)
 		}
 	} else if (ret == -EINVAL) {
 		soc_version_major = read_ipq_soc_version_major();
-		BUG_ON(!soc_version_major);
+		BUG_ON(soc_version_major <= 0);
 
 		pcie->phy_type = (enum qca_pcie_phy_type)of_device_get_match_data(dev);
-		if ((*soc_version_major == 1) && ( pcie->phy_type == PHY_TYPE_PCIE_GEN3)) {
+		if ((soc_version_major == 1) && ( pcie->phy_type == PHY_TYPE_PCIE_GEN3)) {
 			goto err;
-		} else if ((*soc_version_major == 2) && ( pcie->phy_type == PHY_TYPE_PCIE_GEN2)) {
+		} else if ((soc_version_major == 2) && ( pcie->phy_type == PHY_TYPE_PCIE_GEN2)) {
 			goto err;
 		}
 	} else {

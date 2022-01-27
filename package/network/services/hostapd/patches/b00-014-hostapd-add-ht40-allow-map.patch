@@ -1,6 +1,6 @@
 --- a/hostapd/ctrl_iface.c
 +++ b/hostapd/ctrl_iface.c
-@@ -2780,6 +2780,92 @@ set:
+@@ -2779,6 +2779,92 @@ set:
  	return ret;
  }
  
@@ -93,7 +93,7 @@
  
  static int hostapd_ctrl_iface_remove_neighbor(struct hostapd_data *hapd,
  					      char *buf)
-@@ -3417,6 +3503,10 @@ static int hostapd_ctrl_iface_receive_pr
+@@ -3414,6 +3500,10 @@ static int hostapd_ctrl_iface_receive_pr
  	} else if (os_strncmp(buf, "SIGNAL_TXRATE", 13) == 0) {
  		if (hostapd_ctrl_iface_signal_txrate(hapd, buf + 13))
  			reply_len = -1;
@@ -106,7 +106,7 @@
  			hapd, buf + 15, reply, reply_size);
 --- a/hostapd/hostapd_cli.c
 +++ b/hostapd/hostapd_cli.c
-@@ -1368,6 +1368,12 @@ static int hostapd_cli_cmd_driver_flags(
+@@ -1366,6 +1366,12 @@ static int hostapd_cli_cmd_driver_flags(
  	return wpa_ctrl_command(ctrl, "DRIVER_FLAGS");
  }
  
@@ -119,7 +119,7 @@
  
  #ifdef CONFIG_DPP
  
-@@ -1695,6 +1701,8 @@ static const struct hostapd_cli_cmd host
+@@ -1691,6 +1697,8 @@ static const struct hostapd_cli_cmd host
  	{ "signal_txrate", hostapd_cli_cmd_signal_txrate, NULL,
  	  "= set signal tx rate parameters: signal_txrate "
  	  "LOW=<> HIGH=<>" },

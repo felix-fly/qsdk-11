@@ -175,6 +175,50 @@ function edma_war_config_del(){
 	delete_war_cosmap
 }
 
+function ipq50xx_serdes_monitor () {
+	#if qca808x phy exist, need to monitor the serdes to avoid the effect for WIFI
+	port_id=2
+	old_linkstatus="DISABLE"
+	phy_id_info=`ssdk_sh port phyid get $port_id | grep Org | awk -F '!' '{print $2}'`
+	if [ "$phy_id_info" = "[Org ID]:0x004d[Rev ID]:0xd101" ]; then
+		ssdk_sh debug phy set 29 0xb 0x300d
+		ssdk_sh debug uniphy set 0 0x7ac 0x300d 4
+
+		while true
+		do
+			cur_linkstatus=`ssdk_sh port linkstatus get $port_id | grep Status | awk -F ':' '{print $2}'`
+			#when qca808x phy link status is from down to up, serdes tx would be enabled
+			if [ "$cur_linkstatus" = "ENABLE" ] && [ "$old_linkstatus" = "DISABLE" ]; then
+				ssdk_sh debug phy set 29 0xb 0xb00d
+				ssdk_sh debug uniphy set 0 0x7ac 0xb00d 4
+			fi
+			#when qca808x phy link status is from up to down, serdes tx would be disabled
+			if [ "$cur_linkstatus" = "DISABLE" ] && [ "$old_linkstatus" = "ENABLE" ]; then
+				ssdk_sh debug phy set 29 0xb 0x300d
+				ssdk_sh debug uniphy set 0 0x7ac 0x300d 4
+			fi
+			old_linkstatus=$cur_linkstatus
+		done
+	fi
+}
+
+function ipq50xx_phy_amplitude_set () {
+	#for qca808x phy sgmii, set half amplitude with src_half_swing register
+	port_id=2
+	phy_id_info=`ssdk_sh port phyid get $port_id | grep Org | awk -F '!' '{print $2}'`
+	if [ "$phy_id_info" = "[Org ID]:0x004d[Rev ID]:0xd101" ]; then
+		ssdk_sh debug phy set 29 0x40010087 0xa08a
+		ssdk_sh debug phy set 29 0x40010067 0xb910
+	fi
+}
+
+function ipq50xx_uniphy_amplitude_set () {
+	#for ipq50xx sgmii, set half amplitude with tx_emp_lvl/margin_index and tx_margin
+	ssdk_sh debug uniphy set 0 0x24 0x54 4
+	ssdk_sh debug uniphy set 0 0x21c 0x288a 4
+	ssdk_sh debug uniphy set 0 0x19c 0xbea0 4
+}
+
 start() {
 	chip_ver=`ssdk_sh debug reg get 0 4 | grep Data | tr -d 'SSDK Init OK![Data]:'`
 	#The following commands should be uncommented to enable EDMA WAR
@@ -185,6 +229,15 @@ start() {
 	#The following commands should be uncommented to add acl egress stp bypass rules
 	if [ "$chip_ver" = "0x1500" ] || [ "$chip_ver" = "0x1501" ]; then
 		#create_acl_byp_egstp_rules
+		echo ''
+	fi
+	#The following commands should be uncommented to enable WAR for ipq50xx
+	chip_type_info=`cat tmp/sysinfo/model`
+	result=$(echo $chip_type_info | grep "IPQ5018")
+	if [ "$result" != "" ]; then
+		#ipq50xx_serdes_monitor &
+		#ipq50xx_uniphy_amplitude_set
+		#ipq50xx_phy_amplitude_set
 		echo ''
 	fi
 	echo starting

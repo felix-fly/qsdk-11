@@ -21,6 +21,8 @@ $url_filename = shift @ARGV unless $ARGV[0] =~ /:\/\//;
 my $scriptdir = dirname($0);
 my @mirrors;
 my $ok;
+my $is_network_down = $ENV{'IS_NETWORK_DOWN'};
+my $nfs_server = $ENV{'NFS_MIRROR_SERVER'};
 
 $url_filename or $url_filename = $filename;
 
@@ -80,7 +82,7 @@ sub download
 			system("mkdir", "-p", "$target/");
 		}
 
-		if (! open TMPDLS, "find $mirror -follow -name $filename 2>/dev/null |") {
+		if (! open TMPDLS, "find $mirror -not -path '*/[@.]*' -follow -name $filename 2>/dev/null |") {
 			print("Failed to search for $filename in $mirror\n");
 			return;
 		}
@@ -110,7 +112,7 @@ sub download
 			return;
 		}
 	} else {
-		open WGET, "wget -t5 --timeout=20 --no-check-certificate $options -O- '$mirror/$url_filename' |" or die "Cannot launch wget.\n";
+		open WGET, "wget -t5 --timeout=60 --no-check-certificate $options -O- '$mirror/$url_filename' |" or die "Cannot launch wget.\n";
 		open MD5SUM, "| $md5cmd > '$target/$filename.md5sum'" or die "Cannot launch md5sum.\n";
 		open OUTPUT, "> $target/$filename.dl" or die "Cannot create file $target/$filename.dl: $!\n";
 		my $buffer;
@@ -150,7 +152,9 @@ sub cleanup
 	unlink "$target/$filename.md5sum";
 }
 
-@mirrors = localmirrors();
+if (!$is_network_down) {
+	@mirrors = localmirrors();
+}
 
 foreach my $mirror (@ARGV) {
 	if ($mirror =~ /^\@SF\/(.+)$/) {
@@ -214,36 +218,27 @@ foreach my $mirror (@ARGV) {
 push @mirrors, 'http://mirror2.openwrt.org/sources';
 push @mirrors, 'http://downloads.openwrt.org/sources';
 
-#first check in CAF server
-my $caf = 'https://www.codeaurora.org/mirrored_source/quic/qsdk';
-download($caf);
+my @caf_mirrors;
+if ($nfs_server) {
+	push @caf_mirrors, "file://${nfs_server}";
+} else {
+	push @caf_mirrors, 'file:///prj/qct/openwrt/caf_mirrored_tarballs';
+}
+
+if (!$is_network_down) {
+	push @caf_mirrors, 'https://source.codeaurora.org/mirrored_source/quic/qsdk';
+}
+#first check in NFS and CAF server
+while (!$ok) {
+	my $mirror = shift @caf_mirrors;
+	$mirror or last;
+
+	download($mirror);
+	-f "$target/$filename" and $ok = 1;
+}
+
 if(!-f "$target/$filename") {
-    my $ok = 1;
-    if (index($filename, "rtl8712u.bin") != -1) {
-	print ("The $target/$filename cannot be mirrored on CAF.\n");
-	$ok = 0;
-    }
-    if (index($filename, "mbedtls-1.3.17-gpl.tgz") != -1) {
-	print ("The $target/$filename - CAF mirror pending.\n");
-	$ok = 0;
-    }
-    if (index($filename, "jpegsrc.v9a.tar.gz") != -1) {
-	print ("The $target/$filename - CAF mirror pending.\n");
-	$ok = 0;
-    }
-    foreach my $mirror(@mirrors)
-    {
-	if ((index($mirror, "vm-cnsswebserv") != -1) or (index($mirror, "qualcomm.com") != -1) or (index($mirror, "cdclnxeng") != -1)) {
-	    print ("The $target/$filename is not present in CAF but should be there in $mirror\n");
-	    $ok = 0;
-	    last;
-	}
-    }
-    if($ok != 0)
-    {
-	print ("The $target/$filename is not present\n");
-	#exit -1;
-    }
+	print ("The $target/$filename is not present in caf\n");
 }
 
 while (!$ok) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2011, Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -41,9 +41,6 @@ void dfs_get_radars(struct wlan_dfs *dfs)
 	if (wlan_objmgr_psoc_get_dev_type(psoc) == WLAN_DEV_OL) {
 		/* For Partial offload */
 		dfs_get_po_radars(dfs);
-	} else {
-		/* For Direct Attach (DA) */
-		dfs_get_da_radars(dfs);
 	}
 }
 
@@ -61,11 +58,12 @@ void dfs_phyerr_param_copy(struct wlan_dfs_phyerr_param *dst,
 	qdf_mem_copy(dst, src, sizeof(*dst));
 }
 
+#ifdef CONFIG_CHAN_FREQ_API
 struct dfs_state *dfs_getchanstate(struct wlan_dfs *dfs, uint8_t *index,
-		int ext_chan_flag)
+				   int ext_chan_flag)
 {
 	struct dfs_state *rs = NULL;
-	struct dfs_channel *cmp_ch, cmp_ch1;
+	struct dfs_channel *ch, cmp_ch1;
 	int i;
 	QDF_STATUS err;
 
@@ -73,51 +71,54 @@ struct dfs_state *dfs_getchanstate(struct wlan_dfs *dfs, uint8_t *index,
 		dfs_err(dfs, WLAN_DEBUG_DFS_ALWAYS,  "dfs is NULL");
 		return NULL;
 	}
-	cmp_ch = &cmp_ch1;
+	ch = &cmp_ch1;
 	if (ext_chan_flag) {
-		err = dfs_mlme_get_extchan(dfs->dfs_pdev_obj,
-				&(cmp_ch->dfs_ch_freq),
-				&(cmp_ch->dfs_ch_flags),
-				&(cmp_ch->dfs_ch_flagext),
-				&(cmp_ch->dfs_ch_ieee),
-				&(cmp_ch->dfs_ch_vhtop_ch_freq_seg1),
-				&(cmp_ch->dfs_ch_vhtop_ch_freq_seg2));
+		err = dfs_mlme_get_extchan_for_freq(
+					dfs->dfs_pdev_obj,
+					&ch->dfs_ch_freq,
+					&ch->dfs_ch_flags,
+					&ch->dfs_ch_flagext,
+					&ch->dfs_ch_ieee,
+					&ch->dfs_ch_vhtop_ch_freq_seg1,
+					&ch->dfs_ch_vhtop_ch_freq_seg2,
+					&ch->dfs_ch_mhz_freq_seg1,
+					&ch->dfs_ch_mhz_freq_seg2);
 
 		if (err == QDF_STATUS_SUCCESS) {
 			dfs_debug(dfs, WLAN_DEBUG_DFS2,
-					"Extension channel freq = %u flags=0x%x",
-					cmp_ch->dfs_ch_freq,
-					cmp_ch->dfs_ch_flagext);
-		} else
+				  "Extension channel freq = %u flags=0x%x",
+				  ch->dfs_ch_freq,
+				  ch->dfs_ch_flagext);
+		} else {
 			return NULL;
+		}
 	} else {
-		cmp_ch = dfs->dfs_curchan;
+		ch = dfs->dfs_curchan;
 		dfs_debug(dfs, WLAN_DEBUG_DFS2,
-				"Primary channel freq = %u flags=0x%x",
-				cmp_ch->dfs_ch_freq, cmp_ch->dfs_ch_flagext);
+			  "Primary channel freq = %u flags=0x%x",
+			  ch->dfs_ch_freq, ch->dfs_ch_flagext);
 	}
 
 	for (i = 0; i < DFS_NUM_RADAR_STATES; i++) {
 		if ((dfs->dfs_radar[i].rs_chan.dfs_ch_freq ==
-					cmp_ch->dfs_ch_freq) &&
-				(dfs->dfs_radar[i].rs_chan.dfs_ch_flags ==
-				 cmp_ch->dfs_ch_flags)
-		   ) {
+			 ch->dfs_ch_freq) &&
+			(dfs->dfs_radar[i].rs_chan.dfs_ch_flags ==
+			 ch->dfs_ch_flags)) {
 			if (index)
 				*index = (uint8_t)i;
-			return &(dfs->dfs_radar[i]);
+			return &dfs->dfs_radar[i];
 		}
 	}
 	/* No existing channel found, look for first free channel state entry.*/
 	for (i = 0; i < DFS_NUM_RADAR_STATES; i++) {
 		if (dfs->dfs_radar[i].rs_chan.dfs_ch_freq == 0) {
-			rs = &(dfs->dfs_radar[i]);
+			rs = &dfs->dfs_radar[i];
 			/* Found one, set channel info and default thresholds.*/
-			rs->rs_chan = *cmp_ch;
+			rs->rs_chan = *ch;
 
 			/* Copy the parameters from the default set. */
 			dfs_phyerr_param_copy(&rs->rs_param,
-					&dfs->dfs_defaultparams);
+					      &dfs->dfs_defaultparams);
 
 			if (index)
 				*index = (uint8_t)i;
@@ -129,12 +130,14 @@ struct dfs_state *dfs_getchanstate(struct wlan_dfs *dfs, uint8_t *index,
 
 	return NULL;
 }
+#endif
 
+#ifdef CONFIG_CHAN_FREQ_API
 void dfs_radar_enable(struct wlan_dfs *dfs, int no_cac, uint32_t opmode)
 {
 	int is_ext_ch;
 	int is_fastclk = 0;
-	struct dfs_channel *ext_ch, extchan;
+	struct dfs_channel *exch, extchan;
 	QDF_STATUS err = QDF_STATUS_E_FAILURE;
 
 	if (!dfs) {
@@ -150,11 +153,10 @@ void dfs_radar_enable(struct wlan_dfs *dfs, int no_cac, uint32_t opmode)
 	 * primary non-DFS 80MHz with extension 80MHz DFS.
 	 */
 	if ((WLAN_IS_CHAN_DFS(dfs->dfs_curchan) ||
-				((WLAN_IS_CHAN_11AC_VHT160(dfs->dfs_curchan) ||
-				  WLAN_IS_CHAN_11AC_VHT80_80(dfs->dfs_curchan))
-				 &&
-				 WLAN_IS_CHAN_DFS_CFREQ2(dfs->dfs_curchan))) ||
-		(dfs_is_precac_timer_running(dfs))) {
+	     ((WLAN_IS_CHAN_11AC_VHT160(dfs->dfs_curchan) ||
+	       WLAN_IS_CHAN_11AC_VHT80_80(dfs->dfs_curchan)) &&
+	      WLAN_IS_CHAN_DFS_CFREQ2(dfs->dfs_curchan))) ||
+	    (dfs_is_precac_timer_running(dfs))) {
 		struct dfs_state *rs_pri = NULL, *rs_ext = NULL;
 		uint8_t index_pri, index_ext;
 
@@ -162,25 +164,27 @@ void dfs_radar_enable(struct wlan_dfs *dfs, int no_cac, uint32_t opmode)
 		dfs->dfs_proc_phyerr |= DFS_RADAR_EN;
 		dfs->dfs_proc_phyerr |= DFS_SECOND_SEGMENT_RADAR_EN;
 
-		ext_ch = &extchan;
-		if (is_ext_ch)
-			err = dfs_mlme_get_extchan(dfs->dfs_pdev_obj,
-					&(ext_ch->dfs_ch_freq),
-					&(ext_ch->dfs_ch_flags),
-					&(ext_ch->dfs_ch_flagext),
-					&(ext_ch->dfs_ch_ieee),
-					&(ext_ch->dfs_ch_vhtop_ch_freq_seg1),
-					&(ext_ch->dfs_ch_vhtop_ch_freq_seg2));
-
-
+		exch = &extchan;
+		if (is_ext_ch) {
+			err = dfs_mlme_get_extchan_for_freq
+				(
+				 dfs->dfs_pdev_obj,
+				 &exch->dfs_ch_freq,
+				 &exch->dfs_ch_flags,
+				 &exch->dfs_ch_flagext,
+				 &exch->dfs_ch_ieee,
+				 &exch->dfs_ch_vhtop_ch_freq_seg1,
+				 &exch->dfs_ch_vhtop_ch_freq_seg2,
+				 &exch->dfs_ch_mhz_freq_seg1,
+				 &exch->dfs_ch_mhz_freq_seg2);
+		}
 		dfs_reset_alldelaylines(dfs);
 
 		rs_pri = dfs_getchanstate(dfs, &index_pri, 0);
 		if (err == QDF_STATUS_SUCCESS)
 			rs_ext = dfs_getchanstate(dfs, &index_ext, 1);
 
-		if (rs_pri && ((err == QDF_STATUS_E_FAILURE) ||
-					(rs_ext))) {
+		if (rs_pri && ((err == QDF_STATUS_E_FAILURE) || (rs_ext))) {
 			struct wlan_dfs_phyerr_param pe;
 
 			qdf_mem_set(&pe, sizeof(pe), '\0');
@@ -195,31 +199,32 @@ void dfs_radar_enable(struct wlan_dfs *dfs, int no_cac, uint32_t opmode)
 
 			dfs_phyerr_param_copy(&pe, &rs_pri->rs_param);
 			dfs_debug(dfs, WLAN_DEBUG_DFS3,
-					"firpwr=%d, rssi=%d, height=%d, prssi=%d, inband=%d, relpwr=%d, relstep=%d, maxlen=%d",
-					pe.pe_firpwr,
-					pe.pe_rrssi, pe.pe_height,
-					pe.pe_prssi, pe.pe_inband,
-					pe.pe_relpwr, pe.pe_relstep,
-					pe.pe_maxlen);
+				  "firpwr=%d, rssi=%d, height=%d, prssi=%d, inband=%d, relpwr=%d, relstep=%d, maxlen=%d",
+				  pe.pe_firpwr,
+				  pe.pe_rrssi, pe.pe_height,
+				  pe.pe_prssi, pe.pe_inband,
+				  pe.pe_relpwr, pe.pe_relstep,
+				  pe.pe_maxlen);
 
 			lmac_dfs_enable(dfs->dfs_pdev_obj, &is_fastclk,
 					&pe, dfs->dfsdomain);
 			dfs_debug(dfs, WLAN_DEBUG_DFS,
-					"Enabled radar detection on channel %d",
-					dfs->dfs_curchan->dfs_ch_freq);
+				  "Enabled radar detection on channel %d",
+				  dfs->dfs_curchan->dfs_ch_freq);
 
 			dfs->dur_multiplier = is_fastclk ?
 				DFS_FAST_CLOCK_MULTIPLIER :
 				DFS_NO_FAST_CLOCK_MULTIPLIER;
 
 			dfs_debug(dfs, WLAN_DEBUG_DFS3,
-					"duration multiplier is %d",
-					dfs->dur_multiplier);
+				  "duration multiplier is %d",
+				  dfs->dur_multiplier);
 		} else
 			dfs_debug(dfs, WLAN_DEBUG_DFS,
-					"No more radar states left");
+				  "No more radar states left");
 	}
 }
+#endif
 
 int dfs_set_thresholds(struct wlan_dfs *dfs, const uint32_t threshtype,
 		const uint32_t value)
@@ -237,10 +242,9 @@ int dfs_set_thresholds(struct wlan_dfs *dfs, const uint32_t threshtype,
 	chanindex = dfs->dfs_curchan_radindex;
 	if ((chanindex < 0) || (chanindex >= DFS_NUM_RADAR_STATES)) {
 		dfs_debug(dfs, WLAN_DEBUG_DFS1,
-				"%s: chanindex = %d, DFS_NUM_RADAR_STATES=%d\n",
-				__func__,
-				chanindex,
-				DFS_NUM_RADAR_STATES);
+			  "chanindex = %d, DFS_NUM_RADAR_STATES=%d",
+			  chanindex,
+			  DFS_NUM_RADAR_STATES);
 		return 0;
 	}
 

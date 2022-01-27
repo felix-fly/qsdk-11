@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2016-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -445,8 +445,9 @@ static int dfs_tlv_parse_frame(struct wlan_dfs *dfs,
  *
  * Return: Returns the channel center.
  */
+#ifdef CONFIG_CHAN_FREQ_API
 static int dfs_tlv_calc_freq_info(struct wlan_dfs *dfs,
-		struct rx_radar_status *rs)
+				  struct rx_radar_status *rs)
 {
 	uint32_t chan_centre;
 	uint32_t chan_width;
@@ -466,9 +467,7 @@ static int dfs_tlv_calc_freq_info(struct wlan_dfs *dfs,
 		 * If it's 80+80 this won't work - need to use seg
 		 * appropriately!
 		 */
-		chan_centre = dfs_mlme_ieee2mhz(dfs->dfs_pdev_obj,
-				dfs->dfs_curchan->dfs_ch_vhtop_ch_freq_seg1,
-				dfs->dfs_curchan->dfs_ch_flags);
+		chan_centre = dfs->dfs_curchan->dfs_ch_mhz_freq_seg1;
 	} else {
 		/*
 		 * HT20/HT40.
@@ -478,16 +477,14 @@ static int dfs_tlv_calc_freq_info(struct wlan_dfs *dfs,
 		chan_width = 20;
 
 		/* Grab default channel centre. */
-		chan_centre = dfs_chan2freq(dfs->dfs_curchan);
+		chan_centre = dfs->dfs_curchan->dfs_ch_freq;
 
 		/* Calculate offset based on HT40U/HT40D and VHT40U/VHT40D. */
 		if (WLAN_IS_CHAN_11N_HT40PLUS(dfs->dfs_curchan) ||
-			dfs->dfs_curchan->dfs_ch_flags &
-			WLAN_CHAN_VHT40PLUS)
+		    WLAN_IS_CHAN_VHT40PLUS(dfs->dfs_curchan))
 			chan_offset = chan_width;
 		else if (WLAN_IS_CHAN_11N_HT40MINUS(dfs->dfs_curchan) ||
-			dfs->dfs_curchan->dfs_ch_flags &
-			WLAN_CHAN_VHT40MINUS)
+			  WLAN_IS_CHAN_VHT40MINUS(dfs->dfs_curchan))
 			chan_offset = -chan_width;
 		else
 			chan_offset = 0;
@@ -499,6 +496,8 @@ static int dfs_tlv_calc_freq_info(struct wlan_dfs *dfs,
 	/* Return ev_chan_centre in MHz. */
 	return chan_centre;
 }
+#endif
+
 
 /**
  * dfs_tlv_calc_event_freq_pulse() - Calculate the centre frequency and

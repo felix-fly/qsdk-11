@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2019, 2021, The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -39,10 +39,33 @@ struct qca808x_phy_info* qca808x_phy_info_get(a_uint32_t phy_addr)
 	return NULL;
 }
 
+static a_bool_t qca808x_sfp_present(struct phy_device *phydev)
+{
+	qca808x_priv *priv = phydev->priv;
+	struct qca808x_phy_info *pdata = priv->phy_info;
+	a_uint32_t phy_id = 0;
+	sw_error_t rv = SW_OK;
+
+	if (!pdata) {
+		SSDK_ERROR("pdata is null\n");
+		return A_FALSE;
+	}
+	rv = qca808x_phy_get_phy_id(pdata->dev_id, pdata->phy_addr, &phy_id);
+	if(rv == SW_READ_ERROR) {
+		return A_FALSE;
+	}
+
+	return A_TRUE;
+}
+
 static sw_error_t qca808x_phy_config_init(struct phy_device *phydev)
 {
 	a_uint16_t phy_data;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 	a_uint32_t features;
+#else
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+#endif
 	a_uint32_t dev_id = 0, phy_id = 0;
 	qca808x_priv *priv = phydev->priv;
 	struct qca808x_phy_info *pdata = priv->phy_info;
@@ -54,8 +77,15 @@ static sw_error_t qca808x_phy_config_init(struct phy_device *phydev)
 	dev_id = pdata->dev_id;
 	phy_id = pdata->phy_addr;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 	features = SUPPORTED_TP | SUPPORTED_MII |
 		SUPPORTED_AUI | SUPPORTED_BNC;
+#else
+	linkmode_set_bit(ETHTOOL_LINK_MODE_TP_BIT, mask);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_MII_BIT, mask);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_AUI_BIT, mask);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_BNC_BIT, mask);
+#endif
 
 	phy_data = qca808x_phy_reg_read(dev_id,
 			phy_id, QCA808X_PHY_STATUS);
@@ -65,19 +95,39 @@ static sw_error_t qca808x_phy_config_init(struct phy_device *phydev)
 	}
 
 	if (phy_data & QCA808X_STATUS_AUTONEG_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_Autoneg;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, mask);
+#endif
 	}
-	if (phy_data & QCA808X_STATUS_100X_FD_CAPS) {
+	if (phy_data & QCA808X_STATUS_100TX_FD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_100baseT_Full;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT, mask);
+#endif
 	}
-	if (phy_data & QCA808X_STATUS_100X_HD_CAPS) {
+	if (phy_data & QCA808X_STATUS_100TX_HD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_100baseT_Half;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT, mask);
+#endif
 	}
 	if (phy_data & QCA808X_STATUS_10T_FD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_10baseT_Full;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT, mask);
+#endif
 	}
 	if (phy_data & QCA808X_STATUS_10T_HD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_10baseT_Half;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT, mask);
+#endif
 	}
 
 	if (phy_data & QCA808X_STATUS_EXTENDED_STATUS) {
@@ -88,10 +138,20 @@ static sw_error_t qca808x_phy_config_init(struct phy_device *phydev)
 			return SW_READ_ERROR;
 		}
 		if (phy_data & QCA808X_STATUS_1000T_FD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 			features |= SUPPORTED_1000baseT_Full;
+#else
+			linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+					mask);
+#endif
 		}
 		if (phy_data & QCA808X_STATUS_1000T_HD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 			features |= SUPPORTED_1000baseT_Half;
+#else
+			linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT,
+					mask);
+#endif
 		}
 	}
 
@@ -99,16 +159,26 @@ static sw_error_t qca808x_phy_config_init(struct phy_device *phydev)
 			QCA808X_MMD1_PMA_CAP_REG);
 
 	if (phy_data & QCA808X_STATUS_2500T_FD_CAPS) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 		features |= SUPPORTED_2500baseX_Full;
+#else
+		linkmode_set_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT, mask);
+#endif
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 	phydev->supported = features;
 	phydev->advertising = features;
+#else
+	linkmode_copy(phydev->supported, mask);
+	linkmode_copy(phydev->advertising, mask);
+#endif
 
 	return SW_OK;
 }
 
-static int qca808x_config_init(struct phy_device *phydev)
+static a_bool_t qca808x_config_init_done = A_FALSE;
+static int _qca808x_config_init(struct phy_device *phydev)
 {
 	int ret = 0;
 #if defined(IN_LINUX_STD_PTP)
@@ -117,6 +187,23 @@ static int qca808x_config_init(struct phy_device *phydev)
 #endif
 
 	ret |= qca808x_phy_config_init(phydev);
+
+	return ret;
+}
+
+static int qca808x_config_init(struct phy_device *phydev)
+{
+	int ret = 0;
+
+	if(!qca808x_sfp_present(phydev))
+	{
+		return 0;
+	}
+	ret = _qca808x_config_init(phydev);
+	if(!ret)
+	{
+		qca808x_config_init_done = A_TRUE;
+	}
 
 	return ret;
 }
@@ -172,9 +259,11 @@ static int qca808x_ack_interrupt(struct phy_device *phydev)
 }
 
 /* switch linux negtiation capability to fal avariable */
-static a_uint32_t qca808x_negtiation_cap_get(a_uint32_t advertise)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+static a_uint32_t qca808x_negtiation_cap_get(struct phy_device *phydev)
 {
 	a_uint32_t autoneg = 0;
+	a_uint32_t advertise = phydev->advertising & phydev->supported;
 
 	if (advertise & ADVERTISED_Pause) {
 		autoneg |= FAL_PHY_ADV_PAUSE;
@@ -203,6 +292,42 @@ static a_uint32_t qca808x_negtiation_cap_get(a_uint32_t advertise)
 
 	return autoneg;
 }
+#else
+static a_uint32_t qca808x_negtiation_cap_get(struct phy_device *phydev)
+{
+	a_uint32_t autoneg = 0;
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising) = { 0, };
+
+	linkmode_and(advertising, phydev->advertising, phydev->supported);
+
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_Pause_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_PAUSE;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_ASY_PAUSE;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_10T_HD;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_10T_FD;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_100TX_HD;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_100TX_FD;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_1000T_FD;
+	}
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT, advertising)) {
+		autoneg |= FAL_PHY_ADV_2500T_FD;
+	}
+
+	return autoneg;
+}
+#endif
 
 static int qca808x_config_aneg(struct phy_device *phydev)
 {
@@ -212,6 +337,11 @@ static int qca808x_config_aneg(struct phy_device *phydev)
 	a_uint32_t dev_id = 0, phy_id = 0;
 	qca808x_priv *priv = phydev->priv;
 	const struct qca808x_phy_info *pdata = priv->phy_info;
+
+	if(!qca808x_sfp_present(phydev))
+	{
+		return 0;
+	}
 
 	if (!pdata) {
 		return SW_FAIL;
@@ -236,8 +366,7 @@ static int qca808x_config_aneg(struct phy_device *phydev)
 		err = qca808x_phy_set_force_speed(dev_id, phy_id, phydev->speed);
 	} else {
 		/* autoneg enabled */
-		advertise = phydev->advertising & phydev->supported;
-		advertise = qca808x_negtiation_cap_get(advertise);
+		advertise = qca808x_negtiation_cap_get(phydev);
 		err |= qca808x_phy_set_autoneg_adv(dev_id, phy_id, advertise);
 		err |= qca808x_phy_restart_autoneg(dev_id, phy_id);
 	}
@@ -268,10 +397,18 @@ static int qca808x_aneg_done(struct phy_device *phydev)
 
 static int qca808x_read_status(struct phy_device *phydev)
 {
-	struct port_phy_status phy_status;
+	struct port_phy_status phy_status = {0};
 	a_uint32_t dev_id = 0, phy_id = 0;
 	qca808x_priv *priv = phydev->priv;
 	const struct qca808x_phy_info *pdata = priv->phy_info;
+
+	if(!qca808x_config_init_done)
+	{
+		if(!_qca808x_config_init(phydev))
+		{
+			qca808x_config_init_done = A_TRUE;
+		}
+	}
 
 	if (!pdata) {
 		return SW_FAIL;
@@ -351,6 +488,10 @@ static int qca808x_soft_reset(struct phy_device *phydev)
 	qca808x_priv *priv = phydev->priv;
 	const struct qca808x_phy_info *pdata = priv->phy_info;
 
+	if(!qca808x_sfp_present(phydev)) {
+		return 0;
+	}
+
 	if (!pdata) {
 		return SW_FAIL;
 	}
@@ -380,7 +521,11 @@ static int qca808x_phy_probe(struct phy_device *phydev)
 	}
 
 	priv->phydev = phydev;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0))
 	priv->phy_info = qca808x_phy_info_get(phydev->addr);
+#else
+	priv->phy_info = qca808x_phy_info_get(phydev->mdio.addr);
+#endif
 	phydev->priv = priv;
 
 #if defined(IN_LINUX_STD_PTP)
@@ -401,11 +546,13 @@ static void qca808x_phy_remove(struct phy_device *phydev)
 }
 
 struct phy_driver qca808x_phy_driver = {
-	.phy_id		= QCA8081_PHY,
-	.phy_id_mask    = 0xfffffff0,
+	.phy_id		= QCA8081_PHY_V1_1,
+	.phy_id_mask    = 0xffffffff,
 	.name		= "QCA808X ethernet",
 	.features	= PHY_GBIT_FEATURES,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
 	.flags		= PHY_HAS_INTERRUPT,
+#endif
 	.probe		= qca808x_phy_probe,
 	.remove		= qca808x_phy_remove,
 	.config_init	= qca808x_config_init,
@@ -468,16 +615,12 @@ void qca808x_phydev_init(a_uint32_t dev_id, a_uint32_t port_id)
 	/* in i2c mode, need to register a fake phy device
 	 * before the phy driver register */
 	if (hsl_port_phy_access_type_get(dev_id, port_id) == PHY_I2C_ACCESS) {
-		a_uint32_t phy_id = 0;
-		sw_error_t ret = SW_OK;
-		ret = qca808x_phy_get_phy_id(dev_id, pdata->phy_addr, &phy_id);
-		if (ret != SW_OK) {
-			SSDK_ERROR("%s fail to get phy id\n", __func__);
+		a_uint32_t phy_id = QCA8081_PHY_V1_1;
+		qca808x_phy_get_phy_id(dev_id, pdata->phy_addr, &phy_id);
+		if(phy_id != QCA8081_PHY_V1_1 && phy_id != INVALID_PHY_ID) {
+			SSDK_ERROR("phy id 0x%x is not supported\n", phy_id);
 			return;
 		}
-                if(phy_id == INVALID_PHY_ID) {
-                        phy_id = QCA8081_PHY_V1_1;
-                }
 		pdata->phydev_addr = qca_ssdk_port_to_phy_mdio_fake_addr(dev_id, port_id);
 		sfp_phy_device_setup(dev_id, port_id, phy_id);
 	}

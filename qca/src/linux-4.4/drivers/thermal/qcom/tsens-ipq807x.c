@@ -86,6 +86,7 @@ struct low_temp_notification {
 
 static struct low_temp_notification low_temp_notif[MAX_SENSOR];
 static int up_thres_backup[MAX_SENSOR];
+static bool int_clr_deassert_quirk;
 
 /* Trips: from very hot to very cold */
 enum tsens_trip_type {
@@ -406,6 +407,9 @@ static void tsens_scheduler_fn(struct work_struct *work)
 			/* Notify user space */
 			schedule_work(&tmdev->sensor[i].notify_work);
 
+			if (int_clr_deassert_quirk)
+				regmap_write(tmdev->map, reg_addr, 0);
+
 			if (!get_temp_ipq807x(tmdev, i, &temp))
 				pr_debug("Trigger (%d degrees) for sensor %d\n",
 					temp, i);
@@ -457,6 +461,8 @@ static int init_ipq807x(struct tsens_device *tmdev)
 	g_tmdev = tmdev;
 	enable_irq_wake(tmdev->tsens_irq);
 
+	int_clr_deassert_quirk = device_property_read_bool(tmdev->dev,
+				"tsens-up-low-int-clr-deassert-quirk");
 	/* Sync registers */
 	mb();
 	return 0;

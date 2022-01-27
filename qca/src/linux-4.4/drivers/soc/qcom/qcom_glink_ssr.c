@@ -97,6 +97,9 @@ static int qcom_glink_ssr_notify(struct notifier_block *nb, unsigned long event,
 	char *ssr_name = data;
 	int ret;
 
+	if (strstr(ssr_name, "pd"))
+		return 0;
+
 	ssr->seq_num++;
 	reinit_completion(&ssr->completion);
 

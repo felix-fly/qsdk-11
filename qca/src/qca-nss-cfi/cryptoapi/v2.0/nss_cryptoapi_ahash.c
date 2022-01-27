@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -149,8 +149,6 @@ void nss_cryptoapi_ahash_cra_exit(struct crypto_tfm *tfm)
 	 */
 	atomic_set(&ctx->active, 0);
 
-	nss_crypto_session_free(ctx->user, ctx->sid);
-
 	if (!atomic_sub_and_test(1, &ctx->refcnt)) {
 		/*
 		 * We need to wait for any outstanding packet using this ctx.
@@ -161,9 +159,12 @@ void nss_cryptoapi_ahash_cra_exit(struct crypto_tfm *tfm)
 		WARN_ON(!ret);
 	}
 
-	ctx->sid = NSS_CRYPTO_SESSION_MAX;
+	if (ctx->sid != NSS_CRYPTO_SESSION_MAX) {
+		nss_crypto_session_free(ctx->user, ctx->sid);
+		debugfs_remove_recursive(ctx->dentry);
+		ctx->sid = NSS_CRYPTO_SESSION_MAX;
+	}
 
-	debugfs_remove_recursive(ctx->dentry);
 	NSS_CRYPTOAPI_CLEAR_MAGIC(ctx);
 };
 
@@ -199,9 +200,15 @@ int nss_cryptoapi_ahash_setkey(struct crypto_ahash *ahash, const u8 *key, unsign
 	if (data.algo >= NSS_CRYPTO_CMN_ALGO_MAX)
 		return -ERANGE;
 
+	if (ctx->sid != NSS_CRYPTO_SESSION_MAX) {
+		nss_crypto_session_free(ctx->user, ctx->sid);
+		debugfs_remove_recursive(ctx->dentry);
+		ctx->sid = NSS_CRYPTO_SESSION_MAX;
+	}
+
 	status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
 	if (status < 0) {
-		nss_cfi_warn("%p: Unable to allocate crypto session(%d)\n", ctx, status);
+		nss_cfi_warn("%px: Unable to allocate crypto session(%d)\n", ctx, status);
 		crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
 		return status;
 	}
@@ -300,7 +307,7 @@ int nss_cryptoapi_ahash_init(struct ahash_request *req)
 
 		status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
 		if (status < 0) {
-			nss_cfi_err("%p: Unable to allocate crypto session(%d)\n", ctx, status);
+			nss_cfi_err("%px: Unable to allocate crypto session(%d)\n", ctx, status);
 			crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
 			return status;
 		}
@@ -363,11 +370,15 @@ int nss_cryptoapi_ahash_update(struct ahash_request *req)
 	/*
 	 * Fill the request information structure
 	 */
-	info.nsegs = sg_nents(req->src);
+	info.src.nsegs = sg_nents(req->src);
+	info.dst.nsegs = sg_nents(req->src);
 	info.cb = nss_cryptoapi_ahash_done;
 	info.hmac_len = crypto_ahash_digestsize(ahash);
-	info.first_sg = req->src;
-	info.last_sg = sg_last(req->src, info.nsegs);
+	info.src.first_sg = req->src;
+	info.src.last_sg = sg_last(req->src, info.src.nsegs);
+	info.dst.first_sg = req->src;
+	info.dst.last_sg = sg_last(req->src, info.src.nsegs);
+	info.in_place = true;
 	info.iv = NULL;
 	info.iv_size = 0;
 	info.skip = 0;
@@ -378,14 +389,14 @@ int nss_cryptoapi_ahash_update(struct ahash_request *req)
 	 * the DMA length to what is specified in req->nbytes and later
 	 * restore the length of scatterlist back to its original value.
 	 */
-	for_each_sg(req->src, cur, info.nsegs, i) {
+	for_each_sg(req->src, cur, info.src.nsegs, i) {
 		tot_len += cur->length;
 		if (!sg_next(cur))
 			break;
 	}
 
 	info.ahash_skip = tot_len - req->nbytes;
-	info.last_sg = cur;
+	info.src.last_sg = cur;
 
 	if (!atomic_inc_not_zero(&ctx->refcnt))
 		return -ENOENT;
@@ -439,7 +450,7 @@ int nss_cryptoapi_ahash_export(struct ahash_request *req, void *out)
 {
 	struct nss_cryptoapi_ctx *ctx __attribute__((unused)) = crypto_tfm_ctx(req->base.tfm);
 
-	nss_cfi_warn("%p: ahash .export is not supported", ctx);
+	nss_cfi_warn("%px: ahash .export is not supported", ctx);
 	return -ENOSYS;
 };
 
@@ -454,6 +465,6 @@ int nss_cryptoapi_ahash_import(struct ahash_request *req, const void *in)
 {
 	struct nss_cryptoapi_ctx *ctx __attribute__((unused)) = crypto_tfm_ctx(req->base.tfm);
 
-	nss_cfi_warn("%p: ahash .import is not supported", ctx);
+	nss_cfi_warn("%px: ahash .import is not supported", ctx);
 	return -ENOSYS;
 }

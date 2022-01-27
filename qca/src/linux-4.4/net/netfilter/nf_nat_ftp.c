@@ -113,14 +113,14 @@ static unsigned int nf_nat_ftp(struct sk_buff *skb,
 	 * this one. */
 	exp->expectfn = nf_nat_follow_master;
 
-	/* In the case of MAP-E, the FTP ALG source port number must use its own
+	/* In the case of MAP-E, the outbound FTP ALG source port number must use its own
 	 * PSID. Otherwise the returned packets from ftp server will use other
 	 * than its own IPv6 address.
 	 * so let the check hook to validate the port*/
 	for (port = ntohs(exp->saved_proto.tcp.port); port != 0; port++) {
 		int ret;
 
-		if (!nf_nat_port_valid_check(skb, port))
+		if ((type == NF_CT_FTP_EPRT || type == NF_CT_FTP_PORT) && !nf_nat_port_valid_check(skb, port))
 			continue;
 
 		exp->tuple.dst.u.tcp.port = htons(port);

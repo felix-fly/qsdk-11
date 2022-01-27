@@ -677,8 +677,8 @@
 		device_type = "network";
 		compatible = "qcom,nss-dp";
 		qcom,id = <5>;
-		reg = <0x3a003000 0x3fff>;
-		qcom,mactype = <1>;
+		reg = <0x3a001800 0x200>;
+		qcom,mactype = <0>;
 		local-mac-address = [000000000000];
 		qcom,link-poll = <1>;
 		qcom,phy-mdio-addr = <30>;

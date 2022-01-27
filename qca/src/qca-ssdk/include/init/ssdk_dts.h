@@ -71,6 +71,8 @@ typedef struct
 {
 	a_uint8_t port_id;
 	a_uint8_t phy_addr;
+	a_uint8_t port_duplex;
+	a_uint32_t port_speed;
 	phy_features_t phy_features;
 	struct mii_bus *miibus;
 } ssdk_port_phyinfo;
@@ -103,9 +105,12 @@ typedef struct
 	a_bool_t ess_switch_flag;
 	a_uint32_t device_id;
 	struct device_node *of_node;
+	a_bool_t is_emulation;
+	a_uint32_t emu_chip_ver; /*only valid when is_emulation is true*/
 } ssdk_dt_cfg;
 
 #define SSDK_MAX_NR_ETH 6
+#define SSDK_PHY_RESET_GPIO_INDEX 0
 
 typedef struct
 {
@@ -122,10 +127,18 @@ typedef struct
 } ssdk_reg_map_info;
 
 /* DTS info for get */
+#ifdef HPPE
+#ifdef IN_QOS
 a_uint8_t ssdk_tm_tick_mode_get(a_uint32_t dev_id);
-a_uint8_t ssdk_bm_tick_mode_get(a_uint32_t dev_id);
-a_uint16_t ssdk_ucast_queue_start_get(a_uint32_t dev_id, a_uint32_t port);
 ssdk_dt_scheduler_cfg* ssdk_bootup_shceduler_cfg_get(a_uint32_t dev_id);
+#endif
+#endif
+#ifdef IN_BM
+a_uint8_t ssdk_bm_tick_mode_get(a_uint32_t dev_id);
+#endif
+#ifdef IN_QM
+a_uint16_t ssdk_ucast_queue_start_get(a_uint32_t dev_id, a_uint32_t port);
+#endif
 a_uint32_t ssdk_intf_mac_num_get(void);
 a_uint8_t* ssdk_intf_macaddr_get(a_uint32_t index);
 a_uint32_t ssdk_dt_global_get_mac_mode(a_uint32_t dev_id, a_uint32_t index);
@@ -133,16 +146,24 @@ a_uint32_t ssdk_dt_global_set_mac_mode(a_uint32_t dev_id, a_uint32_t index, a_ui
 a_uint32_t ssdk_cpu_bmp_get(a_uint32_t dev_id);
 a_uint32_t ssdk_lan_bmp_get(a_uint32_t dev_id);
 a_uint32_t ssdk_wan_bmp_get(a_uint32_t dev_id);
+sw_error_t ssdk_lan_bmp_set(a_uint32_t dev_id, a_uint32_t lan_bmp);
+sw_error_t ssdk_wan_bmp_set(a_uint32_t dev_id, a_uint32_t wan_bmp);
 a_uint32_t ssdk_inner_bmp_get(a_uint32_t dev_id);
 ssdk_port_phyinfo* ssdk_port_phyinfo_get(a_uint32_t dev_id, a_uint32_t port_id);
+a_bool_t ssdk_port_feature_get(a_uint32_t dev_id, a_uint32_t port_id, phy_features_t feature);
+a_uint32_t ssdk_port_force_speed_get(a_uint32_t dev_id, a_uint32_t port_id);
 struct mii_bus *
 ssdk_dts_miibus_get(a_uint32_t dev_id, a_uint32_t phy_addr);
 hsl_reg_mode ssdk_switch_reg_access_mode_get(a_uint32_t dev_id);
-hsl_reg_mode ssdk_uniphy_reg_access_mode_get(a_uint32_t dev_id);
-hsl_reg_mode ssdk_psgmii_reg_access_mode_get(a_uint32_t dev_id);
 void ssdk_switch_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info);
+#ifdef DESS
+hsl_reg_mode ssdk_psgmii_reg_access_mode_get(a_uint32_t dev_id);
 void ssdk_psgmii_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info);
+#endif
+#ifdef IN_UNIPHY
+hsl_reg_mode ssdk_uniphy_reg_access_mode_get(a_uint32_t dev_id);
 void ssdk_uniphy_reg_map_info_get(a_uint32_t dev_id, ssdk_reg_map_info *info);
+#endif
 a_bool_t ssdk_ess_switch_flag_get(a_uint32_t dev_id);
 a_uint32_t ssdk_device_id_get(a_uint32_t index);
 struct device_node *ssdk_dts_node_get(a_uint32_t dev_id);
@@ -152,6 +173,9 @@ struct clk *ssdk_dts_cmnclk_get(a_uint32_t dev_id);
 int ssdk_switch_device_num_init(void);
 void ssdk_switch_device_num_exit(void);
 a_uint32_t ssdk_switch_device_num_get(void);
+a_bool_t ssdk_is_emulation(a_uint32_t dev_id);
+a_uint32_t ssdk_emu_chip_ver_get(a_uint32_t dev_id);
+
 #ifndef BOARD_AR71XX
 #if defined(CONFIG_OF) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0))
 sw_error_t ssdk_dt_parse(ssdk_init_cfg *cfg, a_uint32_t num, a_uint32_t *dev_id);

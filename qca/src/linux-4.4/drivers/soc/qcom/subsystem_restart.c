@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2015, 2020 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,6 +37,8 @@
 
 #include <asm/current.h>
 
+#define BUF_SIZE 30
+
 #define DISABLE_SSR 0x9889deed
 /* If set to 0x9889deed, call to subsystem_restart_dev() returns immediately */
 static uint disable_restart_work;
@@ -44,6 +46,10 @@ module_param(disable_restart_work, uint, S_IRUGO | S_IWUSR);
 
 static int enable_debug;
 module_param(enable_debug, int, S_IRUGO | S_IWUSR);
+
+static struct subsys_device *desc_to_subsys(struct device *d);
+static void send_notif_to_child(struct subsys_desc *desc,
+					enum subsys_notif_type notif);
 
 /* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
 #define SHUTDOWN_ACK_MAX_LOOPS	100
@@ -64,17 +70,6 @@ enum p_subsys_state {
 	SUBSYS_RESTARTING,
 };
 
-/**
- * enum subsys_state - state of a subsystem (public)
- * @SUBSYS_OFFLINE: subsystem is offline
- * @SUBSYS_ONLINE: subsystem is online
- *
- * The 'public' side of the subsytem state, exposed to userspace.
- */
-enum subsys_state {
-	SUBSYS_OFFLINE,
-	SUBSYS_ONLINE,
-};
 
 static const char * const subsys_states[] = {
 	[SUBSYS_OFFLINE] = "OFFLINE",
@@ -250,7 +245,8 @@ static ssize_t firmware_name_store(struct device *dev,
 
 	pr_info("Changing subsys fw_name to %s\n", buf);
 	mutex_lock(&track->lock);
-	strlcpy(subsys->desc->fw_name, buf, count + 1);
+	strlcpy(subsys->desc->fw_name, buf,
+			min(count + 1, sizeof(subsys->desc->fw_name)));
 	mutex_unlock(&track->lock);
 	return orig_count;
 }
@@ -293,6 +289,13 @@ int subsys_get_restart_level(struct subsys_device *dev)
 	return dev->restart_level;
 }
 EXPORT_SYMBOL(subsys_get_restart_level);
+
+enum subsys_state subsys_get_state(struct subsys_device *subsys)
+{
+	enum subsys_state state = subsys->track.state;
+	return state;
+}
+EXPORT_SYMBOL(subsys_get_state);
 
 static void subsys_set_state(struct subsys_device *subsys,
 			     enum subsys_state state)
@@ -630,6 +633,17 @@ void *__subsystem_get(const char *name, const char *fw_name)
 		goto err_module;
 	}
 
+	/*parent must start before child*/
+	if (subsys->desc->parent) {
+		void *tmp = subsystem_get(subsys->desc->parent->name);
+
+		if (IS_ERR_OR_NULL(tmp)) {
+			pr_err("can't get %s subsystem\n",
+					subsys->desc->parent->name);
+			return tmp;
+		}
+	}
+
 	subsys_d = subsystem_get(subsys->desc->depends_on);
 	if (IS_ERR(subsys_d)) {
 		retval = subsys_d;
@@ -727,6 +741,13 @@ void subsystem_put(void *subsystem)
 		subsystem_put(subsys_d);
 		put_device(&subsys_d->dev);
 	}
+
+	if (subsys->desc->parent) {
+		struct subsys_device *subsys_p =
+			desc_to_subsys(subsys->desc->parent->dev);
+		subsystem_put(subsys_p);
+	}
+
 	module_put(subsys->owner);
 	put_device(&subsys->dev);
 	return;
@@ -734,6 +755,103 @@ err_out:
 	mutex_unlock(&track->lock);
 }
 EXPORT_SYMBOL(subsystem_put);
+
+static void update_crash_status_of_child(struct subsys_desc *desc)
+{
+	struct subsys_child *sub_child;
+
+	list_for_each_entry(sub_child, &desc->child, node) {
+		struct subsys_desc *tmp_desc =
+			(struct subsys_desc *)sub_child->handle;
+		struct subsys_device *tmp_dev =
+			desc_to_subsys(tmp_desc->dev);
+
+		if (tmp_dev &&
+				tmp_dev->track.state == SUBSYS_ONLINE) {
+			subsys_set_crash_status(tmp_dev,
+					CRASH_STATUS_ERR_FATAL);
+			tmp_dev->track.p_state = SUBSYS_CRASHED;
+		}
+	}
+}
+
+static void restart_multipd_subsystem(struct subsys_device *dev)
+{
+	struct subsys_child *sub_child;
+	struct subsys_desc *desc = dev->desc;
+	unsigned long flags;
+	struct subsys_tracking *track = &dev->track;
+
+	update_crash_status_of_child(desc);
+	/*shut down child's*/
+	list_for_each_entry(sub_child, &desc->child, node) {
+		struct subsys_desc *tmp_desc =
+			(struct subsys_desc *)sub_child->handle;
+		struct subsys_device *tmp_dev =
+			desc_to_subsys(tmp_desc->dev);
+
+		if (tmp_dev &&
+				tmp_dev->track.state == SUBSYS_ONLINE) {
+			notify_each_subsys_device(&tmp_dev, 1,
+						SUBSYS_BEFORE_SHUTDOWN, NULL);
+			for_each_subsys_device(&tmp_dev, 1, NULL,
+						subsystem_shutdown);
+			notify_each_subsys_device(&tmp_dev, 1,
+						SUBSYS_AFTER_SHUTDOWN, NULL);
+		}
+	}
+
+	/*shut down parent*/
+	for_each_subsys_device(&dev, 1, NULL, subsystem_shutdown);
+
+	/*send ramdump notif to childs as well*/
+	send_notif_to_child(desc, SUBSYS_RAMDUMP_NOTIFICATION);
+	/*Take crash dump of parent only, it consist's child dump also*/
+	notify_each_subsys_device(&dev, 1, SUBSYS_RAMDUMP_NOTIFICATION, NULL);
+
+	spin_lock_irqsave(&track->s_lock, flags);
+	track->p_state = SUBSYS_RESTARTING;
+	spin_unlock_irqrestore(&track->s_lock, flags);
+
+	for_each_subsys_device(&dev, 1, NULL, subsystem_ramdump);
+
+	/*power on parent*/
+	notify_each_subsys_device(&dev, 1, SUBSYS_BEFORE_POWERUP, NULL);
+	for_each_subsys_device(&dev, 1, NULL, subsystem_powerup);
+
+	if (dev->track.state != SUBSYS_ONLINE) {
+		pr_info("[%s:%s:%d]: Restart sequence for %s failed.\n",
+			__func__, current->comm, current->pid, desc->name);
+		return;
+	}
+	notify_each_subsys_device(&dev, 1, SUBSYS_AFTER_POWERUP, NULL);
+
+	/*Power on child*/
+	list_for_each_entry(sub_child, &desc->child, node) {
+		struct subsys_desc *tmp_desc =
+			(struct subsys_desc *)sub_child->handle;
+		struct subsys_device *tmp_dev =
+			desc_to_subsys(tmp_desc->dev);
+
+		if (tmp_dev &&
+				tmp_dev->track.p_state == SUBSYS_CRASHED) {
+			notify_each_subsys_device(&tmp_dev, 1,
+						SUBSYS_BEFORE_POWERUP, NULL);
+			for_each_subsys_device(&tmp_dev, 1, NULL,
+						subsystem_powerup);
+			if (tmp_dev->track.state != SUBSYS_ONLINE) {
+				pr_info("Restart sequence for %s failed.\n",
+							tmp_desc->name);
+				continue;
+			}
+			notify_each_subsys_device(&tmp_dev, 1,
+						SUBSYS_AFTER_POWERUP, NULL);
+			tmp_dev->track.p_state = SUBSYS_NORMAL;
+		}
+	}
+	pr_info("[%s:%s:%d]: Restart sequence for %s completed.\n",
+			__func__, current->comm, current->pid, desc->name);
+}
 
 static void subsystem_restart_wq_func(struct work_struct *work)
 {
@@ -745,6 +863,8 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	struct subsys_tracking *track;
 	unsigned count;
 	unsigned long flags;
+	bool is_parent = false;
+	struct subsys_child *sub_child;
 
 	/*
 	 * It's OK to not take the registration lock at this point.
@@ -779,6 +899,18 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 
 	pr_debug("[%s:%d]: Starting restart sequence for %s\n",
 			current->comm, current->pid, desc->name);
+
+	/*check whether it's a parent*/
+	list_for_each_entry(sub_child, &desc->child, node) {
+		is_parent = true;
+		break;
+	}
+
+	if (is_parent) {
+		restart_multipd_subsystem(dev);
+		goto unlock;
+	}
+
 	notify_each_subsys_device(list, count, SUBSYS_BEFORE_SHUTDOWN, NULL);
 	for_each_subsys_device(list, count, NULL, subsystem_shutdown);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_SHUTDOWN, NULL);
@@ -807,7 +939,7 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 		pr_info("[%s:%d]: Restart sequence for %s completed.\n",
 			current->comm, current->pid, desc->name);
 	}
-
+unlock:
 	mutex_unlock(&soc_order_reg_lock);
 	mutex_unlock(&track->lock);
 
@@ -816,6 +948,22 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 		track->p_state = SUBSYS_NORMAL;
 		__pm_relax(&dev->ssr_wlock);
 		spin_unlock_irqrestore(&track->s_lock, flags);
+	}
+}
+
+static void send_notif_to_child(struct subsys_desc *desc,
+					enum subsys_notif_type notif)
+{
+	struct subsys_child *sub_child;
+
+	list_for_each_entry(sub_child, &desc->child, node) {
+		struct subsys_desc *tmp_desc =
+			(struct subsys_desc *)sub_child->handle;
+		struct subsys_device *tmp_dev =
+			desc_to_subsys(tmp_desc->dev);
+
+		if (tmp_dev)
+			notify_each_subsys_device(&tmp_dev, 1, notif, NULL);
 	}
 }
 
@@ -850,7 +998,12 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 					dev->track.state == SUBSYS_ONLINE) {
 		if (track->p_state != SUBSYS_RESTARTING) {
 			track->p_state = SUBSYS_CRASHED;
-
+			/*
+			 * Send fatal notification to userpd(s) if rootpd
+			 * crashed, irrespective of userpd status.
+			 */
+			send_notif_to_child(desc,
+					SUBSYS_PREPARE_FOR_FATAL_SHUTDOWN);
 			notify_each_subsys_device(list, count,
 				SUBSYS_PREPARE_FOR_FATAL_SHUTDOWN, NULL);
 			__pm_stay_awake(&dev->ssr_wlock);
@@ -907,8 +1060,9 @@ int subsystem_restart_dev(struct subsys_device *dev)
 	pr_info("Restart sequence requested for %s, restart_level = %s.\n",
 		name, restart_levels[dev->restart_level]);
 
-	if (WARN(disable_restart_work == DISABLE_SSR,
-		"subsys-restart: Ignoring restart request for %s.\n", name)) {
+	if (disable_restart_work == DISABLE_SSR) {
+		pr_warn("subsys-restart: Ignoring restart request for %s.\n",
+									name);
 		return 0;
 	}
 
@@ -1231,7 +1385,9 @@ static int __get_irq(struct subsys_desc *desc, const char *prop,
 {
 	int ret, gpiol, irql;
 
-	if (of_property_read_bool(desc->dev->of_node, "qca,extended-intc")) {
+	if (of_property_read_bool(desc->dev->of_node, "qca,extended-intc") ||
+		of_property_read_bool(desc->dev->parent->of_node,
+					"qca,extended-intc")) {
 		struct platform_device *pdev = container_of(desc->dev,
 				struct platform_device, dev);
 
@@ -1275,12 +1431,12 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	struct platform_device *pdev = container_of(desc->dev,
 					struct platform_device, dev);
 
-	ret = __get_irq(desc, "qcom,gpio-err-fatal", &desc->err_fatal_irq,
+	ret = __get_irq(desc, "fatal", &desc->err_fatal_irq,
 							&desc->err_fatal_gpio);
 	if (ret && ret != -ENOENT)
 		return ret;
 
-	ret = __get_irq(desc, "qcom,gpio-stop-ack", &desc->stop_ack_irq, NULL);
+	ret = __get_irq(desc, "stop-ack", &desc->stop_ack_irq, NULL);
 	if (ret && ret != -ENOENT)
 		return ret;
 
@@ -1298,13 +1454,17 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	if (ret && ret != -ENOENT)
 		return ret;
 
-	if (of_property_read_bool(desc->dev->of_node, "qca,extended-intc"))
-		ret = platform_get_irq_byname(pdev, "wdog");
-	else
-		ret = platform_get_irq(pdev, 0); /* There is only one irq */
+	if (!desc->parent) {
+		if (of_property_read_bool(desc->dev->of_node,
+						"qca,extended-intc"))
+			ret = platform_get_irq_byname(pdev, "wdog");
+		else
+			/* There is only one irq */
+			ret = platform_get_irq(pdev, 0);
 
-	if (ret > 0)
-		desc->wdog_bite_irq = ret;
+		if (ret > 0)
+			desc->wdog_bite_irq = ret;
+	}
 
 	order = ssr_parse_restart_orders(desc);
 	if (IS_ERR(order)) {
@@ -1320,12 +1480,24 @@ static int subsys_setup_irqs(struct subsys_device *subsys)
 {
 	struct subsys_desc *desc = subsys->desc;
 	int ret;
+	char *err_fatal_int;
+	char *stop_ack_int;
 
 	if (desc->err_fatal_irq && desc->err_fatal_handler) {
+		if (!desc->parent)
+			err_fatal_int = "err_fatal_interrupt";
+		else {
+			err_fatal_int = devm_kzalloc(desc->dev, BUF_SIZE,
+								GFP_KERNEL);
+			if (!err_fatal_int)
+				return -ENOMEM;
+			strlcpy(err_fatal_int, desc->name, BUF_SIZE);
+			strlcat(err_fatal_int, "_fatal", BUF_SIZE);
+		}
 		ret = devm_request_threaded_irq(desc->dev, desc->err_fatal_irq,
 				NULL, desc->err_fatal_handler,
 				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-				"err_fatal_interrupt", desc);
+				err_fatal_int, desc);
 		if (ret < 0) {
 			dev_err(desc->dev, "[%s]: Unable to register error fatal IRQ handler!: %d\n",
 				desc->name, ret);
@@ -1334,10 +1506,20 @@ static int subsys_setup_irqs(struct subsys_device *subsys)
 	}
 
 	if (desc->stop_ack_irq && desc->stop_ack_handler) {
+		if (!desc->parent)
+			stop_ack_int = "stop_ack_interrupt";
+		else {
+			stop_ack_int = devm_kzalloc(desc->dev, BUF_SIZE,
+								GFP_KERNEL);
+			if (!stop_ack_int)
+				return -ENOMEM;
+			strlcpy(stop_ack_int, desc->name, BUF_SIZE);
+			strlcat(stop_ack_int, "_stop_ack", BUF_SIZE);
+		}
 		ret = devm_request_threaded_irq(desc->dev, desc->stop_ack_irq,
 				NULL, desc->stop_ack_handler,
 				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-				"stop_ack_interrupt", desc);
+				stop_ack_int, desc);
 		if (ret < 0) {
 			dev_err(desc->dev, "[%s]: Unable to register stop ack handler!: %d\n",
 				desc->name, ret);
@@ -1345,7 +1527,7 @@ static int subsys_setup_irqs(struct subsys_device *subsys)
 		}
 	}
 
-	if (desc->wdog_bite_irq && desc->wdog_bite_handler) {
+	if (desc->wdog_bite_irq && desc->wdog_bite_handler && !desc->parent) {
 		ret = devm_request_threaded_irq(desc->dev, desc->wdog_bite_irq,
 				NULL, desc->wdog_bite_handler,
 				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
@@ -1372,6 +1554,17 @@ static void subsys_free_irqs(struct subsys_device *subsys)
 		devm_free_irq(desc->dev, desc->wdog_bite_irq, desc);
 }
 
+void subsys_add_child(struct subsys_desc *desc, struct subsys_child *child)
+{
+	list_add(&child->node, &desc->child);
+}
+EXPORT_SYMBOL(subsys_add_child);
+
+void subsys_remove_child(struct subsys_desc *desc, struct subsys_child *child)
+{
+	list_del(&child->node);
+}
+EXPORT_SYMBOL(subsys_remove_child);
 struct subsys_device *subsys_register(struct subsys_desc *desc)
 {
 	struct subsys_device *subsys;
@@ -1453,6 +1646,7 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 	INIT_LIST_HEAD(&subsys->list);
 	list_add_tail(&subsys->list, &subsys_list);
 	mutex_unlock(&subsys_list_lock);
+	INIT_LIST_HEAD(&subsys->desc->child);
 
 	return subsys;
 

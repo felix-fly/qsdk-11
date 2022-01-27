@@ -264,3 +264,13 @@ config ACPI_CPPC_CPUFREQ
 	  support for its operation.
 
 	  If in doubt, say N.
+
+config ARM_QTI_IPQ60XX_CPUFREQ
+	tristate "CPUFreq driver support for Qualcomm technologies Inc IPQ60XX"
+	depends on ARCH_QCOM
+	select PM_OPP
+	default y
+	help
+	  This adds cpufreq driver support for Qualcomm technologies Inc IPQ60XX SoCs.
+
+	  If in doubt, say N.

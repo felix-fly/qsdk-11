@@ -8,6 +8,8 @@ snd-soc-ipq-codec-objs := ipq-codec.o
 snd-soc-ipq-pcm-raw-objs := ipq-pcm-raw.o ipq-pcm-raw-lb-test.o
 snd-soc-ipq806x-pcm-raw-objs := ipq806x-pcm-raw.o ipq806x-pcm-raw-lb-test.o
 snd-soc-ipq806x-lpaif-objs := ipq806x-lpaif.o
+snd-soc-ipq-lpass-objs := ipq-lpass.o
+snd-soc-ipq-lpass-pcm-raw-objs := ipq-lpass-tdm-pcm.o ipq-pcm-raw-lb-test.o
 
 obj-$(CONFIG_SND_SOC_IPQ) += ipq.o
 obj-$(CONFIG_SND_SOC_IPQ_ADSS) += ipq-adss.o
@@ -18,6 +20,11 @@ obj-$(CONFIG_SND_SOC_IPQ_PCM_I2S) += snd-soc-ipq-pcm-i2s.o
 obj-$(CONFIG_SND_SOC_IPQ_CODEC) += snd-soc-ipq-codec.o
 obj-$(CONFIG_SND_SOC_IPQ_PCM_SPDIF) += snd-soc-ipq-pcm-spdif.o
 obj-$(CONFIG_SND_SOC_IPQ_PCM_TDM) += snd-soc-ipq-pcm-tdm.o
-obj-$(CONFIG_SND_SOC_IPQ_PCM_RAW) += snd-soc-ipq-pcm-raw.o
 obj-$(CONFIG_SND_SOC_IPQ806X_PCM_RAW) += snd-soc-ipq806x-pcm-raw.o
 obj-$(CONFIG_SND_SOC_IPQ806X_LPAIF) += snd-soc-ipq806x-lpaif.o
+obj-$(CONFIG_SND_SOC_IPQ_LPASS) += snd-soc-ipq-lpass.o
+ifdef CONFIG_SND_SOC_IPQ_LPASS_PCM_RAW
+obj-$(CONFIG_SND_SOC_IPQ_LPASS_PCM_RAW) += snd-soc-ipq-lpass-pcm-raw.o
+else
+obj-$(CONFIG_SND_SOC_IPQ_PCM_RAW) += snd-soc-ipq-pcm-raw.o
+endif

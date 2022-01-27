@@ -28,24 +28,28 @@ class Slabinfo_summary(RamParser):
                         start,  slab_lru_offset,
                         max_page):
         page = self.ramdump.read_word(start)
-        if page == 0:
-            return
-        seen = []
         totalfree = 0
+        if page == 0:
+            return totalfree
+        seen = []
         mapcount = 0
         total_objects = 0
         inuse = 0
         while page != start:
-            if page is None:
-                return
+            if page is None or page == 0:
+                return totalfree
             if page in seen:
-                return
+                return totalfree
             if page > max_page:
-                return
+                return totalfree
             seen.append(page)
             page = page - slab_lru_offset
-            mapcount = self.ramdump.read_structure_field(
-                        page, 'struct page', '_mapcount')
+            if (self.ramdump.kernel_version <= (4, 14)):
+                mapcount = self.ramdump.read_structure_field(
+                                                        page, 'struct page', '_mapcount')
+            else:
+                mapcount = self.ramdump.read_structure_field(
+                                                        page, 'struct page', 'counters')
             inuse = mapcount & 0x0000FFFF
             total_objects = (mapcount >> 16) & 0x00007FFF
             freeobj = total_objects - inuse
@@ -57,9 +61,7 @@ class Slabinfo_summary(RamParser):
     def print_slab_summary(self, slab_out):
         total_freeobjects = 0
         original_slab = self.ramdump.addr_lookup('slab_caches')
-        cpu_present_bits_addr = self.ramdump.addr_lookup('cpu_present_bits')
-        cpu_present_bits = self.ramdump.read_word(cpu_present_bits_addr)
-        cpus = bin(cpu_present_bits).count('1')
+        cpus = self.ramdump.get_num_cpus()
         slab_list_offset = self.ramdump.field_offset(
             'struct kmem_cache', 'list')
         slab_name_offset = self.ramdump.field_offset(
@@ -138,8 +140,12 @@ class Slabinfo_summary(RamParser):
                                 num_slabs, slab_size))
 
     def parse(self):
-        if not self.ramdump.is_config_defined('CONFIG_SLUB_DEBUG'):
+        if len(self.ramdump.config) != 0 and not self.ramdump.is_config_defined('CONFIG_SLUB_DEBUG'):
             print_out_str ("slub_debug_on is not enabled")
+            return
+        cmdline = self.ramdump.get_command_line()
+        if cmdline.find("slub_debug=FZPU") == -1:
+            print_out_str ("slub_debug=FZPU is not present in command line. Boot args is not properly set")
             return
         slab_out = self.ramdump.open_file('slabsummary.txt')
         self.print_slab_summary(slab_out)

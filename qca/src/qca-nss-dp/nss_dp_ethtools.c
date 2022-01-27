@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -16,7 +16,10 @@
  **************************************************************************
  */
 
+#include <linux/version.h>
 #include <linux/ethtool.h>
+#include <linux/phy.h>
+#include <linux/mii.h>
 #include "nss_dp_dev.h"
 #include "fal/fal_port_ctrl.h"
 
@@ -53,6 +56,7 @@ static void nss_dp_get_strings(struct net_device *netdev, uint32_t stringset,
 					  data);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 /*
  * nss_dp_get_settings()
  */
@@ -83,6 +87,7 @@ static int32_t nss_dp_set_settings(struct net_device *netdev,
 
 	return phy_ethtool_sset(dp_priv->phydev, cmd);
 }
+#endif
 
 /*
  * nss_dp_get_pauseparam()
@@ -100,10 +105,44 @@ static void nss_dp_get_pauseparam(struct net_device *netdev,
 /*
  * nss_dp_set_pauseparam()
  */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
+static int32_t nss_dp_set_pauseparam(struct net_device *netdev,
+				     struct ethtool_pauseparam *pause)
+{
+         struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(netdev);
+
+         /* set flow control settings */
+         dp_priv->pause = 0;
+         if (pause->rx_pause)
+                 dp_priv->pause |= FLOW_CTRL_RX;
+
+         if (pause->tx_pause)
+                 dp_priv->pause |= FLOW_CTRL_TX;
+
+         if (!dp_priv->phydev)
+                 return 0;
+
+         /* Update flow control advertisment */
+         dp_priv->phydev->advertising &=
+                                 ~(ADVERTISED_Pause | ADVERTISED_Asym_Pause);
+
+         if (pause->rx_pause)
+                 dp_priv->phydev->advertising |=
+                                 (ADVERTISED_Pause | ADVERTISED_Asym_Pause);
+
+         if (pause->tx_pause)
+                 dp_priv->phydev->advertising |= ADVERTISED_Asym_Pause;
+
+         genphy_config_aneg(dp_priv->phydev);
+
+         return 0;
+}
+#else
 static int32_t nss_dp_set_pauseparam(struct net_device *netdev,
 				     struct ethtool_pauseparam *pause)
 {
 	struct nss_dp_dev *dp_priv = (struct nss_dp_dev *)netdev_priv(netdev);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising) = { 0, };
 
 	/* set flow control settings */
 	dp_priv->pause = 0;
@@ -117,20 +156,25 @@ static int32_t nss_dp_set_pauseparam(struct net_device *netdev,
 		return 0;
 
 	/* Update flow control advertisment */
-	dp_priv->phydev->advertising &=
-				~(ADVERTISED_Pause | ADVERTISED_Asym_Pause);
+	linkmode_copy(advertising, dp_priv->phydev->advertising);
 
-	if (pause->rx_pause)
-		dp_priv->phydev->advertising |=
-				(ADVERTISED_Pause | ADVERTISED_Asym_Pause);
+	linkmode_clear_bit(ETHTOOL_LINK_MODE_Pause_BIT, advertising);
+	linkmode_clear_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT, advertising);
+
+	if (pause->rx_pause) {
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Pause_BIT, advertising);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT, advertising);
+	}
 
 	if (pause->tx_pause)
-		dp_priv->phydev->advertising |= ADVERTISED_Asym_Pause;
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT, advertising);
 
+	linkmode_copy(dp_priv->phydev->advertising, advertising);
 	genphy_config_aneg(dp_priv->phydev);
 
 	return 0;
 }
+#endif
 
 /*
  * nss_dp_fal_to_ethtool_linkmode_xlate()
@@ -311,8 +355,13 @@ struct ethtool_ops nss_dp_ethtool_ops = {
 	.get_sset_count = &nss_dp_get_strset_count,
 	.get_ethtool_stats = &nss_dp_get_ethtool_stats,
 	.get_link = &ethtool_op_get_link,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 	.get_settings = &nss_dp_get_settings,
 	.set_settings = &nss_dp_set_settings,
+#else
+	.get_link_ksettings = phy_ethtool_get_link_ksettings,
+	.set_link_ksettings = phy_ethtool_set_link_ksettings,
+#endif
 	.get_pauseparam = &nss_dp_get_pauseparam,
 	.set_pauseparam = &nss_dp_set_pauseparam,
 	.get_eee = &nss_dp_get_eee,

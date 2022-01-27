@@ -122,6 +122,9 @@
 #define CONFIG_TZ_END_ADDR		0x4AA00000
 #define CONFIG_SYS_SDRAM_END	((long long)CONFIG_SYS_SDRAM_BASE + gd->ram_size)
 
+#define CONFIG_QCA_UBOOT_OFFSET		0xA100000
+#define CONFIG_UBOOT_END_ADDR		0x4A500000
+
 #ifndef __ASSEMBLY__
 #include <compiler.h>
 extern loff_t board_env_offset;
@@ -345,7 +348,6 @@ extern loff_t board_env_size;
  * Cache flush and invalidation based on L1 cache, so the cache line
  * size is configured to 64 */
 #define CONFIG_SYS_CACHELINE_SIZE	64
-#define CONFIG_CMD_CACHE
 /*#define CONFIG_SYS_DCACHE_OFF*/
 
 /* Enabling this flag will report any L2 errors.
@@ -361,5 +363,7 @@ extern loff_t board_env_size;
 #define CONFIG_ARMV7_PSCI
 #define CONFIG_IPQ_ELF_AUTH
 #define IPQ_UBI_VOL_WRITE_SUPPORT
+#define CONFIG_IPQ_TZT
+#define CONFIG_IPQ_FDT_FIXUP
 
 #endif /* _IPQ6018_H */

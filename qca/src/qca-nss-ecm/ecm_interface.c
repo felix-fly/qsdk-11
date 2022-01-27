@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2014-2019 The Linux Foundation.  All rights reserved.
+ * Copyright (c) 2014-2021 The Linux Foundation.  All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -31,6 +31,7 @@
 #include <net/ip_fib.h>
 #include <net/ip.h>
 #include <net/tcp.h>
+#include <net/addrconf.h>
 #include <asm/unaligned.h>
 #include <asm/uaccess.h>	/* for put_user */
 #include <linux/inet.h>
@@ -43,17 +44,14 @@
 #include <linux/rtnetlink.h>
 #include <linux/socket.h>
 #include <linux/wireless.h>
+#include <net/gre.h>
 
 #if defined(ECM_DB_XREF_ENABLE) && defined(ECM_BAND_STEERING_ENABLE)
 #include <linux/if_bridge.h>
 #endif
 #include <linux/inetdevice.h>
 #if defined(ECM_INTERFACE_TUNIPIP6_ENABLE) || defined(ECM_INTERFACE_SIT_ENABLE)
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 9, 0))
-#include <net/ipip.h>
-#else
 #include <net/ip_tunnels.h>
-#endif
 #endif
 #include <net/ip6_tunnel.h>
 #include <net/addrconf.h>
@@ -66,7 +64,6 @@
 #include <net/netfilter/nf_conntrack_acct.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <linux/netfilter_ipv6/ip6_tables.h>
@@ -88,6 +85,15 @@
 #ifdef ECM_INTERFACE_MAP_T_ENABLE
 #include <nat46-core.h>
 #endif
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+#include <net/vxlan.h>
+#endif
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+#include <ovsmgr.h>
+#endif
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+#include <linux/if_macvlan.h>
+#endif
 
 /*
  * Debug output levels
@@ -107,8 +113,8 @@
 #include "ecm_db_types.h"
 #include "ecm_state.h"
 #include "ecm_tracker.h"
-#include "ecm_classifier.h"
 #include "ecm_front_end_types.h"
+#include "ecm_classifier.h"
 #include "ecm_tracker_datagram.h"
 #include "ecm_tracker_udp.h"
 #include "ecm_tracker_tcp.h"
@@ -133,13 +139,6 @@ struct ecm_interface_wifi_event {
 
 static struct ecm_interface_wifi_event __ewn;
 
-#ifdef ECM_IPV6_ENABLE
-/*
- * TODO: Remove once the Linux image and headers get propogated.
- */
-struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr, int strict);
-#endif
-
 #ifdef ECM_INTERFACE_IPSEC_GLUE_LAYER_SUPPORT_ENABLE
 /*
  * Get ipsecmgr tunnel netdevice method
@@ -163,6 +162,15 @@ static bool ecm_interface_terminate_pending = false;		/* True when the user has 
  *	whether it matches with the rule's source interface or not.
  */
 int ecm_interface_src_check;
+
+#if defined(CONFIG_NET_CLS_ACT) && defined(ECM_CLASSIFIER_DSCP_IGS)
+/*
+ * IGS enabled flag.
+ *	If it is enabled, the acceleration engine will deny the acceleration for the new
+ *	connnection, if the egress interface has ingress qdisc enabled over it.
+ */
+int ecm_interface_igs_enabled;
+#endif
 
 static struct ctl_table_header *ecm_interface_ctl_table_header;	/* Sysctl table header */
 
@@ -238,13 +246,45 @@ static void ecm_interface_ovpn_update_route(struct net_device *dev, uint32_t *fr
 #endif
 
 /*
+ * ecm_interface_get_and_hold_ipsec_tun_netdev()
+ * 	Returns the nss tunnel interface net_dev
+ */
+struct net_device *ecm_interface_get_and_hold_ipsec_tun_netdev(struct net_device *dev, struct sk_buff *skb, int32_t *interface_type)
+{
+	struct net_device *ipsec_dev = NULL;
+#ifdef ECM_INTERFACE_IPSEC_GLUE_LAYER_SUPPORT_ENABLE
+	spin_lock_bh(&ecm_interface_lock);
+	if (!ecm_interface_ipsec_cb.tunnel_get_and_hold) {
+		spin_unlock_bh(&ecm_interface_lock);
+		DEBUG_WARN("IPSec glue module is not loaded yet\n");
+		return NULL;
+	}
+
+	ipsec_dev = ecm_interface_ipsec_cb.tunnel_get_and_hold(dev, skb, interface_type);
+	spin_unlock_bh(&ecm_interface_lock);
+#endif
+	return ipsec_dev;
+}
+
+/*
  * ecm_interface_get_and_hold_dev_master()
  *	Returns the master device of a net device if any.
  */
 struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev)
 {
 	struct net_device *master;
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,6,0))
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+	if (ecm_interface_is_ovs_bridge_port(dev)) {
+		master = ovsmgr_dev_get_master(dev);
+		if (!master) {
+			return NULL;
+		}
+
+		dev_hold(master);
+		return master;
+	}
+#endif
 	rcu_read_lock();
 	master = netdev_master_upper_dev_get_rcu(dev);
 	if (!master) {
@@ -253,13 +293,7 @@ struct net_device *ecm_interface_get_and_hold_dev_master(struct net_device *dev)
 	}
 	dev_hold(master);
 	rcu_read_unlock();
-#else
-	master = dev->master;
-	if (!master) {
-		return NULL;
-	}
-	dev_hold(master);
-#endif
+
 	return master;
 }
 EXPORT_SYMBOL(ecm_interface_get_and_hold_dev_master);
@@ -270,11 +304,7 @@ EXPORT_SYMBOL(ecm_interface_get_and_hold_dev_master);
  */
 static inline struct net_device *ecm_interface_vlan_real_dev(struct net_device *vlan_dev)
 {
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 6, 0))
 	return vlan_dev_next_dev(vlan_dev);
-#else
-	return vlan_dev_real_dev(vlan_dev);
-#endif
 }
 
 /*
@@ -355,7 +385,7 @@ struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_loc
 	dev = ecm_interface_dev_find_by_local_addr(addr);
 	if (dev) {
 		 *from_local_addr = true;
-		DEBUG_TRACE("addr: %s is local: %p (%s)\n", addr_str, dev, dev->name);
+		DEBUG_TRACE("addr: %s is local: %px (%s)\n", addr_str, dev, dev->name);
 		return dev;
 	}
 
@@ -375,7 +405,7 @@ struct net_device *ecm_interface_dev_find_by_addr(ip_addr_t addr, bool *from_loc
 	dev = dst->dev;
 	dev_hold(dev);
 	ecm_interface_route_release(&ecm_rt);
-	DEBUG_TRACE("dest_addr: %s uses dev: %p(%s)\n", addr_str, dev, dev->name);
+	DEBUG_TRACE("dest_addr: %s uses dev: %px(%s)\n", addr_str, dev, dev->name);
 	return dev;
 }
 EXPORT_SYMBOL(ecm_interface_dev_find_by_addr);
@@ -420,14 +450,8 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 
 	rcu_read_lock();
 	dst = ecm_rt.dst;
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-	neigh = dst_get_neighbour_noref(dst);
-	if (neigh) {
-		neigh_hold(neigh);
-	}
-#else
+
 	neigh = dst_neigh_lookup(dst, &daddr);
-#endif
 	if (!neigh) {
 		neigh = neigh_lookup(&nd_tbl, &daddr, dst->dev);
 	}
@@ -459,9 +483,9 @@ static bool ecm_interface_mac_addr_get_ipv6(ip_addr_t addr, uint8_t *mac_addr, b
 	if (neigh->dev->flags & IFF_LOOPBACK) {
 		// GGG TODO Create an equivalent logic to that for ipv4, maybe need to create an ip6_dev_find()?
 		DEBUG_TRACE("local address " ECM_IP_ADDR_OCTAL_FMT " (found loopback)\n", ECM_IP_ADDR_TO_OCTAL(addr));
-		memset(mac_addr, 0, 6);
+		eth_zero_addr(mac_addr);
 	} else {
-		memcpy(mac_addr, neigh->ha, 6);
+		ether_addr_copy(mac_addr, neigh->ha);
 	}
 	rcu_read_unlock();
 	neigh_release(neigh);
@@ -528,16 +552,15 @@ static bool ecm_interface_find_gateway_ipv4(ip_addr_t addr, ip_addr_t gw_addr)
 	 * Is this destination reachable via a gateway?
 	 */
 	rt = ecm_rt.rt.rtv4;
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 6, 0))
-	if (!(rt->rt_dst != rt->rt_gateway) && !(rt->rt_flags & RTF_GATEWAY)) {
-#else
 	if (!rt->rt_uses_gateway && !(rt->rt_flags & RTF_GATEWAY)) {
-#endif
 		ecm_interface_route_release(&ecm_rt);
 		return false;
 	}
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0))
 	ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gateway)
+#else
+	ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gw4)
+#endif
 	ecm_interface_route_release(&ecm_rt);
 	return true;
 }
@@ -590,13 +613,13 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	 * Is this destination on link or off-link via a gateway?
 	 */
 	rt = ecm_rt.rt.rtv4;
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-	if ((rt->rt_dst != rt->rt_gateway) || (rt->rt_flags & RTF_GATEWAY)) {
-#else
 	if (rt->rt_uses_gateway || (rt->rt_flags & RTF_GATEWAY)) {
-#endif
 		*on_link = false;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0))
 		ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gateway)
+#else
+		ECM_NIN4_ADDR_TO_IP_ADDR(gw_addr, rt->rt_gw4)
+#endif
 	} else {
 		*on_link = true;
 	}
@@ -606,14 +629,8 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	 */
 	rcu_read_lock();
 	dst = ecm_rt.dst;
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-	neigh = dst_get_neighbour_noref(dst);
-	if (neigh) {
-		neigh_hold(neigh);
-	}
-#else
+
 	neigh = dst_neigh_lookup(dst, &ipv4_addr);
-#endif
 	if (!neigh) {
 		neigh = neigh_lookup(&arp_tbl, &ipv4_addr, dst->dev);
 	}
@@ -645,7 +662,7 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 	if (neigh->dev->type == ARPHRD_LOOPBACK) {
 		struct net_device *dev;
 
-		DEBUG_TRACE("%pI4 finds loopback device, dev: %p (%s)\n", &ipv4_addr, neigh->dev, neigh->dev->name);
+		DEBUG_TRACE("%pI4 finds loopback device, dev: %px (%s)\n", &ipv4_addr, neigh->dev, neigh->dev->name);
 		rcu_read_unlock();
 		neigh_release(neigh);
 		ecm_interface_route_release(&ecm_rt);
@@ -659,19 +676,19 @@ static bool ecm_interface_mac_addr_get_ipv4(ip_addr_t addr, uint8_t *mac_addr, b
 			return false;
 		}
 		memcpy(mac_addr, dev->dev_addr, (size_t)dev->addr_len);
-		DEBUG_TRACE("is local addr: %pI4, mac: %pM, dev ifindex: %d, dev: %p (%s), dev_type: %d\n",
+		DEBUG_TRACE("is local addr: %pI4, mac: %pM, dev ifindex: %d, dev: %px (%s), dev_type: %d\n",
 				&ipv4_addr, mac_addr, dev->ifindex, dev, dev->name, dev->type);
 		dev_put(dev);
 		return true;
 	}
 
 	if (!(neigh->dev->flags & IFF_NOARP)) {
-		memcpy(mac_addr, neigh->ha, (size_t)neigh->dev->addr_len);
+		ether_addr_copy(mac_addr, neigh->ha);
 	} else {
-		DEBUG_TRACE("non-arp device: %p (%s, type: %d) to reach %pI4\n", neigh->dev, neigh->dev->name, neigh->dev->type, &ipv4_addr);
-		memset(mac_addr, 0, 6);
+		DEBUG_TRACE("non-arp device: %px (%s, type: %d) to reach %pI4\n", neigh->dev, neigh->dev->name, neigh->dev->type, &ipv4_addr);
+		eth_zero_addr(mac_addr);
 	}
-	DEBUG_TRACE("addr: %pI4, mac: %pM, iif: %d, neigh dev ifindex: %d, dev: %p (%s), dev_type: %d\n",
+	DEBUG_TRACE("addr: %pI4, mac: %pM, iif: %d, neigh dev ifindex: %d, dev: %px (%s), dev_type: %d\n",
 			&ipv4_addr, mac_addr, rt->rt_iif, neigh->dev->ifindex, neigh->dev, neigh->dev->name, neigh->dev->type);
 
 	rcu_read_unlock();
@@ -892,7 +909,11 @@ bool ecm_interface_multicast_check_for_br_dev(uint32_t dest_if[], uint8_t max_if
 			continue;
 		}
 
-		if (ecm_front_end_is_bridge_device(br_dev)) {
+		if (ecm_front_end_is_bridge_device(br_dev)
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+			|| ecm_front_end_is_ovs_bridge_device(br_dev)
+#endif
+				) {
 			dev_put(br_dev);
 			return true;
 		}
@@ -901,6 +922,37 @@ bool ecm_interface_multicast_check_for_br_dev(uint32_t dest_if[], uint8_t max_if
 	return false;
 }
 EXPORT_SYMBOL(ecm_interface_multicast_check_for_br_dev);
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+/*
+ * ecm_interface_multicast_check_for_ovs_br_dev()
+ * 	Check if OVS bridge dev exists in given list of interfaces.
+ */
+bool ecm_interface_multicast_check_for_ovs_br_dev(uint32_t dest_if[], uint8_t max_if)
+{
+	int i;
+
+	for (i = 0; i < max_if; i++) {
+		struct net_device *br_dev;
+
+		br_dev = dev_get_by_index(&init_net, dest_if[i]);
+		if (!br_dev) {
+			/*
+			 * Interface got deleted; but is yet to be updated in MFC table
+			 */
+			DEBUG_WARN("Could not find a valid netdev for interface: %d\n", dest_if[i]);
+			continue;
+		}
+
+		if (ecm_front_end_is_ovs_bridge_device(br_dev)) {
+			dev_put(br_dev);
+			return true;
+		}
+		dev_put(br_dev);
+	}
+	return false;
+}
+#endif
 
 /*
  * ecm_interface_multicast_is_iface_type()
@@ -936,6 +988,39 @@ bool ecm_interface_multicast_is_iface_type(int32_t mc_if_index[], int32_t max_if
 }
 
 /*
+ * ecm_interface_multicast_filter_src_interface()
+ * 	Filter the source interface from the list.
+ */
+int32_t ecm_interface_multicast_filter_src_interface(struct ecm_db_connection_instance *ci, uint32_t *mc_dst_if_index)
+{
+	struct ecm_db_iface_instance *ii;
+	struct ecm_db_iface_instance *from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX];
+	ecm_db_iface_type_t ii_type;
+	int32_t from_ifaces_first;
+	int32_t from_iface_identifier;
+	int32_t if_index = ECM_DB_IFACE_HEIRARCHY_MAX;
+
+	/*
+	 * Get the interface lists of the connection, we must have at least one interface in the list to continue
+	 */
+	from_ifaces_first = ecm_db_connection_interfaces_get_and_ref(ci, from_ifaces, ECM_DB_OBJ_DIR_FROM);
+	if (from_ifaces_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+		return if_index;
+	}
+
+	ii = from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 1];
+	ii_type = ecm_db_iface_type_get(ii);
+	if ((ii_type == ECM_DB_IFACE_TYPE_BRIDGE) || (ii_type == ECM_DB_IFACE_TYPE_OVS_BRIDGE)) {
+		ii = from_ifaces[ECM_DB_IFACE_HEIRARCHY_MAX - 2];
+	}
+
+	from_iface_identifier = ecm_db_iface_interface_identifier_get(ii);
+	if_index = ecm_interface_multicast_check_for_src_ifindex(mc_dst_if_index, ECM_DB_IFACE_HEIRARCHY_MAX, from_iface_identifier);
+	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
+	return if_index;
+}
+
+/*
  * ecm_interface_multicast_check_for_src_if_index()
  * 	Find if a source netdev ifindex is matching with list of
  * 	multicast destination netdev ifindex. If find a match then
@@ -964,6 +1049,44 @@ int32_t ecm_interface_multicast_check_for_src_ifindex(int32_t mc_if_index[], int
 EXPORT_SYMBOL(ecm_interface_multicast_check_for_src_ifindex);
 #endif
 
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+/*
+ * ecm_interface_vxlan_type_get()
+ *	Function to get VxLAN interface type i.e. inner/outer.
+ *	Returns 0 for outer and 1 for inner.
+ */
+uint32_t ecm_interface_vxlan_type_get(struct sk_buff *skb)
+{
+	ip_addr_t saddr;
+	struct net_device *local_dev;
+
+	if (!skb) {
+		return -1;
+	}
+
+	switch (ntohs(skb->protocol)) {
+	case ETH_P_IP:
+		ECM_NIN4_ADDR_TO_IP_ADDR(saddr, ip_hdr(skb)->saddr);
+		break;
+	case ETH_P_IPV6:
+		ECM_NIN6_ADDR_TO_IP_ADDR(saddr, ipv6_hdr(skb)->saddr);
+		break;
+	default:
+		DEBUG_WARN("%px: Unknown skb protocol.\n", skb);
+		return -1;
+	}
+
+	local_dev = ecm_interface_dev_find_by_local_addr(saddr);
+	if (local_dev) {
+		dev_put(local_dev);
+		DEBUG_TRACE("%px: VxLAN outer interface type.\n", skb);
+		return 0;
+	}
+	DEBUG_TRACE("%px: VxLAN inner interface type.\n", skb);
+	return 1;
+}
+#endif
+
 /*
  * ecm_interface_addr_find_route_by_addr_ipv4()
  *	Return the route for the given IP address.  Returns NULL on failure.
@@ -982,13 +1105,22 @@ static bool ecm_interface_find_route_by_addr_ipv4(ip_addr_t addr, struct ecm_int
 		DEBUG_TRACE("No output route to: %pI4n\n", &be_addr);
 		return false;
 	}
-	DEBUG_TRACE("Output route to: %pI4n is: %p\n", &be_addr, ecm_rt->rt.rtv4);
+	DEBUG_TRACE("Output route to: %pI4n is: %px\n", &be_addr, ecm_rt->rt.rtv4);
 	ecm_rt->dst = (struct dst_entry *)ecm_rt->rt.rtv4;
 	ecm_rt->v4_route = true;
 	return true;
 }
 
 #ifdef ECM_IPV6_ENABLE
+struct rt6_info *ecm_interface_ipv6_route_lookup(struct net *netf, struct in6_addr *addr)
+{
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0))
+	return rt6_lookup(netf, addr, NULL, 0, 0);
+#else
+	return rt6_lookup(netf, addr, NULL, 0, NULL, 0);
+#endif
+}
+
 /*
  * ecm_interface_addr_find_route_by_addr_ipv6()
  *	Return the route for the given IP address.  Returns NULL on failure.
@@ -1003,12 +1135,12 @@ static bool ecm_interface_find_route_by_addr_ipv6(ip_addr_t addr, struct ecm_int
 	 * Get a route to the given IP address, this will allow us to also find the interface
 	 * it is using to communicate with that IP address.
 	 */
-	ecm_rt->rt.rtv6 = rt6_lookup(&init_net, &naddr, NULL, 0, 0);
+	ecm_rt->rt.rtv6 = ecm_interface_ipv6_route_lookup(&init_net, &naddr);
 	if (!ecm_rt->rt.rtv6) {
 		DEBUG_TRACE("No output route to: " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		return NULL;
 	}
-	DEBUG_TRACE("Output route to: " ECM_IP_ADDR_OCTAL_FMT " is: %p\n", ECM_IP_ADDR_TO_OCTAL(addr), ecm_rt->rt.rtv6);
+	DEBUG_TRACE("Output route to: " ECM_IP_ADDR_OCTAL_FMT " is: %px\n", ECM_IP_ADDR_TO_OCTAL(addr), ecm_rt->rt.rtv6);
 	ecm_rt->dst = (struct dst_entry *)ecm_rt->rt.rtv6;
 	ecm_rt->v4_route = false;
 	return true;
@@ -1077,7 +1209,7 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	/*
 	 * Find the route entry
 	 */
-	rt6i = rt6_lookup(netf, &dst_addr, NULL, 0, 0);
+	rt6i = ecm_interface_ipv6_route_lookup(netf, &dst_addr);
 	if (!rt6i) {
 		DEBUG_TRACE("IPv6 Route lookup failure for destination IPv6 address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		return;
@@ -1086,12 +1218,8 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	/*
 	 * Find the neighbor entry
 	 */
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3,6,0))
-	neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, &dst_addr);
-#else
 	neigh = rt6i->dst.ops->neigh_lookup(&rt6i->dst, NULL, &dst_addr);
-#endif
-	if (neigh == NULL) {
+	if (IS_ERR(neigh)) {
 		DEBUG_TRACE("Neighbour lookup failure for destination IPv6 address " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(addr));
 		dst_release(&rt6i->dst);
 		return;
@@ -1101,10 +1229,10 @@ void ecm_interface_send_neighbour_solicitation(struct net_device *dev, ip_addr_t
 	 * Issue a Neighbour soliciation request
 	 */
 	DEBUG_TRACE("Issue Neighbour solicitation request\n");
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
-	ndisc_send_ns(dev, neigh, &dst_addr, &mc_dst_addr, &src_addr);
-#else
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	ndisc_send_ns(dev, &dst_addr, &mc_dst_addr, &src_addr);
+#else
+	ndisc_send_ns(dev, &dst_addr, &mc_dst_addr, &src_addr, 0);
 #endif
 	neigh_release(neigh);
 	dst_release(&rt6i->dst);
@@ -1194,7 +1322,8 @@ struct neighbour *ecm_interface_ipv6_neigh_get(ip_addr_t addr)
 	struct in6_addr ipv6_addr;
 
 	ECM_IP_ADDR_TO_NIN6_ADDR(ipv6_addr, addr);
-	rt = rt6_lookup(&init_net, &ipv6_addr, NULL, 0, 0);
+
+	rt = ecm_interface_ipv6_route_lookup(&init_net, &ipv6_addr);
 	if (!rt) {
 		return NULL;
 	}
@@ -1220,7 +1349,7 @@ bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
 	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
 	 */
 	if (out->type == ARPHRD_PPP) {
-		if (out->priv_flags & IFF_PPP_PPTP) {
+		if (out->priv_flags_ext & IFF_EXT_PPP_PPTP) {
 			return true;
 		}
 	}
@@ -1231,7 +1360,7 @@ bool ecm_interface_is_pptp(struct sk_buff *skb, const struct net_device *out)
 	}
 
 	if (in->type == ARPHRD_PPP) {
-		if (in->priv_flags & IFF_PPP_PPTP) {
+		if (in->priv_flags_ext & IFF_EXT_PPP_PPTP) {
 			dev_put(in);
 			return true;
 		}
@@ -1255,10 +1384,10 @@ bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct n
 
 	switch (ver) {
 	case 2:
-		flag = IFF_PPP_L2TPV2;
+		flag = IFF_EXT_PPP_L2TPV2;
 		break;
 	case 3:
-		flag = IFF_PPP_L2TPV3;
+		flag = IFF_EXT_PPP_L2TPV3;
 		break;
 	default:
 		break;
@@ -1267,7 +1396,7 @@ bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct n
 	/*
 	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
 	 */
-	if (out->priv_flags & flag) {
+	if (out->priv_flags_ext & flag) {
 		return true;
 	}
 
@@ -1276,7 +1405,7 @@ bool ecm_interface_is_l2tp_packet_by_version(struct sk_buff *skb, const struct n
 		return true;
 	}
 
-	if (in->priv_flags & flag) {
+	if (in->priv_flags_ext & flag) {
 		dev_put(in);
 		return true;
 	}
@@ -1299,8 +1428,8 @@ bool ecm_interface_is_l2tp_pptp(struct sk_buff *skb, const struct net_device *ou
 	/*
 	 * skip first pass of l2tp/pptp tunnel encapsulated traffic
 	 */
-	if (out->priv_flags & (IFF_PPP_L2TPV2 | IFF_PPP_L2TPV3 |
-			       IFF_PPP_PPTP)) {
+	if (out->priv_flags_ext & (IFF_EXT_PPP_L2TPV2 | IFF_EXT_PPP_L2TPV3 |
+			       IFF_EXT_PPP_PPTP)) {
 		return true;
 	}
 
@@ -1309,15 +1438,14 @@ bool ecm_interface_is_l2tp_pptp(struct sk_buff *skb, const struct net_device *ou
 		return true;
 	}
 
-	if (in->priv_flags & (IFF_PPP_L2TPV2 | IFF_PPP_L2TPV3 |
-			      IFF_PPP_PPTP)) {
+	if (in->priv_flags_ext & (IFF_EXT_PPP_L2TPV2 | IFF_EXT_PPP_L2TPV3 |
+			      IFF_EXT_PPP_PPTP)) {
 		dev_put(in);
 		return true;
 	}
 
 	dev_put(in);
 	return false;
-
 }
 
 #ifdef ECM_INTERFACE_VLAN_ENABLE
@@ -1340,7 +1468,7 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 	 */
 	ii = ecm_db_iface_find_and_ref_vlan(type_info->address, type_info->vlan_tag, type_info->vlan_tpid);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1367,25 +1495,158 @@ static struct ecm_db_iface_instance *ecm_interface_vlan_interface_establish(stru
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: vlan iface established\n", nii);
+	DEBUG_TRACE("%px: vlan iface established\n", nii);
 	return nii;
 }
 #endif
 
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
 /*
- * ecm_interface_is_ovs()
- *	Returns true if dev is OpenVswitch (OVS) interface.
+ * ecm_interface_macvlan_interface_establish()
+ *	Returns a reference to a iface of the MACVLAN type, possibly creating one if necessary.
+ * Returns NULL on failure or a reference to interface.
  */
-bool ecm_interface_is_ovs(const struct net_device *dev)
+static struct ecm_db_iface_instance *ecm_interface_macvlan_interface_establish(struct ecm_db_interface_info_macvlan *type_info,
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
+{
+	struct ecm_db_iface_instance *nii;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_INFO("Establish MACVLAN iface: %s with address: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, mtu, dev_interface_num, ae_interface_num);
+
+	/*
+	 * Locate the iface
+	 */
+	ii = ecm_db_iface_find_and_ref_macvlan(type_info->address);
+	if (ii) {
+		DEBUG_TRACE("%px: iface established\n", ii);
+		return ii;
+	}
+
+	/*
+	 * No iface - create one
+	 */
+	nii = ecm_db_iface_alloc();
+	if (!nii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * Add iface into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ii = ecm_db_iface_find_and_ref_macvlan(type_info->address);
+	if (ii) {
+		spin_unlock_bh(&ecm_interface_lock);
+		ecm_db_iface_deref(nii);
+		return ii;
+	}
+	ecm_db_iface_add_macvlan(nii, type_info->address, dev_name,
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
+	spin_unlock_bh(&ecm_interface_lock);
+
+	DEBUG_TRACE("%px: MACVLAN iface established\n", nii);
+	return nii;
+}
+#endif
+
+#if defined(ECM_INTERFACE_OVS_BRIDGE_ENABLE) && defined(ECM_MULTICAST_ENABLE)
+/*
+ * ecm_interface_multicast_ovs_to_interface_get_and_ref()
+ *	Populate ov_ ports/bridge device from multicast 'to' list.
+ *	Returns the number of ovs port count.
+ */
+int ecm_interface_multicast_ovs_to_interface_get_and_ref(struct ecm_db_connection_instance *ci, struct net_device **to_ovs_port,
+							struct net_device **to_ovs_brdev)
+{
+	struct net_device *dev;
+	struct ecm_db_iface_instance *to_mc_ifaces;
+	int32_t *to_mc_ifaces_first, *to_iface_first, if_cnt, i;
+	int ovs_port_cnt = 0;
+
+	if_cnt = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &to_mc_ifaces, &to_mc_ifaces_first);
+	if (!if_cnt) {
+		DEBUG_WARN("%px: Not able to find 'to' interfaces", ci);
+		return 0;
+	}
+
+	/*
+	 * The 'to' interfaces ports can be part of different OVS bridges.
+	 * ovs-br1-(eth0, eth1, eth2)
+	 * ovs-br2-(eth3)
+	 * ovs-br3 (eth4, eth5)
+	 *
+	 * to_ovs_port: eth0, eth1, eth2, eth3. eth4. eth5
+	 * to_ovs_brdev: ovs-br1, ovs-br1, ovs-br1, ovs-br2, ovs-br3, ovs-br3
+	 */
+	for (i = 0; i < ECM_DB_MULTICAST_IF_MAX; i++) {
+		struct ecm_db_iface_instance *ii_temp;
+		int32_t j;
+
+		/*
+		 * Find interface list, skip if invalid.
+		 */
+		to_iface_first = ecm_db_multicast_if_first_get_at_index(to_mc_ifaces_first, i);
+		if (*to_iface_first == ECM_DB_IFACE_HEIRARCHY_MAX) {
+			continue;
+		}
+
+		/*
+		 * We need to find 'to' multicast port to
+		 * update the OVS statistics.
+		 */
+		ii_temp = ecm_db_multicast_if_heirarchy_get(to_mc_ifaces, i);
+		for (j = ECM_DB_IFACE_HEIRARCHY_MAX - 1; j >= *to_iface_first; j--) {
+			struct net_device *br_dev;
+			struct ecm_db_iface_instance **ifaces;
+			struct ecm_db_iface_instance *to_iface;
+			struct ecm_db_iface_instance *ii_single;
+
+			ii_single = ecm_db_multicast_if_instance_get_at_index(ii_temp, j);
+			ifaces = (struct ecm_db_iface_instance **)ii_single;
+			to_iface = *ifaces;
+			dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(to_iface));
+			if (unlikely(!dev)) {
+				DEBUG_WARN("%px: Failed to get net device with %d index\n", ci, j);
+				continue;
+			}
+
+			if (!ecm_interface_is_ovs_bridge_port(dev)) {
+				DEBUG_TRACE("%px: %s_dev: %s at %d index is not an OVS bridge port\n", ci, ecm_db_obj_dir_strings[ECM_DB_OBJ_DIR_TO], dev->name, j);
+				dev_put(dev);
+				continue;
+			}
+
+			br_dev = ovsmgr_dev_get_master(dev);
+			DEBUG_ASSERT(br_dev, "%px: master dev for the OVS port:%s is NULL\n", ci, dev->name);
+			to_ovs_port[ovs_port_cnt] = dev;
+			to_ovs_brdev[ovs_port_cnt] = br_dev;
+			DEBUG_TRACE("%px: %s_dev: %s at %d index is an OVS bridge port. OVS bridge: %s\n", ci, ecm_db_obj_dir_strings[ECM_DB_OBJ_DIR_TO], dev->name, j, br_dev->name);
+			ovs_port_cnt++;
+			break;
+		}
+	}
+
+	ecm_db_multicast_connection_to_interfaces_deref_all(to_mc_ifaces, to_mc_ifaces_first);
+	return ovs_port_cnt;
+}
+#endif
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+/*
+ * ecm_interface_is_ovs_bridge_port()
+ *	Returns true if dev is OpenVswitch (OVS) bridge port.
+ */
+bool ecm_interface_is_ovs_bridge_port(const struct net_device *dev)
 {
 	/*
-	 * Check if dev is OVS master or an OVS datapath port.
+	 * Check if dev is OVS bridge port.
 	 */
-	if (dev->priv_flags & (IFF_OVS_DATAPATH | IFF_OPENVSWITCH))
-		return true;
-
-	return false;
+	return !!(dev->priv_flags & IFF_OVS_DATAPATH);
 }
+#endif
 
 /*
  * ecm_interface_bridge_interface_establish()
@@ -1404,9 +1665,9 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 	/*
 	 * Locate the iface
 	 */
-	ii = ecm_db_iface_find_and_ref_bridge(type_info->address);
+	ii = ecm_db_iface_find_and_ref_bridge(type_info->address, dev_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1423,7 +1684,7 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 	 * Add iface into the database, atomically to avoid races creating the same thing
 	 */
 	spin_lock_bh(&ecm_interface_lock);
-	ii = ecm_db_iface_find_and_ref_bridge(type_info->address);
+	ii = ecm_db_iface_find_and_ref_bridge(type_info->address, dev_interface_num);
 	if (ii) {
 		spin_unlock_bh(&ecm_interface_lock);
 		ecm_db_iface_deref(nii);
@@ -1433,9 +1694,61 @@ static struct ecm_db_iface_instance *ecm_interface_bridge_interface_establish(st
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: bridge iface established\n", nii);
+	DEBUG_TRACE("%px: bridge iface established\n", nii);
 	return nii;
 }
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+/*
+ * ecm_interface_ovs_bridge_interface_establish()
+ *	Returns a reference to a iface of the OVS BRIDGE type, possibly creating one if necessary.
+ * Returns NULL on failure or a reference to interface.
+ */
+static struct ecm_db_iface_instance *ecm_interface_ovs_bridge_interface_establish(struct ecm_db_interface_info_ovs_bridge *type_info,
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
+{
+	struct ecm_db_iface_instance *nii;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_INFO("Establish OVS BRIDGE iface: %s with address: %pM, MTU: %d, if num: %d, accel engine if id: %d\n",
+			dev_name, type_info->address, mtu, dev_interface_num, ae_interface_num);
+
+	/*
+	 * Locate the iface
+	 */
+	ii = ecm_db_iface_find_and_ref_ovs_bridge(type_info->address, dev_interface_num);
+	if (ii) {
+		DEBUG_TRACE("%px: iface established\n", ii);
+		return ii;
+	}
+
+	/*
+	 * No iface - create one
+	 */
+	nii = ecm_db_iface_alloc();
+	if (!nii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * Add iface into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ii = ecm_db_iface_find_and_ref_ovs_bridge(type_info->address, dev_interface_num);
+	if (ii) {
+		spin_unlock_bh(&ecm_interface_lock);
+		ecm_db_iface_deref(nii);
+		return ii;
+	}
+	ecm_db_iface_add_ovs_bridge(nii, type_info->address, dev_name,
+			mtu, dev_interface_num, ae_interface_num, NULL, nii);
+	spin_unlock_bh(&ecm_interface_lock);
+
+	DEBUG_TRACE("%px: OVS bridge iface established\n", nii);
+	return nii;
+}
+#endif
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
 /*
@@ -1457,7 +1770,7 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
 	 */
 	ii = ecm_db_iface_find_and_ref_lag(type_info->address);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1484,7 +1797,7 @@ static struct ecm_db_iface_instance *ecm_interface_lag_interface_establish(struc
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: lag iface established\n", nii);
+	DEBUG_TRACE("%px: lag iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1509,7 +1822,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 	ii = ecm_db_iface_ifidx_find_and_ref_ethernet(type_info->address, dev_interface_num);
 
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		/*
 		 * Update the accel engine interface identifier, just in case it was changed.
 		 */
@@ -1540,7 +1853,7 @@ static struct ecm_db_iface_instance *ecm_interface_ethernet_interface_establish(
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: ethernet iface established\n", nii);
+	DEBUG_TRACE("%px: ethernet iface established\n", nii);
 	return nii;
 }
 
@@ -1564,7 +1877,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
 	 */
 	ii = ecm_db_iface_find_and_ref_pppoe(type_info->pppoe_session_id, type_info->remote_mac);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1591,7 +1904,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppoe_interface_establish(str
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: pppoe iface established\n", nii);
+	DEBUG_TRACE("%px: pppoe iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1616,7 +1929,7 @@ static struct ecm_db_iface_instance *ecm_interface_map_t_interface_establish(str
 	 */
 	ii = ecm_db_iface_find_and_ref_map_t(type_info->if_index, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1643,7 +1956,7 @@ static struct ecm_db_iface_instance *ecm_interface_map_t_interface_establish(str
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: map_t iface established\n", nii);
+	DEBUG_TRACE("%px: map_t iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1667,7 +1980,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppol2tpv2_interface_establis
 	 */
 	ii = ecm_db_iface_find_and_ref_pppol2tpv2(type_info->l2tp.tunnel.tunnel_id, type_info->l2tp.session.session_id);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
 		return ii;
 	}
@@ -1696,7 +2009,7 @@ static struct ecm_db_iface_instance *ecm_interface_pppol2tpv2_interface_establis
 	ecm_db_iface_add_pppol2tpv2(nii, type_info, dev_name, mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: pppol2tpv2 iface established\n", nii);
+	DEBUG_TRACE("%px: pppol2tpv2 iface established\n", nii);
 	return nii;
 }
 
@@ -1721,7 +2034,7 @@ static struct ecm_db_iface_instance *ecm_interface_pptp_interface_establish(stru
 	 */
 	ii = ecm_db_iface_find_and_ref_pptp(type_info->src_call_id, type_info->dst_call_id, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
 		return ii;
 	}
@@ -1750,7 +2063,7 @@ static struct ecm_db_iface_instance *ecm_interface_pptp_interface_establish(stru
 	ecm_db_iface_add_pptp(nii, type_info, dev_name, mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: pptp iface established\n", nii);
+	DEBUG_TRACE("%px: pptp iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1775,7 +2088,7 @@ static struct ecm_db_iface_instance *ecm_interface_gre_tun_interface_establish(s
 	 */
 	ii = ecm_db_iface_find_and_ref_gre_tun(type_info->if_index, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1802,7 +2115,7 @@ static struct ecm_db_iface_instance *ecm_interface_gre_tun_interface_establish(s
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: gre iface established\n", nii);
+	DEBUG_TRACE("%px: gre iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1826,7 +2139,7 @@ static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(s
 	 */
 	ii = ecm_db_iface_find_and_ref_unknown(type_info->os_specific_ident);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1853,7 +2166,7 @@ static struct ecm_db_iface_instance *ecm_interface_unknown_interface_establish(s
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: unknown iface established\n", nii);
+	DEBUG_TRACE("%px: unknown iface established\n", nii);
 	return nii;
 }
 
@@ -1876,7 +2189,7 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
 	 */
 	ii = ecm_db_iface_find_and_ref_loopback(type_info->os_specific_ident);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1903,7 +2216,7 @@ static struct ecm_db_iface_instance *ecm_interface_loopback_interface_establish(
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: loopback iface established\n", nii);
+	DEBUG_TRACE("%px: loopback iface established\n", nii);
 	return nii;
 }
 
@@ -1929,7 +2242,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 	 */
 	ii = ecm_db_iface_find_and_ref_ipsec_tunnel(type_info->os_specific_ident, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -1956,7 +2269,7 @@ static struct ecm_db_iface_instance *ecm_interface_ipsec_tunnel_interface_establ
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: ipsec_tunnel iface established\n", nii);
+	DEBUG_TRACE("%px: ipsec_tunnel iface established\n", nii);
 	return nii;
 }
 #endif
@@ -1982,7 +2295,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 	 */
 	ii = ecm_db_iface_find_and_ref_sit(type_info->saddr, type_info->daddr, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -2009,7 +2322,7 @@ static struct ecm_db_iface_instance *ecm_interface_sit_interface_establish(struc
 			ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: sit iface established\n", nii);
+	DEBUG_TRACE("%px: sit iface established\n", nii);
 	return nii;
 }
 #endif
@@ -2036,7 +2349,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 	 */
 	ii = ecm_db_iface_find_and_ref_tunipip6(type_info->saddr, type_info->daddr, ae_interface_num);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -2063,7 +2376,7 @@ static struct ecm_db_iface_instance *ecm_interface_tunipip6_interface_establish(
 			ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: tunipip6 iface established\n", nii);
+	DEBUG_TRACE("%px: tunipip6 iface established\n", nii);
 	return nii;
 }
 #endif
@@ -2089,7 +2402,7 @@ static struct ecm_db_iface_instance *ecm_interface_rawip_interface_establish(str
 	 */
 	ii = ecm_db_iface_find_and_ref_rawip(type_info->address);
 	if (ii) {
-		DEBUG_TRACE("%p: RAWIP iface already established\n", ii);
+		DEBUG_TRACE("%px: RAWIP iface already established\n", ii);
 		return ii;
 	}
 
@@ -2116,7 +2429,7 @@ static struct ecm_db_iface_instance *ecm_interface_rawip_interface_establish(str
 			mtu, dev_interface_num, ae_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: RAWIP iface established\n", nii);
+	DEBUG_TRACE("%px: RAWIP iface established\n", nii);
 	return nii;
 }
 #endif
@@ -2140,7 +2453,7 @@ static struct ecm_db_iface_instance *ecm_interface_ovpn_interface_establish(stru
 	 */
 	ii = ecm_db_iface_find_and_ref_ovpn(type_info->tun_ifnum);
 	if (ii) {
-		DEBUG_TRACE("%p: iface established\n", ii);
+		DEBUG_TRACE("%px: iface established\n", ii);
 		return ii;
 	}
 
@@ -2167,7 +2480,65 @@ static struct ecm_db_iface_instance *ecm_interface_ovpn_interface_establish(stru
 	ecm_db_iface_add_ovpn(nii, type_info, dev_name, mtu, dev_interface_num, NULL, nii);
 	spin_unlock_bh(&ecm_interface_lock);
 
-	DEBUG_TRACE("%p: ovpn iface established\n", nii);
+	DEBUG_TRACE("%px: ovpn iface established\n", nii);
+	return nii;
+}
+#endif
+
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+/*
+ * ecm_interface_vxlan_interface_establish()
+ *	Returns a reference to a iface of the VxLAN type, possibly creating one if necessary.
+ * Returns NULL on failure or a reference to interface.
+ */
+static struct ecm_db_iface_instance *ecm_interface_vxlan_interface_establish(struct ecm_db_interface_info_vxlan *type_info,
+							char *dev_name, int32_t dev_interface_num, int32_t ae_interface_num, int32_t mtu)
+{
+	struct ecm_db_iface_instance *nii;
+	struct ecm_db_iface_instance *ii;
+
+	DEBUG_INFO("Establish VxLAN iface: %s with vxlan id: %u, MTU: %d, if num: %d, if_type: %d, accel engine if id: %d\n",
+			dev_name, type_info->vni, mtu, dev_interface_num, type_info->if_type, ae_interface_num);
+
+	/*
+	 * Locate the iface
+	 */
+	ii = ecm_db_iface_find_and_ref_vxlan(type_info->vni, type_info->if_type);
+	if (ii) {
+		DEBUG_TRACE("%px: vxlan iface established\n", ii);
+		/*
+		 * Update the accel engine interface identifier, just in case it was changed.
+		 */
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		return ii;
+	}
+
+	/*
+	 * No iface - create one
+	 */
+	nii = ecm_db_iface_alloc();
+	if (!nii) {
+		DEBUG_WARN("Failed to establish iface\n");
+		return NULL;
+	}
+
+	/*
+	 * Add iface into the database, atomically to avoid races creating the same thing
+	 */
+	spin_lock_bh(&ecm_interface_lock);
+	ii = ecm_db_iface_find_and_ref_vxlan(type_info->vni, type_info->if_type);
+	if (ii) {
+		spin_unlock_bh(&ecm_interface_lock);
+		ecm_db_iface_deref(nii);
+		ecm_db_iface_update_ae_interface_identifier(ii, ae_interface_num);
+		DEBUG_TRACE("%px: vxlan iface established\n", ii);
+		return ii;
+	}
+	ecm_db_iface_add_vxlan(nii, type_info->vni, type_info->if_type, dev_name, mtu,
+			dev_interface_num, ae_interface_num, NULL, nii);
+	spin_unlock_bh(&ecm_interface_lock);
+
+	DEBUG_TRACE("%px: vxlan iface established\n", nii);
 	return nii;
 }
 #endif
@@ -2190,6 +2561,7 @@ bool ecm_interface_tunnel_mtu_update(ip_addr_t saddr, ip_addr_t daddr, ecm_db_if
 
 	switch (type) {
 	case ECM_DB_IFACE_TYPE_IPSEC_TUNNEL:
+	case ECM_DB_IFACE_TYPE_VXLAN:
 		if (!src_dev && !dest_dev) {
 			return false;
 		}
@@ -2237,6 +2609,233 @@ done:
 	return ret;
 }
 
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+/*
+ * ecm_interface_ovs_bridge_port_dev_get_and_ref()
+ * 	Looks up the slave port in the bridge devices port list.
+ */
+static struct net_device *ecm_interface_ovs_bridge_port_dev_get_and_ref(struct sk_buff *skb, struct net_device *br_dev,
+								ip_addr_t src_ip, ip_addr_t dst_ip, int ip_version,
+								int protocol, bool is_routed, uint8_t *smac,
+								uint8_t *dmac, __be16 *layer4hdr,
+								struct ecm_front_end_ovs_params *op)
+{
+	struct ovsmgr_dp_flow flow;
+	struct ovsmgr_dp_flow return_flow;
+	struct net_device *dev;
+
+	memset(&flow, 0, sizeof(flow));
+
+	flow.indev = br_dev;
+	flow.outdev = NULL;
+	flow.tuple.ip_version = ip_version;
+	flow.tuple.protocol = protocol;
+	flow.is_routed = is_routed;
+
+	if (!smac) {
+		ether_addr_copy(flow.smac, br_dev->dev_addr);
+	}
+
+	ether_addr_copy(flow.dmac, dmac);
+
+	/*
+	 * Consider a routing flow
+	 * eth1-ovsbr1----->ovsbr2-eth2
+	 * The 2 ovs data path rules should look like the following,
+	 * 1. ingress port:eth1, egress_port:ovsbr1
+	 * 2. ingress_port:ovsbr2, egress_port:eth2
+	 *
+	 * Copy the multicast mac address, if src_ip is multicast.
+	 * During multicast 'from' hierarchy creation, the ECM
+	 * copies the source MAC as multicast MAC as the
+	 * reverse direction rule is not present in the ovs
+	 * data path rule set.
+	 */
+	if (ecm_ip_addr_is_multicast(src_ip)) {
+		struct ethhdr *skb_eth_hdr;
+
+		skb_eth_hdr = eth_hdr(skb);
+		ether_addr_copy(flow.smac, dmac);
+		ether_addr_copy(flow.dmac, skb_eth_hdr->h_dest);
+
+		if (protocol == IPPROTO_UDP) {
+			struct udphdr *udp_hdr = (struct udphdr *)layer4hdr;
+
+			flow.tuple.src_port = udp_hdr->source;
+			flow.tuple.dst_port = udp_hdr->dest;
+		} else {
+			DEBUG_WARN("%px: Protocol is not UDP\n", skb);
+			return NULL;
+		}
+
+		if (ip_version == 4) {
+			ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.src, dst_ip);
+			ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.dst, src_ip);
+			DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI4, dest_addr: %pI4, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+					skb, br_dev->name, &flow.tuple.ipv4.src, &flow.tuple.ipv4.dst,
+					ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+		} else {
+			ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.src, dst_ip);
+			ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.dst, src_ip);
+			DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI6, dest_addr: %pI6, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+					skb, br_dev->name, &flow.tuple.ipv6.src, &flow.tuple.ipv6.dst,
+					ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+		}
+
+		goto port_find;
+	}
+
+	/*
+	 * OVS parameters are not passed explicitly for the following cases:
+	 * 1. IPv6 flows
+	 * 2. IPv4/IPv6 non-ported flows
+	 * 3. Multicast flows.
+	 * 4. SFE flows
+	 */
+	if (!op) {
+		if (protocol == IPPROTO_TCP) {
+			struct tcphdr *tcp_hdr = (struct tcphdr *)layer4hdr;
+
+			flow.tuple.src_port = tcp_hdr->source;
+			flow.tuple.dst_port = tcp_hdr->dest;
+		} else if (protocol == IPPROTO_UDP) {
+			struct udphdr *udp_hdr = (struct udphdr *)layer4hdr;
+
+			flow.tuple.src_port = udp_hdr->source;
+			flow.tuple.dst_port = udp_hdr->dest;
+		} else {
+			DEBUG_WARN("%px: Protocol is not udp/tcp\n", skb);
+			return NULL;
+		}
+
+		if (ip_version == 4) {
+			ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.src, src_ip);
+			ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.dst, dst_ip);
+			DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI4, dest_addr: %pI4, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+					skb, br_dev->name, &flow.tuple.ipv4.src, &flow.tuple.ipv4.dst,
+					ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+		} else {
+			ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.src, src_ip);
+			ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.dst, dst_ip);
+			DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI6, dest_addr: %pI6, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+					skb, br_dev->name, &flow.tuple.ipv6.src, &flow.tuple.ipv6.dst,
+					ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+		}
+
+		goto port_find;
+	}
+
+	/*
+	 * We use OVS params for IPv4 NSS unicast flows.
+	 */
+	if ((protocol == IPPROTO_TCP) || (protocol == IPPROTO_UDP)) {
+		flow.tuple.src_port = htons(op->src_port);
+		flow.tuple.dst_port = htons(op->dest_port);
+	} else {
+		DEBUG_WARN("%px: Protocol is not udp/tcp\n", skb);
+		return NULL;
+	}
+
+	if (ip_version == 4) {
+		ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.src, op->src_ip);
+		ECM_IP_ADDR_TO_NIN4_ADDR(flow.tuple.ipv4.dst, op->dest_ip);
+		DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI4, dest_addr: %pI4, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+				skb, br_dev->name, &flow.tuple.ipv4.src, &flow.tuple.ipv4.dst,
+				ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+	} else {
+		ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.src, op->src_ip);
+		ECM_IP_ADDR_TO_NIN6_ADDR(flow.tuple.ipv6.dst, op->dest_ip);
+		DEBUG_TRACE("%px: br_dev: %s, src_addr: %pI6, dest_addr: %pI6, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+				skb, br_dev->name, &flow.tuple.ipv6.src, &flow.tuple.ipv6.dst,
+				ip_version, protocol, flow.tuple.src_port, flow.tuple.dst_port, flow.smac, flow.dmac);
+	}
+
+port_find:
+	dev = ovsmgr_port_find(skb, br_dev, &flow);
+	if (dev) {
+		DEBUG_TRACE("OVS egress port dev: %s\n", dev->name);
+		dev_hold(dev);
+		return dev;
+	}
+
+	/*
+	 * Handle Multicast flows separately.
+	 */
+	if (ecm_ip_addr_is_multicast(src_ip)) {
+		dev = ovsmgr_port_find_by_mac(skb, br_dev, &flow);
+		if (!dev) {
+			DEBUG_WARN("%px: Couldn't find OVS bridge port for Multicast flow.\n", skb);
+			return NULL;
+		}
+
+		dev_hold(dev);
+		return dev;
+	}
+
+	/*
+	 * Find by MAC addresses using return flow
+	 */
+	return_flow.indev = NULL;
+	return_flow.outdev = br_dev;
+	return_flow.tuple.ip_version = flow.tuple.ip_version;
+	return_flow.tuple.protocol = flow.tuple.protocol;
+	return_flow.is_routed = flow.is_routed;
+
+	ether_addr_copy(return_flow.smac, flow.dmac);
+	ether_addr_copy(return_flow.dmac, flow.smac);
+	return_flow.tuple.src_port = flow.tuple.dst_port;
+	return_flow.tuple.dst_port = flow.tuple.src_port;
+	if (ip_version == 4) {
+		return_flow.tuple.ipv4.src = flow.tuple.ipv4.dst;
+		return_flow.tuple.ipv4.dst = flow.tuple.ipv4.src;
+		DEBUG_TRACE("%px: br_dev = %s, src_addr: %pI4, dest_addr: %pI4, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+				skb, br_dev->name, &return_flow.tuple.ipv4.src,
+				&return_flow.tuple.ipv4.dst, return_flow.tuple.ip_version,
+				return_flow.tuple.protocol, return_flow.tuple.src_port, return_flow.tuple.dst_port,
+				return_flow.smac, return_flow.dmac);
+	} else {
+		memcpy(&return_flow.tuple.ipv6.src, &flow.tuple.ipv6.dst, sizeof(return_flow.tuple.ipv6.src));
+		memcpy(&return_flow.tuple.ipv6.dst, &flow.tuple.ipv6.src, sizeof(return_flow.tuple.ipv6.dst));
+		DEBUG_TRACE("%px: br_dev = %s, src_addr: %pI6, dest_addr: %pI6, ip_version: %d, protocol: %d (sp:%d, dp:%d) (smac:%pM, dmac:%pM)\n",
+				skb, br_dev->name, &return_flow.tuple.ipv4.src,
+				&return_flow.tuple.ipv4.dst, return_flow.tuple.ip_version,
+				return_flow.tuple.protocol, return_flow.tuple.src_port, return_flow.tuple.dst_port,
+				return_flow.smac, return_flow.dmac);
+	}
+
+	dev = ovsmgr_port_find_by_mac(skb, br_dev, &return_flow);
+	if (!dev) {
+		DEBUG_WARN("%px: Couldn't find OVS bridge port\n", skb);
+		return NULL;
+	}
+
+	dev_hold(dev);
+	return dev;
+}
+#endif
+
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+/*
+ * ecm_interface_macvlan_mode_is_valid()
+ * 	Check if the macvlan interface allowed for acceleration.
+ */
+static bool ecm_interface_macvlan_mode_is_valid(struct net_device *dev)
+{
+	enum macvlan_mode mode = macvlan_get_mode(dev);
+
+	/*
+	 * Allow acceleration for only "Private" mode.
+	 */
+	if (mode == MACVLAN_MODE_PRIVATE) {
+		return true;
+	}
+
+	DEBUG_WARN("%px: MACVLAN dev: %s, MACVLAN mode: %d is not supported for acceleration\n", dev,
+			dev->name, mode);
+	return false;
+}
+#endif
+
 /*
  * ecm_interface_establish_and_ref()
  *	Establish an interface instance for the given interface detail.
@@ -2255,6 +2854,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 		struct ecm_db_interface_info_ethernet ethernet;		/* type == ECM_DB_IFACE_TYPE_ETHERNET */
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 		struct ecm_db_interface_info_vlan vlan;			/* type == ECM_DB_IFACE_TYPE_VLAN */
+#endif
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+		struct ecm_db_interface_info_macvlan macvlan;		/* type == ECM_DB_IFACE_TYPE_MACVLAN */
 #endif
 #ifdef ECM_INTERFACE_BOND_ENABLE
 		struct ecm_db_interface_info_lag lag;			/* type == ECM_DB_IFACE_TYPE_LAG */
@@ -2294,6 +2896,12 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 #ifdef ECM_INTERFACE_OVPN_ENABLE
 		struct ecm_db_interface_info_ovpn ovpn;			/* type == ECM_DB_IFACE_TYPE_OVPN */
 #endif
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+		struct ecm_db_interface_info_vxlan vxlan;		/* type == ECM_DB_IFACE_TYPE_VXLAN */
+#endif
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+		struct ecm_db_interface_info_ovs_bridge ovsb;		/* type == ECM_DB_IFACE_TYPE_OVS_BRIDGE */
+#endif
 	} type_info;
 
 #ifdef ECM_INTERFACE_GRE_TUN_ENABLE
@@ -2304,9 +2912,6 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 	int channel_count;
 	struct ppp_channel *ppp_chan[1];
 	int channel_protocol;
-#ifdef ECM_INTERFACE_PPPOE_ENABLE
-	struct pppoe_opt addressing;
-#endif
 #ifdef ECM_INTERFACE_PPTP_ENABLE
 	int protocol = IPPROTO_IP;
 	struct pptp_opt opt;
@@ -2330,7 +2935,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 	 */
 	ae_interface_num = feci->ae_interface_number_by_dev_get(dev);
 
-	DEBUG_TRACE("%p: Establish interface instance for device: %p is type: %d, name: %s, ifindex: %d, ae_if: %d, mtu: %d\n",
+	DEBUG_TRACE("%px: Establish interface instance for device: %px is type: %d, name: %s, ifindex: %d, ae_if: %d, mtu: %d\n",
 			feci, dev, dev_type, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 
 	/*
@@ -2342,7 +2947,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 		 * If MAC address is zeros, do nothing.
 		 */
 		if (is_zero_ether_addr(dev->dev_addr)) {
-			DEBUG_WARN("%p: Net device %p MAC address is all zeros\n", feci, dev);
+			DEBUG_WARN("%px: Net device %px MAC address is all zeros\n", feci, dev);
 			return NULL;
 		}
 
@@ -2359,20 +2964,86 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 * VLAN master
 			 * GGG No locking needed here, ASSUMPTION is that real_dev is held for as long as we have dev.
 			 */
-			memcpy(type_info.vlan.address, dev->dev_addr, 6);
+			ether_addr_copy(type_info.vlan.address, dev->dev_addr);
 			type_info.vlan.vlan_tag = vlan_dev_vlan_id(dev);
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0))
-			type_info.vlan.vlan_tpid = ETH_P_8021Q;
-#else
 			type_info.vlan.vlan_tpid = ntohs(vlan_dev_vlan_proto(dev));
-#endif
-			DEBUG_TRACE("%p: Net device: %p is VLAN, mac: %pM, vlan_id: %x vlan_tpid: %x\n",
+			DEBUG_TRACE("%px: Net device: %px is VLAN, mac: %pM, vlan_id: %x vlan_tpid: %x\n",
 					feci, dev, type_info.vlan.address, type_info.vlan.vlan_tag, type_info.vlan.vlan_tpid);
 
 			/*
 			 * Establish this type of interface
 			 */
 			ii = ecm_interface_vlan_interface_establish(&type_info.vlan, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			goto identifier_update;
+		}
+#endif
+
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+		/*
+		 * MACVLAN?
+		 */
+		if (netif_is_macvlan(dev)) {
+			if (ecm_interface_macvlan_mode_is_valid(dev)) {
+				ether_addr_copy(type_info.macvlan.address, dev->dev_addr);
+				DEBUG_TRACE("%px: Net device: %px is MACVLAN, mac: %pM\n",
+						feci, dev, type_info.macvlan.address);
+
+				/*
+				 * Establish this type of interface
+				 */
+				ii = ecm_interface_macvlan_interface_establish(&type_info.macvlan, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+				goto identifier_update;
+			}
+
+			DEBUG_WARN("%px: Net device %px MACVLAN mode is not supported.\n", feci, dev);
+			return NULL;
+		}
+#endif
+
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+		/*
+		 * VxLAN?
+		 */
+		if (netif_is_vxlan(dev)) {
+			u32 vni;
+			struct vxlan_dev *vxlan_tun;
+			ip_addr_t vxlan_saddr, vxlan_daddr;
+
+			/*
+			 * VxLAN
+			 */
+			vxlan_tun = netdev_priv(dev);
+			vni = vxlan_get_vni(vxlan_tun);
+			DEBUG_TRACE("%px: Net device: %px is VxLAN, mac: %pM, vni: %d\n",
+					feci, dev, dev->dev_addr, vni);
+			interface_type = ecm_interface_vxlan_type_get(skb);
+			ae_interface_num = feci->ae_interface_number_by_dev_type_get(dev, interface_type);
+			DEBUG_TRACE("%px: VxLAN netdevice interface ae_interface_num: %d, interface_type: %d\n",
+					feci, ae_interface_num, interface_type);
+
+			type_info.vxlan.vni = vni;
+			type_info.vxlan.if_type = interface_type;
+
+			/*
+			 * Copy IP addresses from skb
+			 */
+			if (ip_hdr(skb)->version == IPVERSION) {
+				ECM_NIN4_ADDR_TO_IP_ADDR(vxlan_saddr, ip_hdr(skb)->saddr);
+				ECM_NIN4_ADDR_TO_IP_ADDR(vxlan_daddr, ip_hdr(skb)->daddr);
+			} else {
+				ECM_NIN6_ADDR_TO_IP_ADDR(vxlan_saddr, ipv6_hdr(skb)->saddr);
+				ECM_NIN6_ADDR_TO_IP_ADDR(vxlan_daddr, ipv6_hdr(skb)->daddr);
+			}
+
+			if (ecm_interface_tunnel_mtu_update(vxlan_saddr, vxlan_daddr,
+						ECM_DB_IFACE_TYPE_VXLAN, &dev_mtu)) {
+				DEBUG_TRACE("%px: VxLAN netdevice mtu updated: %d\n", feci, dev_mtu);
+			}
+
+			/*
+			 * Establish this type of interface
+			 */
+			ii = ecm_interface_vxlan_interface_establish(&type_info.vxlan, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 			goto identifier_update;
 		}
 #endif
@@ -2384,9 +3055,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			/*
 			 * Bridge
 			 */
-			memcpy(type_info.bridge.address, dev->dev_addr, 6);
+			ether_addr_copy(type_info.bridge.address, dev->dev_addr);
 
-			DEBUG_TRACE("%p: Net device: %p is BRIDGE, mac: %pM\n",
+			DEBUG_TRACE("%px: Net device: %px is BRIDGE, mac: %pM\n",
 					feci, dev, type_info.bridge.address);
 
 			/*
@@ -2396,6 +3067,27 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			goto identifier_update;
 		}
 
+		/*
+		 * OVS BRIDGE?
+		 */
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+		if (ovsmgr_is_ovs_master(dev)) {
+			/*
+			 * OVS Bridge
+			 */
+			ether_addr_copy(type_info.ovsb.address, dev->dev_addr);
+
+			DEBUG_TRACE("%px: Net device: %px is OVS BRIDGE, mac: %pM\n",
+					feci, dev, type_info.ovsb.address);
+
+			/*
+			 * Establish this type of interface
+			 */
+			ii = ecm_interface_ovs_bridge_interface_establish(&type_info.ovsb, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
+			goto identifier_update;
+		}
+#endif
+
 #ifdef ECM_INTERFACE_BOND_ENABLE
 		/*
 		 * LAG?
@@ -2404,9 +3096,9 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			/*
 			 * Link aggregation
 			 */
-			memcpy(type_info.lag.address, dev->dev_addr, 6);
+			ether_addr_copy(type_info.lag.address, dev->dev_addr);
 
-			DEBUG_TRACE("%p: Net device: %p is LAG, mac: %pM\n",
+			DEBUG_TRACE("%px: Net device: %px is LAG, mac: %pM\n",
 					feci, dev, type_info.lag.address);
 
 			/*
@@ -2421,7 +3113,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 		/*
 		 * GRE TAP?
 		 */
-		if (dev->priv_flags & (IFF_GRE_V4_TAP | IFF_GRE_V6_TAP)) {
+		if (dev->priv_flags_ext & (IFF_EXT_GRE_V4_TAP | IFF_EXT_GRE_V6_TAP)) {
 			interface_type = feci->ae_interface_type_get(feci, dev);
 			ae_interface_num = feci->ae_interface_number_by_dev_type_get(dev, interface_type);
 
@@ -2432,7 +3124,7 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 			 * we should wait until it is ready.
 			 */
 			if (ae_interface_num < 0) {
-				DEBUG_TRACE("%p: GRE TAP interface is not ready yet. Interface type: %d\n", feci, interface_type);
+				DEBUG_TRACE("%px: GRE TAP interface is not ready yet. Interface type: %d\n", feci, interface_type);
 				return NULL;
 			}
 		}
@@ -2441,8 +3133,8 @@ struct ecm_db_iface_instance *ecm_interface_establish_and_ref(struct ecm_front_e
 		 * ETHERNET!
 		 * Just plain ethernet it seems
 		 */
-		memcpy(type_info.ethernet.address, dev->dev_addr, 6);
-		DEBUG_TRACE("%p: Net device: %p is ETHERNET, mac: %pM\n",
+		ether_addr_copy(type_info.ethernet.address, dev->dev_addr);
+		DEBUG_TRACE("%px: Net device: %px is ETHERNET, mac: %pM\n",
 				feci, dev, type_info.ethernet.address);
 
 		/*
@@ -2467,7 +3159,7 @@ identifier_update:
 	 * LOOPBACK?
 	 */
 	if (dev_type == ARPHRD_LOOPBACK) {
-		DEBUG_TRACE("%p: Net device: %p is LOOPBACK type: %d\n", feci, dev, dev_type);
+		DEBUG_TRACE("%px: Net device: %px is LOOPBACK type: %d\n", feci, dev, dev_type);
 		type_info.loopback.os_specific_ident = dev_interface_num;
 		ii = ecm_interface_loopback_interface_establish(&type_info.loopback, dev_name, dev_interface_num, ae_interface_num, dev_mtu);
 		return ii;
@@ -2483,18 +3175,9 @@ identifier_update:
 		struct net_device *ipsec_dev;
 		ip_addr_t saddr, daddr;
 
-		DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dev, dev_type);
+		DEBUG_TRACE("Net device: %px is IPSec tunnel type: %d\n", dev, dev_type);
 
-		spin_lock_bh(&ecm_interface_lock);
-		if (!ecm_interface_ipsec_cb.tunnel_get_and_hold) {
-			spin_unlock_bh(&ecm_interface_lock);
-			DEBUG_WARN("IPSec glue module is not loaded yet for dev=%s\n", dev->name);
-			return NULL;
-		}
-
-		ipsec_dev = ecm_interface_ipsec_cb.tunnel_get_and_hold(dev, skb, &interface_type);
-		spin_unlock_bh(&ecm_interface_lock);
-
+		ipsec_dev = ecm_interface_get_and_hold_ipsec_tun_netdev(dev, skb, &interface_type);
 		if (!ipsec_dev) {
 			DEBUG_WARN("Failed to find NSS IPSec dev for: %s and type: %d\n", dev->name, dev_type);
 			return NULL;
@@ -2539,7 +3222,7 @@ identifier_update:
 			ae_interface_num = feci->ae_interface_number_by_dev_type_get(dev, interface_type);
 
 			if (ae_interface_num < 0) {
-				DEBUG_TRACE("%p: MAP-T interface is not ready yet\n", feci);
+				DEBUG_TRACE("%px: MAP-T interface is not ready yet\n", feci);
 				return NULL;
 			}
 
@@ -2560,7 +3243,7 @@ identifier_update:
 		struct ip_tunnel_6rd_parm *ip6rd;
 		const struct iphdr  *tiph;
 
-		DEBUG_TRACE("%p: Net device: %p is SIT (6-in-4) type: %d\n", feci, dev, dev_type);
+		DEBUG_TRACE("%px: Net device: %px is SIT (6-in-4) type: %d\n", feci, dev, dev_type);
 
 		tunnel = (struct ip_tunnel*)netdev_priv(dev);
 		ip6rd =  &tunnel->ip6rd;
@@ -2593,7 +3276,7 @@ identifier_update:
 		struct ip6_tnl *tunnel;
 		struct flowi6 *fl6;
 
-		DEBUG_TRACE("%p: Net device: %p is TUNIPIP6 type: %d\n", feci, dev, dev_type);
+		DEBUG_TRACE("%px: Net device: %px is TUNIPIP6 type: %d\n", feci, dev, dev_type);
 
 		/*
 		 * Get the tunnel device flow information (discover the output path of the tunnel)
@@ -2611,7 +3294,7 @@ identifier_update:
 		ae_interface_num = feci->ae_interface_number_by_dev_type_get(dev, interface_type);
 
 		if (ae_interface_num < 0) {
-			DEBUG_TRACE("%p: TUNIPIP6 interface is not ready yet\n", feci);
+			DEBUG_TRACE("%px: TUNIPIP6 interface is not ready yet\n", feci);
 			return NULL;
 		}
 
@@ -2628,7 +3311,7 @@ identifier_update:
 		if (dev_type == ARPHRD_IPGRE) {
 			gre4_tunnel = netdev_priv(dev);
 			if (!gre4_tunnel) {
-				DEBUG_WARN("%p: failed to obtain node address for host. GREv4 tunnel not ready\n", feci);
+				DEBUG_WARN("%px: failed to obtain node address for host. GREv4 tunnel not ready\n", feci);
 				return NULL;
 			}
 			ECM_NIN4_ADDR_TO_IP_ADDR(type_info.gre_tun.local_ip, gre4_tunnel->parms.iph.saddr);
@@ -2636,7 +3319,7 @@ identifier_update:
 		} else {
 			gre6_tunnel = netdev_priv(dev);
 			if (!gre6_tunnel) {
-				DEBUG_WARN("%p: failed to obtain node address for host. GREv6 tunnel not ready\n", feci);
+				DEBUG_WARN("%px: failed to obtain node address for host. GREv6 tunnel not ready\n", feci);
 				return NULL;
 			}
 			ECM_NIN6_ADDR_TO_IP_ADDR(type_info.gre_tun.local_ip, gre6_tunnel->parms.laddr);
@@ -2646,7 +3329,7 @@ identifier_update:
 		interface_type = feci->ae_interface_type_get(feci, dev);
 		ae_interface_num = feci->ae_interface_number_by_dev_type_get(dev, interface_type);
 		if (ae_interface_num < 0) {
-			DEBUG_TRACE("%p: GRE TUN interface is not ready yet. Interface type: %d\n", feci, interface_type);
+			DEBUG_TRACE("%px: GRE TUN interface is not ready yet. Interface type: %d\n", feci, interface_type);
 			return NULL;
 		}
 
@@ -2670,8 +3353,8 @@ identifier_update:
 		/*
 		 * Copy netdev address to the type info.
 		 */
-		memcpy(type_info.rawip.address, dev->dev_addr, 6);
-                DEBUG_TRACE("%p: Net device: %p is RAWIP, MAC addr: %pM\n",
+		ether_addr_copy(type_info.rawip.address, dev->dev_addr);
+                DEBUG_TRACE("%px: Net device: %px is RAWIP, MAC addr: %pM\n",
                                feci, dev, type_info.rawip.address);
 
                 /*
@@ -2685,15 +3368,15 @@ identifier_update:
 	/*
 	 * OVPN Tunnel?
 	 */
-	if ((dev_type == ARPHRD_NONE) && (dev->priv_flags & IFF_TUN_TAP)) {
+	if ((dev_type == ARPHRD_NONE) && (dev->priv_flags_ext & IFF_EXT_TUN_TAP)) {
 		struct net_device *tun_dev = NULL;
 		ip_addr_t saddr, daddr;
 
-		DEBUG_TRACE("Net device: %p is OVPN type: %d\n", dev, dev_type);
+		DEBUG_TRACE("Net device: %px is OVPN type: %d\n", dev, dev_type);
 
 		ae_interface_num = ecm_interface_ovpn_get_ifnum(dev, skb, &tun_dev);
 		if ((ae_interface_num <= 0) || !tun_dev) {
-			DEBUG_WARN("%p: Couldn't get OVPN acceleration interface number\n", dev);
+			DEBUG_WARN("%px: Couldn't get OVPN acceleration interface number\n", dev);
 			return NULL;
 		}
 
@@ -2719,7 +3402,7 @@ identifier_update:
 	 * If this is NOT PPP then it is unknown to the ecm
 	 */
 	if (dev_type != ARPHRD_PPP) {
-		DEBUG_TRACE("%p: Net device: %p is UNKNOWN type: %d\n", feci, dev, dev_type);
+		DEBUG_TRACE("%px: Net device: %px is UNKNOWN type: %d\n", feci, dev, dev_type);
 		type_info.unknown.os_specific_ident = dev_interface_num;
 
 		/*
@@ -2734,7 +3417,7 @@ identifier_update:
 	 * PPP Support is NOT provided for.
 	 * Interface is therefore unknown
 	 */
-	DEBUG_TRACE("%p: Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", feci, dev, dev_type);
+	DEBUG_TRACE("%px: Net device: %px is UNKNOWN (PPP Unsupported) type: %d\n", feci, dev, dev_type);
 	type_info.unknown.os_specific_ident = dev_interface_num;
 
 	/*
@@ -2751,12 +3434,12 @@ identifier_update:
 	 * ppp_is_multilink() and ppp_hold_channels() which acquire same lock
 	 */
 
-	if ((dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(dev)) {
+	if ((dev->priv_flags_ext & IFF_EXT_PPP_L2TPV2) && ppp_is_xmit_locked(dev)) {
 		if (skb && (skb->skb_iif == dev->ifindex)) {
 			struct pppol2tp_common_addr info;
 
 			if (__ppp_is_multilink(dev) > 0) {
-				DEBUG_TRACE("%p: Net device: %p is MULTILINK PPP - Unknown to the ECM\n", feci, dev);
+				DEBUG_TRACE("%px: Net device: %px is MULTILINK PPP - Unknown to the ECM\n", feci, dev);
 				type_info.unknown.os_specific_ident = dev_interface_num;
 
 				/*
@@ -2767,7 +3450,7 @@ identifier_update:
 			}
 			channel_count = __ppp_hold_channels(dev, ppp_chan, 1);
 			if (channel_count != 1) {
-				DEBUG_TRACE("%p: Net device: %p PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
+				DEBUG_TRACE("%px: Net device: %px PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
 					    feci, dev, channel_count);
 				type_info.unknown.os_specific_ident = dev_interface_num;
 
@@ -2797,7 +3480,7 @@ identifier_update:
 			 */
 			ppp_release_channels(ppp_chan, 1);
 
-			DEBUG_TRACE("%p: Net device: %p PPPo2L2TP session: %d,n", feci, dev, type_info.pppol2tpv2.l2tp.session.peer_session_id);
+			DEBUG_TRACE("%px: Net device: %px PPPo2L2TP session: %d,n", feci, dev, type_info.pppol2tpv2.l2tp.session.peer_session_id);
 
 			/*
 			 * Establish this type of interface
@@ -2809,19 +3492,21 @@ identifier_update:
 #endif
 
 #ifdef ECM_INTERFACE_PPTP_ENABLE
-	if ((protocol == IPPROTO_GRE) && skb && v4_hdr && (dev->priv_flags & IFF_PPP_PPTP)) {
-		struct gre_hdr_pptp *gre_hdr;
+	if ((protocol == IPPROTO_GRE) && skb && v4_hdr && (dev->priv_flags_ext & IFF_EXT_PPP_PPTP)) {
+		struct gre_base_hdr *gre_hdr;
 		uint16_t proto;
 		int ret;
 
 		skb_pull(skb, sizeof(struct iphdr));
-		gre_hdr = (struct gre_hdr_pptp *)(skb->data);
+		gre_hdr = (struct gre_base_hdr *)(skb->data);
 		proto = ntohs(gre_hdr->protocol);
-		if ((gre_hdr->version == GRE_VERSION_PPTP) && (proto == GRE_PROTOCOL_PPTP)) {
-			ret = pptp_session_find(&opt, gre_hdr->call_id, v4_hdr->daddr);
+		if ((gre_hdr->flags & GRE_VERSION) == ECM_GRE_VERSION_1) {
+			ecm_gre_hdr_pptp *hdr = (ecm_gre_hdr_pptp *)gre_hdr;
+
+			ret = pptp_session_find(&opt, hdr->call_id, v4_hdr->daddr);
 			if (ret < 0) {
 				skb_push(skb, sizeof(struct iphdr));
-				DEBUG_WARN("%p: PPTP session info not found\n", feci);
+				DEBUG_WARN("%px: PPTP session info not found\n", feci);
 				return NULL;
 			}
 
@@ -2854,7 +3539,7 @@ identifier_update:
 
 		skb_push(skb, sizeof(struct iphdr));
 
-		DEBUG_TRACE("%p: Unknown GRE protocol\n", feci);
+		DEBUG_TRACE("%px: Unknown GRE protocol\n", feci);
 		type_info.unknown.os_specific_ident = dev_interface_num;
 
 		/*
@@ -2869,7 +3554,7 @@ identifier_update:
 	 * First: If this is multi-link then we do not support it
 	 */
 	if (ppp_is_multilink(dev) > 0) {
-		DEBUG_TRACE("%p: Net device: %p is MULTILINK PPP - Unknown to the ECM\n", feci, dev);
+		DEBUG_TRACE("%px: Net device: %px is MULTILINK PPP - Unknown to the ECM\n", feci, dev);
 		type_info.unknown.os_specific_ident = dev_interface_num;
 
 		/*
@@ -2879,7 +3564,7 @@ identifier_update:
 		return ii;
 	}
 
-	DEBUG_TRACE("%p: Net device: %p is PPP\n", feci, dev);
+	DEBUG_TRACE("%px: Net device: %px is PPP\n", feci, dev);
 
 	/*
 	 * Get the PPP channel and then enquire what kind of channel it is
@@ -2887,7 +3572,7 @@ identifier_update:
 	 */
 	channel_count = ppp_hold_channels(dev, ppp_chan, 1);
 	if (channel_count != 1) {
-		DEBUG_TRACE("%p: Net device: %p PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
+		DEBUG_TRACE("%px: Net device: %px PPP has %d channels - ECM cannot handle this (interface becomes Unknown type)\n",
 				feci, dev, channel_count);
 		type_info.unknown.os_specific_ident = dev_interface_num;
 
@@ -2927,7 +3612,7 @@ identifier_update:
 		 */
 		ppp_release_channels(ppp_chan, 1);
 
-		DEBUG_TRACE("%p: Net device: %p PPPo2L2TP session: %d,n", feci, dev, type_info.pppol2tpv2.l2tp.session.peer_session_id);
+		DEBUG_TRACE("%px: Net device: %px PPPo2L2TP session: %d,n", feci, dev, type_info.pppol2tpv2.l2tp.session.peer_session_id);
 
 		/*
 		 * Establish this type of interface
@@ -2938,15 +3623,22 @@ identifier_update:
 #endif
 #ifdef ECM_INTERFACE_PPPOE_ENABLE
 	if (channel_protocol == PX_PROTO_OE) {
+		struct pppoe_opt addressing;
+
 		/*
 		 * PPPoE channel
 		 */
-		DEBUG_TRACE("%p: Net device: %p PPP channel is PPPoE\n", feci, dev);
+		DEBUG_TRACE("%px: Net device: %px PPP channel is PPPoE\n", feci, dev);
 
 		/*
 		 * Get PPPoE session information and the underlying device it is using.
 		 */
-		pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+		if (pppoe_channel_addressing_get(ppp_chan[0], &addressing)) {
+			DEBUG_WARN("%px: failed to get PPPoE addressing info\n", feci);
+			ppp_release_channels(ppp_chan, 1);
+			return NULL;
+		}
+
 		type_info.pppoe.pppoe_session_id = (uint16_t)ntohs((uint16_t)addressing.pa.sid);
 		memcpy(type_info.pppoe.remote_mac, addressing.pa.remote, ETH_ALEN);
 		dev_put(addressing.dev);
@@ -2956,7 +3648,7 @@ identifier_update:
 		 */
 		ppp_release_channels(ppp_chan, 1);
 
-		DEBUG_TRACE("%p: Net device: %p PPPoE session: %x, remote mac: %pM\n",
+		DEBUG_TRACE("%px: Net device: %px PPPoE session: %x, remote mac: %pM\n",
 			    feci, dev, type_info.pppoe.pppoe_session_id, type_info.pppoe.remote_mac);
 
 		/*
@@ -2980,7 +3672,7 @@ identifier_update:
 		type_info.pptp.src_ip = ntohl(opt.src_addr.sin_addr.s_addr);
 		type_info.pptp.dst_ip = ntohl(opt.dst_addr.sin_addr.s_addr);
 
-		DEBUG_TRACE("%p: Net device: %p PPTP source call id: %d,n", feci, dev, type_info.pptp.src_call_id);
+		DEBUG_TRACE("%px: Net device: %px PPTP source call id: %d,n", feci, dev, type_info.pptp.src_call_id);
 		ppp_release_channels(ppp_chan, 1);
 
 		interface_type = feci->ae_interface_type_get(feci, dev);
@@ -3000,7 +3692,7 @@ identifier_update:
 		return ii;
 	}
 #endif
-	DEBUG_TRACE("%p: Net device: %p PPP channel protocol: %d - Unknown to the ECM\n", feci, dev, channel_protocol);
+	DEBUG_TRACE("%px: Net device: %px PPP channel protocol: %d - Unknown to the ECM\n", feci, dev, channel_protocol);
 	type_info.unknown.os_specific_ident = dev_interface_num;
 
 	/*
@@ -3062,15 +3754,8 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 		 * If the interface could not be established then we abort
 		 */
 		if (!ii) {
-			DEBUG_WARN("Failed to establish interface: %p, name: %s\n", dest_dev, dest_dev->name);
-			dev_put(dest_dev);
-
-			/*
-			 * Release the interfaces heirarchy we constructed to this point.
-			 */
-			ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
-			ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
-			return ECM_DB_IFACE_HEIRARCHY_MAX;
+			DEBUG_WARN("Failed to establish interface: %px, name: %s\n", dest_dev, dest_dev->name);
+			goto fail;
 		}
 
 		/*
@@ -3091,7 +3776,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			int channel_protocol;
 			struct pppoe_opt addressing;
 #endif
-			DEBUG_TRACE("Net device: %p is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev->name);
+			DEBUG_TRACE("Net device: %px is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev->name);
 			next_dev = NULL;
 
 			if (dest_dev_type == ARPHRD_ETHER) {
@@ -3109,43 +3794,52 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 					 */
 					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
-					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
+					DEBUG_TRACE("Net device: %px is VLAN, slave dev: %px (%s)\n",
 							dest_dev, next_dev, next_dev->name);
 					break;
 				}
 
 				/*
-				 * BRIDGE?
+				 * LINUX_BRIDGE/OVS_BRIDGE?
 				 */
-				if (ecm_front_end_is_bridge_device(dest_dev)) {
-					if (!ecm_front_end_is_bridge_port(br_slave_dev)) {
-						DEBUG_ASSERT(NULL, "%p: expected only bridge slave here\n", interface);
+				if (ecm_front_end_is_bridge_device(dest_dev)
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+					|| ecm_front_end_is_ovs_bridge_device(dest_dev)
+#endif
+				   ) {
+					if (!br_slave_dev) {
+						goto fail;
+					}
 
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
-						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
-						dev_put(dest_dev);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					if (!ecm_front_end_is_bridge_port(br_slave_dev)
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+					&& !ecm_interface_is_ovs_bridge_port(br_slave_dev)
+#endif
+					) {
+						DEBUG_ASSERT(NULL, "%px: expected only bridge slave here\n", interface);
+						goto fail;
 					}
 
 					next_dev = br_slave_dev;
-					if (!next_dev) {
-						DEBUG_WARN("Unable to obtain output port \n");
-
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
-						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
-						dev_put(dest_dev);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
-					}
-					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					DEBUG_TRACE("Net device: %px is BRIDGE, next_dev: %px (%s)\n", dest_dev, next_dev, next_dev->name);
 					dev_hold(next_dev);
 					break;
 				}
+
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+				/*
+				 * MAC-VLAN?
+				 */
+				if (netif_is_macvlan(dest_dev)) {
+					if (ecm_interface_macvlan_mode_is_valid(dest_dev)) {
+						next_dev = macvlan_dev_real_dev(dest_dev);
+						dev_hold(next_dev);
+						DEBUG_TRACE("%px: Net device: %px is MAC-VLAN, slave dev: %px (%s)\n",
+								feci, dest_dev, next_dev, next_dev->name);
+						break;
+					}
+				}
+#endif
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
@@ -3207,18 +3901,11 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 
 					if (!(next_dev && netif_carrier_ok(next_dev))) {
 						DEBUG_WARN("Unable to obtain LAG output slave device\n");
-						dev_put(dest_dev);
-
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
-						ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
+						goto fail;
 					}
 
 					dev_hold(next_dev);
-					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					DEBUG_TRACE("Net device: %px is LAG, slave dev: %px (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
 #endif
@@ -3227,7 +3914,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 				 * ETHERNET!
 				 * Just plain ethernet it seems.
 				 */
-				DEBUG_TRACE("Net device: %p is ETHERNET\n", dest_dev);
+				DEBUG_TRACE("Net device: %px is ETHERNET\n", dest_dev);
 				break;
 			}
 
@@ -3235,7 +3922,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 * LOOPBACK?
 			 */
 			if (dest_dev_type == ARPHRD_LOOPBACK) {
-				DEBUG_TRACE("Net device: %p is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
 				break;
 			}
 
@@ -3243,7 +3930,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 * IPSEC?
 			 */
 			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
-				DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
 				/*
 				 * TODO Figure out the next device the tunnel is using...
 				 */
@@ -3254,7 +3941,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 * SIT (6-in-4)?
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
-				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
 				/*
 				 * TODO Figure out the next device the tunnel is using...
 				 */
@@ -3265,7 +3952,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 * IPIP6 Tunnel?
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
-				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
 				/*
 				 * TODO Figure out the next device the tunnel is using...
 				 */
@@ -3276,23 +3963,23 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.
 			 */
 			if (dest_dev_type != ARPHRD_PPP) {
-				DEBUG_TRACE("Net device: %p is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
 				break;
 			}
 
 #ifndef ECM_INTERFACE_PPP_ENABLE
-			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
+			DEBUG_TRACE("Net device: %px is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
 #else
 			/*
 			 * PPP - but what is the channel type?
 			 * First: If this is multi-link then we do not support it
 			 */
 			if (ppp_is_multilink(dest_dev) > 0) {
-				DEBUG_TRACE("Net device: %p is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
+				DEBUG_TRACE("Net device: %px is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
 				break;
 			}
 
-			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
+			DEBUG_TRACE("Net device: %px is PPP\n", dest_dev);
 
 			/*
 			 * Get the PPP channel and then enquire what kind of channel it is
@@ -3300,7 +3987,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 */
 			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
 			if (channel_count != 1) {
-				DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n",
+				DEBUG_TRACE("Net device: %px PPP has %d channels - Unknown to the ECM\n",
 						dest_dev, channel_count);
 				break;
 			}
@@ -3311,7 +3998,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			 */
 			channel_protocol = ppp_channel_get_protocol(ppp_chan[0]);
 			if (channel_protocol != PX_PROTO_OE) {
-				DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
+				DEBUG_TRACE("Net device: %px PPP channel protocol: %d - Unknown to the ECM\n",
 						dest_dev, channel_protocol);
 
 				/*
@@ -3325,12 +4012,16 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 			/*
 			 * PPPoE channel
 			 */
-			DEBUG_TRACE("Net device: %p PPP channel is PPPoE\n", dest_dev);
+			DEBUG_TRACE("Net device: %px PPP channel is PPPoE\n", dest_dev);
 
 			/*
 			 * Get PPPoE session information and the underlying device it is using.
 			 */
-			pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+			if (pppoe_channel_addressing_get(ppp_chan[0], &addressing)) {
+				DEBUG_WARN("%px: failed to get PPPoE addressing info\n", dest_dev);
+				ppp_release_channels(ppp_chan, 1);
+				break;
+			}
 
 			/*
 			 * Copy the dev hold into this, we will release the hold later
@@ -3358,7 +4049,7 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 #if DEBUG_LEVEL > 1
 			ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
 			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
-				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n", \
+				DEBUG_TRACE("\tInterface @ %d: %px, type: %d, name: %s\n", \
 						i, to_list_single[i], ecm_db_iface_type_get(to_list_single[i]), \
 						ecm_db_interface_type_to_string(ecm_db_iface_type_get(to_list_single[i])));
 			}
@@ -3373,11 +4064,31 @@ static uint32_t ecm_interface_multicast_heirarchy_construct_single(struct ecm_fr
 		dest_dev_type = dest_dev->type;
 	}
 
+fail:
 	dev_put(dest_dev);
 
 	ecm_db_multicast_copy_if_heirarchy(to_list_single, interface);
 	ecm_db_connection_interfaces_deref(to_list_single, current_interface_index);
 	return ECM_DB_IFACE_HEIRARCHY_MAX;
+}
+
+/*
+ * ecm_interface_hierarchy_delete()
+ * 	Delete hierarchy of the requested interfaces.
+ */
+static inline void ecm_interface_hierarchy_delete(struct ecm_db_iface_instance *interfaces,
+							uint32_t *interface_first_base,
+							int valid_if)
+{
+	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
+	struct ecm_db_iface_instance *ifaces;
+	int i;
+
+	for (i = 0; i < valid_if; i++) {
+		ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
+		ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
+		ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
+	}
 }
 
 /*
@@ -3401,7 +4112,6 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 								uint32_t *interface_first_base, bool mfc_update,
 								__be16 *layer4hdr, struct sk_buff *skb)
 {
-	struct ecm_db_iface_instance *to_list_single[ECM_DB_IFACE_HEIRARCHY_MAX];
 	struct ecm_db_iface_instance *ifaces;
 	struct net_device *dest_dev = NULL;
 	struct net_device *br_dev_src = NULL;
@@ -3414,16 +4124,24 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 	int if_index;
 	int ii_cnt;
 	int total_ii_count = 0;
-	bool src_dev_is_bridge = false;
+	bool src_dev_is_bridge = false, dest_dev_is_br_dev_src = false;
 
 	DEBUG_TRACE("Construct interface heirarchy for dest_addr: " ECM_IP_ADDR_DOT_FMT " src_addr: " ECM_IP_ADDR_DOT_FMT "total destination ifs %d\n",
 			ECM_IP_ADDR_TO_DOT(packet_dest_addr), ECM_IP_ADDR_TO_DOT(packet_src_addr), max_if);
 
 	/*
 	 * Check if the source net_dev is a bridge slave.
+	 *
+	 * TODO: We are already considering ingress bridge device and
+	 * adding it to dst_dev in ecm_nss_multicast_ipv4_connection_process().
+	 * Check if this can be removed.
 	 */
 	if (in_dev && !mfc_update) {
-		if (ecm_front_end_is_bridge_port(in_dev)) {
+		if (ecm_front_end_is_bridge_port(in_dev)
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+				|| ecm_interface_is_ovs_bridge_port(in_dev)
+#endif
+		   ) {
 			br_dev_src = ecm_interface_get_and_hold_dev_master(in_dev);
 			DEBUG_ASSERT(br_dev_src, "Expected a master\n");
 
@@ -3443,7 +4161,6 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				 */
 				max_if++;
 			}
-
 		}
 	}
 
@@ -3457,41 +4174,44 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 	 */
 	for (if_index = 0, valid_if = 0; if_index < max_if; if_index++) {
 		dst_if_index = ecm_db_multicast_if_first_get_at_index(dst_if_index_base, if_index);
-
 		if (*dst_if_index == ECM_INTERFACE_LOOPBACK_DEV_INDEX) {
 			continue;
 		}
 
+		dest_dev_is_br_dev_src = false;
 		dest_dev = dev_get_by_index(&init_net, *dst_if_index);
 		if (!dest_dev) {
 			if (!src_dev_is_bridge) {
-				int i;
-
 				/*
 				 * If already constructed any interface heirarchies before hitting
 				 * this error condition then Deref all interface heirarchies.
 				 */
 				if (valid_if > 0) {
-					for (i = 0; i < valid_if; i++) {
-						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
-						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
-					}
+					ecm_interface_hierarchy_delete(interfaces, interface_first_base, valid_if);
 				}
 
-				/*
-				 * If valid netdev not found, Return 0
-				 */
-				return 0;
+				goto fail1;
 			}
 
 			dest_dev = br_dev_src;
 
+			/*
+			 * In some cases when WAN interface is added to bridge and traffic is downstream,
+			 * the bridge device is part of the destination list from MFC, and at the same time
+			 * 'src_dev_is_bridge' will be true as well. In such cases we will need to release
+			 * the hold on the bridge device separately for dest_dev and br_dev_src.
+			 * Setting this flag to true indicates that this is not the case,
+			 * and that releasing the hold once is enough
+			 */
+			dest_dev_is_br_dev_src = true;
 		}
 
 		dest_dev_type = dest_dev->type;
-
-		if (ecm_front_end_is_bridge_device(dest_dev)) {
+		if (ecm_front_end_is_bridge_device(dest_dev)
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+			|| ecm_front_end_is_ovs_bridge_device(dest_dev)
+#endif
+		   ) {
 			struct net_device *mc_br_slave_dev = NULL;
 			uint32_t mc_max_dst = ECM_DB_MULTICAST_IF_MAX;
 			uint32_t mc_dst_if_index[ECM_DB_MULTICAST_IF_MAX];
@@ -3499,15 +4219,19 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 			if (ECM_IP_ADDR_IS_V4(packet_src_addr)) {
 				if_num = mc_bridge_ipv4_get_if(dest_dev, htonl((packet_src_addr[0])), htonl(packet_dest_addr[0]), mc_max_dst, mc_dst_if_index);
 			} else {
+#ifdef ECM_IPV6_ENABLE
 				struct in6_addr origin6;
 				struct in6_addr group6;
 				ECM_IP_ADDR_TO_NIN6_ADDR(origin6, packet_src_addr);
 				ECM_IP_ADDR_TO_NIN6_ADDR(group6, packet_dest_addr);
 				if_num = mc_bridge_ipv6_get_if(dest_dev, &origin6, &group6, mc_max_dst, mc_dst_if_index);
+#else
+				DEBUG_WARN("IPv6 support not enabled\n");
+				if_num = -1;
+#endif
 			}
 
 			if ((if_num < 0) || (if_num > ECM_DB_MULTICAST_IF_MAX)) {
-				int i;
 				DEBUG_WARN("MCS is not ready\n");
 
 				/*
@@ -3515,15 +4239,10 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				 * this error condition then Deref all interface heirarchies.
 				 */
 				if (valid_if > 0) {
-					for (i = 0; i < valid_if; i++) {
-						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
-						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
-					}
+					ecm_interface_hierarchy_delete(interfaces, interface_first_base, valid_if);
 				}
 
-				dev_put(dest_dev);
-				return 0;
+				goto fail2;
 			}
 
 			if (in_dev && !mfc_update) {
@@ -3531,30 +4250,20 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 			}
 
 			for (br_if = 0; br_if < if_num; br_if++) {
+				int total_if = valid_if + br_if;
+
 				mc_br_slave_dev = dev_get_by_index(&init_net, mc_dst_if_index[br_if]);
 				if (!mc_br_slave_dev) {
 					continue;
 				}
 
-				if ((valid_if + br_if) > ECM_DB_MULTICAST_IF_MAX) {
-					int i;
-
-					/*
-					 * If already constructed any interface heirarchies before hitting
-					 * this error condition then Deref all interface heirarchies.
-					 */
-					for (i = 0; i < (valid_if + br_if); i++) {
-						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
-						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
-					}
-
-					dev_put(dest_dev);
+				if (total_if > ECM_DB_MULTICAST_IF_MAX) {
+					ecm_interface_hierarchy_delete(interfaces, interface_first_base, total_if);
 					dev_put(mc_br_slave_dev);
-					return 0;
+					goto fail2;
 				}
 
-				ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, valid_if + br_if);
+				ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, total_if);
 				/*
 				 * Construct a single interface heirarchy of a multicast dev.
 				 */
@@ -3565,28 +4274,21 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 					 * If already constructed any interface heirarchies before hitting
 					 * this error condition then Deref all interface heirarchies.
 					 */
-					if ((valid_if + br_if) > 0) {
-						int i;
-						for (i = 0; i < (valid_if + br_if); i++) {
-							ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
-							ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
-							ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
-						}
+					if (total_if > 0) {
+						ecm_interface_hierarchy_delete(interfaces, interface_first_base, total_if);
 					}
 
-					dev_put(dest_dev);
 					dev_put(mc_br_slave_dev);
-					return 0;
+					goto fail2;
 				}
 
-				interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, (valid_if + br_if));
+				interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, total_if);
 				*interface_first = ii_cnt;
 				total_ii_count += ii_cnt;
 				dev_put(mc_br_slave_dev);
 			}
 
 			valid_if += br_if;
-
 		} else {
 
 			DEBUG_ASSERT(valid_if < ECM_DB_MULTICAST_IF_MAX, "Bad array index size %d\n", valid_if);
@@ -3602,16 +4304,10 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 				 * this error condition then Deref all interface heirarchies.
 				 */
 				if (valid_if > 0) {
-					int i;
-					for (i = 0; i < valid_if; i++) {
-						ifaces = ecm_db_multicast_if_heirarchy_get(interfaces, i);
-						ecm_db_multicast_copy_if_heirarchy(to_list_single, ifaces);
-						ecm_db_connection_interfaces_deref(to_list_single, interface_first_base[i]);
-					}
+					ecm_interface_hierarchy_delete(interfaces, interface_first_base, valid_if);
 				}
 
-				dev_put(dest_dev);
-				return 0;
+				goto fail2;
 			}
 
 			interface_first = ecm_db_multicast_if_first_get_at_index(interface_first_base, valid_if);
@@ -3620,9 +4316,28 @@ int32_t ecm_interface_multicast_heirarchy_construct_routed(struct ecm_front_end_
 			valid_if++;
 		}
 
+		if (!dest_dev_is_br_dev_src) {
+			dev_put(dest_dev);
+		}
+	}
+
+	if (br_dev_src) {
+		dev_put(br_dev_src);
+	}
+
+	return total_ii_count;
+
+fail2:
+	if (!dest_dev_is_br_dev_src) {
 		dev_put(dest_dev);
 	}
-	return total_ii_count;
+
+fail1:
+	if (br_dev_src) {
+		dev_put(br_dev_src);
+	}
+
+	return 0;
 }
 EXPORT_SYMBOL(ecm_interface_multicast_heirarchy_construct_routed);
 
@@ -3866,6 +4581,35 @@ static struct net_device *ecm_interface_should_update_egress_device_bridged(
 	return bridge;
 }
 
+static inline bool ecm_interface_is_tunnel_endpoint(struct sk_buff *skb, struct net_device *dev, int ip_version, int protocol)
+{
+	if (ip_version == 4) {
+		if (protocol == IPPROTO_IPV6) {
+			return true;
+		}
+
+		if (protocol == IPPROTO_UDP && udp_hdr(skb)->dest == htons(4500)) {
+			return true;
+		}
+	}
+
+	if (ip_version == 6 && protocol == IPPROTO_IPIP) {
+		return true;
+	}
+
+	if (protocol == IPPROTO_GRE || protocol == IPPROTO_ESP) {
+		return true;
+	}
+
+#ifdef ECM_INTERFACE_OVPN_ENABLE
+	if (dev->type == ARPHRD_NONE && dev->priv_flags_ext & IFF_EXT_TUN_TAP) {
+		return true;
+	}
+#endif
+
+	return false;
+}
+
 /*
  * ecm_interface_heirarchy_construct()
  *	Construct an interface heirarchy.
@@ -3902,7 +4646,8 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						struct net_device *given_dest_dev,
 						bool is_routed, struct net_device *given_src_dev,
 						uint8_t *dest_node_addr, uint8_t *src_node_addr,
-						__be16 *layer4hdr, struct sk_buff *skb)
+						__be16 *layer4hdr, struct sk_buff *skb,
+						struct ecm_front_end_ovs_params *op)
 {
 	int protocol;
 	ip_addr_t src_addr;
@@ -3931,17 +4676,17 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	ECM_IP_ADDR_COPY(dest_addr, lookup_dest_addr);
 
 	if (ip_version == 4) {
-		DEBUG_TRACE("%p: Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d (serial %u)\n",
+		DEBUG_TRACE("%px: Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_DOT_FMT " to dest_addr: " ECM_IP_ADDR_DOT_FMT ", protocol: %d (serial %u)\n",
 				feci, ECM_IP_ADDR_TO_DOT(src_addr), ECM_IP_ADDR_TO_DOT(dest_addr), protocol,
 				serial);
 #ifdef ECM_IPV6_ENABLE
 	} else if (ip_version == 6) {
-		DEBUG_TRACE("%p: Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d (serial %u)\n",
+		DEBUG_TRACE("%px: Construct interface heirarchy for from src_addr: " ECM_IP_ADDR_OCTAL_FMT " to dest_addr: " ECM_IP_ADDR_OCTAL_FMT ", protocol: %d (serial %u)\n",
 				feci, ECM_IP_ADDR_TO_OCTAL(src_addr), ECM_IP_ADDR_TO_OCTAL(dest_addr), protocol,
 				serial);
 #endif
 	} else {
-		DEBUG_WARN("%p: Wrong IP protocol: %d\n", feci, ip_version);
+		DEBUG_WARN("%px: Wrong IP protocol: %d\n", feci, ip_version);
 		return ECM_DB_IFACE_HEIRARCHY_MAX;
 	}
 
@@ -3974,18 +4719,15 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
 	 */
 	if (dest_dev && from_local_addr) {
-		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
-		    ((ip_version == 6) && (protocol == IPPROTO_IPIP)) ||
-					  (protocol == IPPROTO_GRE) ||
-		    ((given_dest_dev->type == ARPHRD_NONE) && (given_dest_dev->priv_flags & IFF_TUN_TAP))) {
+		if (ecm_interface_is_tunnel_endpoint(skb, given_dest_dev, ip_version, protocol)) {
 			dev_put(dest_dev);
 			dest_dev = given_dest_dev;
 			if (dest_dev) {
 				dev_hold(dest_dev);
 				if (ip_version == 4) {
-					DEBUG_TRACE("%p: HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", feci, "IPV4", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
+					DEBUG_TRACE("%px: HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %px(%s)\n", feci, "IPV4", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
 				} else {
-					DEBUG_TRACE("%p: HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", feci, "IPV6", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+					DEBUG_TRACE("%px: HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", feci, "IPV6", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
 				}
 			}
 		}
@@ -3996,12 +4738,14 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	/*
 	 * if the address is a local address and indev=l2tp.
 	 */
-	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
-		dev_put(dest_dev);
-		dest_dev = given_dest_dev;
-		if (dest_dev) {
-			dev_hold(dest_dev);
-			DEBUG_TRACE("%p: l2tp packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags_ext & IFF_EXT_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
+		if (!dst_xfrm(skb_dst(skb)) || (dest_dev->type != ECM_ARPHRD_IPSEC_TUNNEL_TYPE)) {
+			dev_put(dest_dev);
+			dest_dev = given_dest_dev;
+			if (dest_dev) {
+				dev_hold(dest_dev);
+				DEBUG_TRACE("%px: l2tp packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+			}
 		}
 	}
 #endif
@@ -4010,18 +4754,35 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	/*
 	 * if the address is a local address and indev=PPTP.
 	 */
-	if (protocol == IPPROTO_GRE && given_dest_dev && (given_dest_dev->priv_flags & IFF_PPP_PPTP)){
+	if (protocol == IPPROTO_GRE && given_dest_dev && (given_dest_dev->priv_flags_ext & IFF_EXT_PPP_PPTP)){
 		dev_put(dest_dev);
 		dest_dev = given_dest_dev;
 		if (dest_dev) {
 			dev_hold(dest_dev);
-			DEBUG_TRACE("%p: PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+			DEBUG_TRACE("%px: PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+		}
+	}
+#endif
+
+#ifdef ECM_INTERFACE_VXLAN_ENABLE
+	/*
+	 * if the address is a local address and indev=VxLAN.
+	 */
+	if (from_local_addr &&
+	    given_dest_dev &&
+	    (given_dest_dev->type == ARPHRD_ETHER) &&
+	    (netif_is_vxlan(given_dest_dev))) {
+		dev_put(dest_dev);
+		dest_dev = given_dest_dev;
+		if (dest_dev) {
+			dev_hold(dest_dev);
+			DEBUG_TRACE("%px: VxLAN tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
 		}
 	}
 #endif
 
 	if (!dest_dev) {
-		DEBUG_WARN("%p: dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr));
+		DEBUG_WARN("%px: dest_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr));
 		return ECM_DB_IFACE_HEIRARCHY_MAX;
 	}
 	dest_dev_name = dest_dev->name;
@@ -4056,25 +4817,22 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	 * E.G. IF WE TRIED TO RUN A TUNNEL OVER A VLAN OR QINQ THIS WILL BREAK AS WE DON'T DISCOVER THAT HIERARCHY
 	 */
 	if (src_dev && from_local_addr) {
-		if (((ip_version == 4) && (protocol == IPPROTO_IPV6)) ||
-		    ((ip_version == 6) && (protocol == IPPROTO_IPIP)) ||
-					  (protocol == IPPROTO_GRE) ||
-		    ((given_src_dev->type == ARPHRD_NONE) && (given_src_dev->priv_flags & IFF_TUN_TAP))) {
+		if (ecm_interface_is_tunnel_endpoint(skb, given_src_dev, ip_version, protocol)) {
 			dev_put(src_dev);
 			src_dev = given_src_dev;
 			if (src_dev) {
 				dev_hold(src_dev);
 				if (ip_version == 4) {
-					DEBUG_TRACE("%p: HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", feci, "IPV4", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
+					DEBUG_TRACE("%px: HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %px(%s)\n", feci, "IPV4", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
 				} else {
-					DEBUG_TRACE("%p: HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", feci, "IPV6", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+					DEBUG_TRACE("%px: HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", feci, "IPV6", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
 				}
 			}
 		}
 	}
 
 	if (!src_dev) {
-		DEBUG_WARN("%p: src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", feci, ECM_IP_ADDR_TO_OCTAL(src_addr));
+		DEBUG_WARN("%px: src_addr: " ECM_IP_ADDR_OCTAL_FMT " - cannot locate device\n", feci, ECM_IP_ADDR_TO_OCTAL(src_addr));
 		dev_put(dest_dev);
 		return ECM_DB_IFACE_HEIRARCHY_MAX;
 	}
@@ -4087,7 +4845,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 	if (src_dev == dest_dev) {
 		bool skip = false;
 
-		DEBUG_TRACE("%p: Protocol is :%d source dev and dest dev are same\n", feci, protocol);
+		DEBUG_TRACE("%px: Protocol is :%d source dev and dest dev are same\n", feci, protocol);
 
 		switch (ip_version) {
 		case 4:
@@ -4112,7 +4870,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 			break;
 
 		default:
-			DEBUG_WARN("%p: IP version = %d, Protocol = %d: Corrupted packet entered ecm\n", feci, ip_version, protocol);
+			DEBUG_WARN("%px: IP version = %d, Protocol = %d: Corrupted packet entered ecm\n", feci, ip_version, protocol);
 			skip = true;
 			break;
 		}
@@ -4145,7 +4903,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 		if (new_dest_dev) {
 			dev_put(dest_dev);
 			if (new_dest_dev != given_dest_dev) {
-				DEBUG_INFO("%p: Adjusted port for %pM is %s (given was %s)\n",
+				DEBUG_INFO("%px: Adjusted port for %pM is %s (given was %s)\n",
 					feci, dest_node_addr, new_dest_dev->name,
 					given_dest_dev->name);
 
@@ -4178,7 +4936,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 		 * If the interface could not be established then we abort
 		 */
 		if (!ii) {
-			DEBUG_WARN("%p: Failed to establish interface: %p, name: %s\n", feci, dest_dev, dest_dev_name);
+			DEBUG_WARN("%px: Failed to establish interface: %px, name: %s\n", feci, dest_dev, dest_dev_name);
 			dev_put(src_dev);
 			dev_put(dest_dev);
 
@@ -4209,7 +4967,7 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 #endif
 #endif
 
-			DEBUG_TRACE("%p: Net device: %p is type: %d, name: %s\n", feci, dest_dev, dest_dev_type, dest_dev_name);
+			DEBUG_TRACE("%px: Net device: %px is type: %d, name: %s\n", feci, dest_dev, dest_dev_type, dest_dev_name);
 			next_dev = NULL;
 
 			if (dest_dev_type == ARPHRD_ETHER) {
@@ -4228,12 +4986,41 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 					 */
 					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
-					DEBUG_TRACE("%p: Net device: %p is VLAN, slave dev: %p (%s)\n",
+					DEBUG_TRACE("%px: Net device: %px is VLAN, slave dev: %px (%s)\n",
 							feci, dest_dev, next_dev, next_dev->name);
 					if (current_interface_index == (ECM_DB_IFACE_HEIRARCHY_MAX - 1)) {
 						top_dev = dest_dev;
 					}
 					break;
+				}
+#endif
+
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+				/*
+				 * MAC-VLAN?
+				 */
+				if (netif_is_macvlan(dest_dev)) {
+					if (ecm_interface_macvlan_mode_is_valid(dest_dev)) {
+						next_dev = macvlan_dev_real_dev(dest_dev);
+						dev_hold(next_dev);
+						DEBUG_TRACE("%px: Net device: %px is MAC-VLAN, slave dev: %px (%s)\n",
+								feci, dest_dev, next_dev, next_dev->name);
+
+						/*
+						 * We need to take the master_dev's MAC address during
+						 * NSS rule push. During VLAN/MACVLAN the master_dev for the
+						 * physical interface will be set to NULL but still we need the
+						 * VLAN/MACVLAN dev's MAC address while pushing the rule. We identify
+						 * the same using top_dev variable.
+						 */
+						if (current_interface_index == (ECM_DB_IFACE_HEIRARCHY_MAX - 1)) {
+							top_dev = dest_dev;
+						}
+						break;
+					}
+
+					DEBUG_WARN("%px: Net device %px MACVLAN mode is not supported.\n", feci, dest_dev);
+					goto done;
 				}
 #endif
 
@@ -4259,15 +5046,28 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					} else {
-						if (!ecm_interface_get_next_node_mac_address(dest_addr, dest_dev, ip_version, mac_addr)) {
-							dev_put(src_dev);
-							dev_put(dest_dev);
+						ip_addr_t look_up_addr;
+						struct net_device *tmp_dev;
+						ECM_IP_ADDR_COPY(look_up_addr, dest_addr);
+						/*
+						 * If this is a local IP address, this means the interface hierarchy is being created for
+						 * TO_NAT or FROM_NAT direction. In these cases, since the IP address is a local IP address,
+						 * MAC lookup will find the local interface's MAC address which cannot be used for the slave port
+						 * look up in the forwarding database. So, we use the src_ip address for MAC look up.
+						 * For TO_NAT direction, src_ip address is the sender host's IP address. For FROM_NAT direction
+						 * src_ip address is the destination host's IP address.
+						 * FROM_NAT ---- > HOST (src_ip)
+						 * TO_NAT <----- HOST (src_ip)
+						 */
+						tmp_dev = ecm_interface_dev_find_by_local_addr(dest_addr);
+						if (tmp_dev) {
+							ECM_IP_ADDR_COPY(look_up_addr, src_addr);
+							dev_put(tmp_dev);
+						}
 
-							/*
-							 * Release the interfaces heirarchy we constructed to this point.
-							 */
-							ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-							return ECM_DB_IFACE_HEIRARCHY_MAX;
+						if (!ecm_interface_get_next_node_mac_address(look_up_addr, dest_dev, ip_version, mac_addr)) {
+							DEBUG_WARN("%px: Unable to find the host MAC address connected to the Linux bridge\n", feci);
+							goto done;
 						}
 					}
 
@@ -4275,22 +5075,61 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 						mac_addr, skb, serial);
 
 					if (!next_dev) {
-						DEBUG_WARN("%p: Unable to obtain output port for: %pM\n", feci, mac_addr);
-						dev_put(src_dev);
-						dev_put(dest_dev);
-
-						/*
-						 * Release the interfaces heirarchy we constructed to this point.
-						 */
-						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
-						return ECM_DB_IFACE_HEIRARCHY_MAX;
+						DEBUG_WARN("%px: Unable to obtain output port for: %pM\n", feci, mac_addr);
+						goto done;
 					}
-					DEBUG_TRACE("%p: Net device: %p is BRIDGE, next_dev: %p (%s)\n", feci, dest_dev, next_dev, next_dev->name);
+
+					DEBUG_TRACE("%px: Net device: %px is BRIDGE, next_dev: %px (%s)\n", feci, dest_dev, next_dev, next_dev->name);
+
 					if (current_interface_index == (ECM_DB_IFACE_HEIRARCHY_MAX - 1)) {
 						top_dev = dest_dev;
 					}
 					break;
 				}
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+				if (ovsmgr_is_ovs_master(dest_dev)) {
+					ip_addr_t look_up_addr;
+					uint8_t mac_addr[ETH_ALEN];
+					struct net_device *tmp_dev;
+					ECM_IP_ADDR_COPY(look_up_addr, dest_addr);
+
+					/*
+					 * If this is a local IP address, this means the interface hierarchy is being created for
+					 * TO_NAT or FROM_NAT direction. In these cases, since the IP address is a local IP address,
+					 * MAC lookup will find the local interface's MAC address which cannot be used for the slave port
+					 * look up in the forwarding database. So, we use the src_ip address for MAC look up.
+					 * For TO_NAT direction, src_ip address is the sender host's IP address. For FROM_NAT direction
+					 * src_ip address is the destination host's IP address.
+					 * FROM_NAT ---- > HOST (src_ip)
+					 * TO_NAT <----- HOST (src_ip)
+					 */
+					tmp_dev = ecm_interface_dev_find_by_local_addr(dest_addr);
+					if (tmp_dev) {
+						ECM_IP_ADDR_COPY(look_up_addr, src_addr);
+						dev_put(tmp_dev);
+					}
+
+					if (!ecm_interface_get_next_node_mac_address(look_up_addr, dest_dev, ip_version, mac_addr)) {
+						DEBUG_WARN("%px: Unable to find the host MAC address connected to the OVS bridge\n", feci);
+						goto done;
+					}
+
+					next_dev = ecm_interface_ovs_bridge_port_dev_get_and_ref(skb, dest_dev, src_addr, dest_addr, ip_version, protocol,
+											 is_routed, src_node_addr, mac_addr, layer4hdr, op);
+					if (!next_dev) {
+						DEBUG_WARN("%px: Unable to obtain OVS output port for: %pM\n", feci, mac_addr);
+						goto done;
+					}
+
+					DEBUG_TRACE("%px: Net device: %px is OVS BRIDGE, next_dev: %px (%s)\n", feci, dest_dev, next_dev, next_dev->name);
+
+					if (current_interface_index == (ECM_DB_IFACE_HEIRARCHY_MAX - 1)) {
+						top_dev = dest_dev;
+					}
+					break;
+				}
+#endif
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
@@ -4361,16 +5200,16 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 								}
 
 								if (ip_version == 4) {
-									DEBUG_TRACE("%p: Have a gw address " ECM_IP_ADDR_DOT_FMT "\n", feci, ECM_IP_ADDR_TO_DOT(gw_addr));
+									DEBUG_TRACE("%px: Have a gw address " ECM_IP_ADDR_DOT_FMT "\n", feci, ECM_IP_ADDR_TO_DOT(gw_addr));
 								}
 #ifdef ECM_IPV6_ENABLE
 
 								if (ip_version == 6) {
-									DEBUG_TRACE("%p: Have a gw address " ECM_IP_ADDR_OCTAL_FMT "\n", feci, ECM_IP_ADDR_TO_OCTAL(gw_addr));
+									DEBUG_TRACE("%px: Have a gw address " ECM_IP_ADDR_OCTAL_FMT "\n", feci, ECM_IP_ADDR_TO_OCTAL(gw_addr));
 								}
 #endif
 								if (ecm_interface_mac_addr_get_no_route(master_dev, gw_addr, dest_mac_addr)) {
-									DEBUG_TRACE("%p: Found the mac address for gateway\n", feci);
+									DEBUG_TRACE("%px: Found the mac address for gateway\n", feci);
 									dev_put(master_dev);
 									goto lag_success;
 								}
@@ -4378,13 +5217,21 @@ int32_t ecm_interface_heirarchy_construct(struct ecm_front_end_connection_instan
 								if (ip_version == 4) {
 									ecm_interface_send_arp_request(master_dev, dest_addr, false, gw_addr);
 
-									DEBUG_WARN("%p: Unable to obtain any MAC address for " ECM_IP_ADDR_DOT_FMT "\n", feci, ECM_IP_ADDR_TO_DOT(dest_addr));
+									DEBUG_WARN("%px: Unable to obtain any MAC address for " ECM_IP_ADDR_DOT_FMT "\n", feci, ECM_IP_ADDR_TO_DOT(dest_addr));
 								}
 #ifdef ECM_IPV6_ENABLE
+								/*
+								 * If there is a gw on the link, send the neighbor solicitation
+								 * message to that address.
+								 */
+								if (!ECM_IP_ADDR_IS_NULL(gw_addr)) {
+									ECM_IP_ADDR_COPY(dest_addr, gw_addr);
+								}
+
 								if (ip_version == 6) {
 									ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
 
-									DEBUG_WARN("%p: Unable to obtain any MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr));
+									DEBUG_WARN("%px: Unable to obtain any MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", feci, ECM_IP_ADDR_TO_OCTAL(dest_addr));
 								}
 #endif
 lag_fail:
@@ -4414,7 +5261,7 @@ lag_success:
 					if (next_dev && netif_carrier_ok(next_dev)) {
 						dev_hold(next_dev);
 					} else {
-						DEBUG_WARN("%p: Unable to obtain LAG output slave device\n", feci);
+						DEBUG_WARN("%px: Unable to obtain LAG output slave device\n", feci);
 						dev_put(src_dev);
 						dev_put(dest_dev);
 
@@ -4425,7 +5272,7 @@ lag_success:
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					}
 
-					DEBUG_TRACE("%p: Net device: %p is LAG, slave dev: %p (%s)\n", feci, dest_dev, next_dev, next_dev->name);
+					DEBUG_TRACE("%px: Net device: %px is LAG, slave dev: %px (%s)\n", feci, dest_dev, next_dev, next_dev->name);
 					break;
 				}
 #endif
@@ -4434,7 +5281,7 @@ lag_success:
 				 * ETHERNET!
 				 * Just plain ethernet it seems.
 				 */
-				DEBUG_TRACE("%p: Net device: %p is ETHERNET\n", feci, dest_dev);
+				DEBUG_TRACE("%px: Net device: %px is ETHERNET\n", feci, dest_dev);
 				break;
 			}
 
@@ -4443,7 +5290,7 @@ lag_success:
 			 * GRE Tunnel?
 			 */
 			if ((dest_dev_type == ARPHRD_IPGRE) || (dest_dev_type == ARPHRD_IP6GRE)) {
-				DEBUG_TRACE("%p: Net device: %p is GRE Tunnel type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is GRE Tunnel type: %d\n", feci, dest_dev, dest_dev_type);
 				break;
 			}
 #endif
@@ -4452,7 +5299,7 @@ lag_success:
 			 * LOOPBACK?
 			 */
 			if (dest_dev_type == ARPHRD_LOOPBACK) {
-				DEBUG_TRACE("%p: Net device: %p is LOOPBACK type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is LOOPBACK type: %d\n", feci, dest_dev, dest_dev_type);
 				break;
 			}
 
@@ -4460,7 +5307,7 @@ lag_success:
 			 * IPSEC?
 			 */
 			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
-				DEBUG_TRACE("%p: Net device: %p is IPSec tunnel type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is IPSec tunnel type: %d\n", feci, dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -4469,7 +5316,7 @@ lag_success:
 			 * SIT (6-in-4)?
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
-				DEBUG_TRACE("%p: Net device: %p is SIT (6-in-4) type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is SIT (6-in-4) type: %d\n", feci, dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -4478,7 +5325,7 @@ lag_success:
 			 * IPIP6 Tunnel?
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
-				DEBUG_TRACE("%p: Net device: %p is TUNIPIP6 type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is TUNIPIP6 type: %d\n", feci, dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -4489,7 +5336,7 @@ lag_success:
 			 */
 			if (dest_dev_type == ARPHRD_NONE) {
 				if (is_map_t_dev(dest_dev)) {
-					DEBUG_TRACE("%p: Net device: %p is MAP-T type: %d\n", feci, dest_dev, dest_dev_type);
+					DEBUG_TRACE("%px: Net device: %px is MAP-T type: %d\n", feci, dest_dev, dest_dev_type);
 					break;
 				}
 			}
@@ -4501,7 +5348,7 @@ lag_success:
 			 * If it is RAWIP type, there is no next device.
 			 */
 			if (dest_dev_type == ARPHRD_RAWIP) {
-				DEBUG_TRACE("%p: Net device: %p is RAWIP type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is RAWIP type: %d\n", feci, dest_dev, dest_dev_type);
 				break;
 			}
 #endif
@@ -4509,8 +5356,8 @@ lag_success:
 			/*
 			 * OVPN ?
 			 */
-			if ((dest_dev_type == ARPHRD_NONE) && (dest_dev->priv_flags & IFF_TUN_TAP)) {
-				DEBUG_TRACE("Net device: %p is OVPN, device name: %s\n", dest_dev, dest_dev->name);
+			if ((dest_dev_type == ARPHRD_NONE) && (dest_dev->priv_flags_ext & IFF_EXT_TUN_TAP)) {
+				DEBUG_TRACE("Net device: %px is OVPN, device name: %s\n", dest_dev, dest_dev->name);
 				break;
 			}
 #endif
@@ -4518,27 +5365,27 @@ lag_success:
 			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.
 			 */
 			if (dest_dev_type != ARPHRD_PPP) {
-				DEBUG_TRACE("%p: Net device: %p is UNKNOWN type: %d\n", feci, dest_dev, dest_dev_type);
+				DEBUG_TRACE("%px: Net device: %px is UNKNOWN type: %d\n", feci, dest_dev, dest_dev_type);
 				break;
 			}
 
 #ifndef ECM_INTERFACE_PPP_ENABLE
-			DEBUG_TRACE("%p: Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", feci, dest_dev, dest_dev_type);
+			DEBUG_TRACE("%px: Net device: %px is UNKNOWN (PPP Unsupported) type: %d\n", feci, dest_dev, dest_dev_type);
 #else
-			DEBUG_TRACE("%p: Net device: %p is PPP\n", feci, dest_dev);
+			DEBUG_TRACE("%px: Net device: %px is PPP\n", feci, dest_dev);
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
-			if ((given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
+			if ((given_src_dev->priv_flags_ext & IFF_EXT_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 				if (skb->skb_iif == dest_dev->ifindex) {
-					DEBUG_TRACE("%p: Net device: %p PPP channel is PPPoL2TPV2\n", feci, dest_dev);
+					DEBUG_TRACE("%px: Net device: %px PPP channel is PPPoL2TPV2\n", feci, dest_dev);
 					break;
 				}
 			}
 #endif
 
 #ifdef ECM_INTERFACE_PPTP_ENABLE
-			if (protocol == IPPROTO_GRE && dest_dev && (dest_dev->priv_flags & IFF_PPP_PPTP)) {
-				DEBUG_TRACE("%p: Net device: %p PPP channel is PPTP\n", feci, dest_dev);
+			if (protocol == IPPROTO_GRE && dest_dev && (dest_dev->priv_flags_ext & IFF_EXT_PPP_PPTP)) {
+				DEBUG_TRACE("%px: Net device: %px PPP channel is PPTP\n", feci, dest_dev);
 				break;
 			}
 #endif
@@ -4547,7 +5394,7 @@ lag_success:
 			 * First: If this is multi-link then we do not support it
 			 */
 			if (ppp_is_multilink(dest_dev) > 0) {
-				DEBUG_TRACE("%p: Net device: %p is MULTILINK PPP - Unknown to the ECM\n", feci, dest_dev);
+				DEBUG_TRACE("%px: Net device: %px is MULTILINK PPP - Unknown to the ECM\n", feci, dest_dev);
 				break;
 			}
 
@@ -4557,7 +5404,7 @@ lag_success:
 			 */
 			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
 			if (channel_count != 1) {
-				DEBUG_TRACE("%p: Net device: %p PPP has %d channels - Unknown to the ECM\n",
+				DEBUG_TRACE("%px: Net device: %px PPP has %d channels - Unknown to the ECM\n",
 						feci, dest_dev, channel_count);
 				break;
 			}
@@ -4575,7 +5422,7 @@ lag_success:
 				 * PPPoL2TPV2 channel
 				 */
 				ppp_release_channels(ppp_chan, 1);
-				DEBUG_TRACE("%p: Net device: %p PPP channel is PPPoL2TPV2\n", feci, dest_dev);
+				DEBUG_TRACE("%px: Net device: %px PPP channel is PPPoL2TPV2\n", feci, dest_dev);
 
 				/*
 				 * Release the channel.  Note that next_dev not held.
@@ -4588,12 +5435,16 @@ lag_success:
 				/*
 				 * PPPoE channel
 				 */
-				DEBUG_TRACE("%p: Net device: %p PPP channel is PPPoE\n", feci, dest_dev);
+				DEBUG_TRACE("%px: Net device: %px PPP channel is PPPoE\n", feci, dest_dev);
 
 				/*
 				 * Get PPPoE session information and the underlying device it is using.
 				 */
-				pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+				if (pppoe_channel_addressing_get(ppp_chan[0], &addressing)) {
+					DEBUG_WARN("%px: failed to get PPPoE addressing info\n", feci);
+					ppp_release_channels(ppp_chan, 1);
+					break;
+				}
 
 				/*
 				 * Copy the dev hold into this, we will release the hold later
@@ -4611,7 +5462,7 @@ lag_success:
 			}
 #endif
 
-			DEBUG_TRACE("%p: Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
+			DEBUG_TRACE("%px: Net device: %px PPP channel protocol: %d - Unknown to the ECM\n",
 				    feci, dest_dev, channel_protocol);
 
 			/*
@@ -4632,10 +5483,10 @@ lag_success:
 		 */
 		if (!next_dev) {
 			int32_t i __attribute__((unused));
-			DEBUG_INFO("%p: Completed interface heirarchy construct with first interface @: %d\n", feci, current_interface_index);
+			DEBUG_INFO("%px: Completed interface heirarchy construct with first interface @: %d\n", feci, current_interface_index);
 #if DEBUG_LEVEL > 1
 			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
-				DEBUG_TRACE("\t%p: Interface @ %d: %p, type: %d, name: %s\n",
+				DEBUG_TRACE("\t%px: Interface @ %d: %px, type: %d, name: %s\n",
 						feci, i, interfaces[i], ecm_db_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_iface_type_get(interfaces[i])));
 
 			}
@@ -4656,8 +5507,10 @@ lag_success:
 		dest_dev_type = dest_dev->type;
 	}
 
-	DEBUG_WARN("%p: Too many interfaces: %d\n", feci, current_interface_index);
-	DEBUG_ASSERT(current_interface_index == 0, "%p: Bad logic handling current_interface_index: %d\n", feci, current_interface_index);
+	DEBUG_WARN("%px: Too many interfaces: %d\n", feci, current_interface_index);
+	DEBUG_ASSERT(current_interface_index == 0, "%px: Bad logic handling current_interface_index: %d\n", feci, current_interface_index);
+
+done:
 	dev_put(src_dev);
 	dev_put(dest_dev);
 
@@ -4791,9 +5644,9 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			if (dest_dev) {
 				dev_hold(dest_dev);
 				if (ip_version == 4) {
-					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %px(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(dest_addr), dest_dev, dest_dev->name);
 				} else {
-					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+					DEBUG_TRACE("HACK: %s tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
 				}
 			}
 		}
@@ -4803,12 +5656,14 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 	/*
 	 * if the address is a local address and indev=l2tp.
 	 */
-	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
-		dev_put(dest_dev);
-		dest_dev = given_dest_dev;
-		if (dest_dev) {
-			dev_hold(dest_dev);
-			DEBUG_TRACE("l2tp packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+	if ((given_src_dev->type == ARPHRD_PPP) && (given_src_dev->priv_flags_ext & IFF_EXT_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
+		if (!dst_xfrm(skb_dst(skb)) || (dest_dev->type != ECM_ARPHRD_IPSEC_TUNNEL_TYPE)) {
+			dev_put(dest_dev);
+			dest_dev = given_dest_dev;
+			if (dest_dev) {
+				dev_hold(dest_dev);
+				DEBUG_TRACE("l2tp packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+			}
 		}
 	}
 #endif
@@ -4822,7 +5677,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 		dest_dev = given_dest_dev;
 		if (dest_dev) {
 			dev_hold(dest_dev);
-			DEBUG_TRACE("PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
+			DEBUG_TRACE("PPTP packet tunnel packet with dest_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", ECM_IP_ADDR_TO_OCTAL(dest_addr), dest_dev, dest_dev->name);
 		}
 	}
 #endif
@@ -4875,9 +5730,9 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			if (src_dev) {
 				dev_hold(src_dev);
 				if (ip_version == 4) {
-					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %p(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_DOT_FMT " uses dev: %px(%s)\n", "IPV6", ECM_IP_ADDR_TO_DOT(src_addr), src_dev, src_dev->name);
 				} else {
-					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+					DEBUG_TRACE("HACK: %s tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", "IPIP", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
 				}
 			}
 		}
@@ -4893,7 +5748,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			src_dev = given_src_dev;
 			if (src_dev) {
 				dev_hold(src_dev);
-				DEBUG_TRACE("l2tp tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %p(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
+				DEBUG_TRACE("l2tp tunnel packet with src_addr: " ECM_IP_ADDR_OCTAL_FMT " uses dev: %px(%s)\n", ECM_IP_ADDR_TO_OCTAL(src_addr), src_dev, src_dev->name);
 			}
 		}
 	}
@@ -4976,7 +5831,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 		 * If the interface could not be established then we abort
 		 */
 		if (!ii) {
-			DEBUG_WARN("Failed to establish interface: %p, name: %s\n", dest_dev, dest_dev_name);
+			DEBUG_WARN("Failed to establish interface: %px, name: %s\n", dest_dev, dest_dev_name);
 			dev_put(src_dev);
 			dev_put(dest_dev);
 
@@ -5007,7 +5862,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 #endif
 #endif
 
-			DEBUG_TRACE("Net device: %p is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev_name);
+			DEBUG_TRACE("Net device: %px is type: %d, name: %s\n", dest_dev, dest_dev_type, dest_dev_name);
 			next_dev = NULL;
 
 			if (dest_dev_type == ARPHRD_ETHER) {
@@ -5026,9 +5881,24 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 					 */
 					next_dev = ecm_interface_vlan_real_dev(dest_dev);
 					dev_hold(next_dev);
-					DEBUG_TRACE("Net device: %p is VLAN, slave dev: %p (%s)\n",
+					DEBUG_TRACE("Net device: %px is VLAN, slave dev: %px (%s)\n",
 							dest_dev, next_dev, next_dev->name);
 					break;
+				}
+#endif
+
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+				/*
+				 * MAC-VLAN?
+				 */
+				if (netif_is_macvlan(dest_dev)) {
+					if (ecm_interface_macvlan_mode_is_valid(dest_dev)) {
+						next_dev = macvlan_dev_real_dev(dest_dev);
+						dev_hold(next_dev);
+						DEBUG_TRACE("%px: Net device: %px is MAC-VLAN, slave dev: %px (%s)\n",
+								feci, dest_dev, next_dev, next_dev->name);
+						break;
+					}
 				}
 #endif
 
@@ -5078,9 +5948,48 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					}
-					DEBUG_TRACE("Net device: %p is BRIDGE, next_dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					DEBUG_TRACE("Net device: %px is BRIDGE, next_dev: %px (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
+
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+				/*
+				 * OVS_BRIDGE?
+				 */
+				if (ecm_front_end_is_ovs_bridge_device(dest_dev)) {
+					/*
+					 * Bridge
+					 * Figure out which port device the skb will go to using the dest_addr.
+					 */
+					uint8_t mac_addr[ETH_ALEN];
+
+					if (!ecm_interface_multicast_get_next_node_mac_address(next_dest_addr, dest_dev, ip_version, mac_addr)) {
+						dev_put(src_dev);
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces hierarchy we constructed to this point.
+						 */
+						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+					next_dev = ecm_interface_ovs_bridge_port_dev_get_and_ref(skb, dest_dev, src_addr, dest_addr, ip_version, protocol,
+											 is_routed, src_node_addr, mac_addr, layer4hdr, NULL);
+					if (!next_dev) {
+						DEBUG_WARN("Unable to obtain output port for: %pM\n", mac_addr);
+						dev_put(src_dev);
+						dev_put(dest_dev);
+
+						/*
+						 * Release the interfaces hierarchy we constructed to this point.
+						 */
+						ecm_db_connection_interfaces_deref(interfaces, current_interface_index);
+						return ECM_DB_IFACE_HEIRARCHY_MAX;
+					}
+					DEBUG_TRACE("Net device: %px is BRIDGE, next_dev: %px (%s)\n", dest_dev, next_dev, next_dev->name);
+					break;
+				}
+#endif
 
 #ifdef ECM_INTERFACE_BOND_ENABLE
 				/*
@@ -5164,6 +6073,14 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 									ecm_interface_send_arp_request(dest_dev, dest_addr, dest_on_link, dest_gw_addr);
 								}
 #ifdef ECM_IPV6_ENABLE
+								/*
+								 * If there is a gw on the link, send the neighbor solicitation
+								 * message to that address.
+								 */
+								if (!ECM_IP_ADDR_IS_NULL(dest_gw_addr)) {
+									ECM_IP_ADDR_COPY(dest_addr, dest_gw_addr);
+								}
+
 								if (ip_version == 6) {
 									DEBUG_WARN("Unable to obtain MAC address for " ECM_IP_ADDR_OCTAL_FMT "\n", ECM_IP_ADDR_TO_OCTAL(dest_addr));
 									ecm_interface_send_neighbour_solicitation(master_dev, dest_addr);
@@ -5208,7 +6125,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 						return ECM_DB_IFACE_HEIRARCHY_MAX;
 					}
 
-					DEBUG_TRACE("Net device: %p is LAG, slave dev: %p (%s)\n", dest_dev, next_dev, next_dev->name);
+					DEBUG_TRACE("Net device: %px is LAG, slave dev: %px (%s)\n", dest_dev, next_dev, next_dev->name);
 					break;
 				}
 #endif
@@ -5217,7 +6134,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 				 * ETHERNET!
 				 * Just plain ethernet it seems.
 				 */
-				DEBUG_TRACE("Net device: %p is ETHERNET\n", dest_dev);
+				DEBUG_TRACE("Net device: %px is ETHERNET\n", dest_dev);
 				break;
 			}
 
@@ -5225,7 +6142,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * LOOPBACK?
 			 */
 			if (dest_dev_type == ARPHRD_LOOPBACK) {
-				DEBUG_TRACE("Net device: %p is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is LOOPBACK type: %d\n", dest_dev, dest_dev_type);
 				break;
 			}
 
@@ -5233,7 +6150,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * IPSEC?
 			 */
 			if (dest_dev_type == ECM_ARPHRD_IPSEC_TUNNEL_TYPE) {
-				DEBUG_TRACE("Net device: %p is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is IPSec tunnel type: %d\n", dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -5242,7 +6159,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * SIT (6-in-4)?
 			 */
 			if (dest_dev_type == ARPHRD_SIT) {
-				DEBUG_TRACE("Net device: %p is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is SIT (6-in-4) type: %d\n", dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -5251,7 +6168,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * IPIP6 Tunnel?
 			 */
 			if (dest_dev_type == ARPHRD_TUNNEL6) {
-				DEBUG_TRACE("Net device: %p is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is TUNIPIP6 type: %d\n", dest_dev, dest_dev_type);
 				/* TODO Figure out the next device the tunnel is using... */
 				break;
 			}
@@ -5260,19 +6177,19 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * If this is NOT PPP then it is unknown to the ecm and we cannot figure out it's next device.
 			 */
 			if (dest_dev_type != ARPHRD_PPP) {
-				DEBUG_TRACE("Net device: %p is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
+				DEBUG_TRACE("Net device: %px is UNKNOWN type: %d\n", dest_dev, dest_dev_type);
 				break;
 			}
 
 #ifndef ECM_INTERFACE_PPP_ENABLE
-			DEBUG_TRACE("Net device: %p is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
+			DEBUG_TRACE("Net device: %px is UNKNOWN (PPP Unsupported) type: %d\n", dest_dev, dest_dev_type);
 #else
-			DEBUG_TRACE("Net device: %p is PPP\n", dest_dev);
+			DEBUG_TRACE("Net device: %px is PPP\n", dest_dev);
 
 #ifdef ECM_INTERFACE_L2TPV2_ENABLE
-			if ((given_src_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
+			if ((given_src_dev->priv_flags_ext & IFF_EXT_PPP_L2TPV2) && ppp_is_xmit_locked(given_src_dev)) {
 				if (skb->skb_iif == dest_dev->ifindex) {
-					DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
+					DEBUG_TRACE("Net device: %px PPP channel is PPPoL2TPV2\n", dest_dev);
 					break;
 				}
 			}
@@ -5280,7 +6197,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 
 #ifdef ECM_INTERFACE_PPTP_ENABLE
 			if (protocol == IPPROTO_GRE && dest_dev && dest_dev->type == ARPHRD_PPP) {
-				DEBUG_TRACE("Net device: %p PPP channel is PPTP\n", dest_dev);
+				DEBUG_TRACE("Net device: %px PPP channel is PPTP\n", dest_dev);
 				break;
 			}
 #endif
@@ -5289,7 +6206,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 * First: If this is multi-link then we do not support it
 			 */
 			if (ppp_is_multilink(dest_dev) > 0) {
-				DEBUG_TRACE("Net device: %p is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
+				DEBUG_TRACE("Net device: %px is MULTILINK PPP - Unknown to the ECM\n", dest_dev);
 				break;
 			}
 
@@ -5299,7 +6216,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			 */
 			channel_count = ppp_hold_channels(dest_dev, ppp_chan, 1);
 			if (channel_count != 1) {
-				DEBUG_TRACE("Net device: %p PPP has %d channels - Unknown to the ECM\n",
+				DEBUG_TRACE("Net device: %px PPP has %d channels - Unknown to the ECM\n",
 						dest_dev, channel_count);
 				break;
 			}
@@ -5317,7 +6234,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 				 * PPPoL2TPV2 channel
 				 */
 				ppp_release_channels(ppp_chan, 1);
-				DEBUG_TRACE("Net device: %p PPP channel is PPPoL2TPV2\n", dest_dev);
+				DEBUG_TRACE("Net device: %px PPP channel is PPPoL2TPV2\n", dest_dev);
 
 				/*
 				 * Release the channel.  Note that next_dev not held.
@@ -5330,12 +6247,16 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 				/*
 				 * PPPoE channel
 				 */
-				DEBUG_TRACE("Net device: %p PPP channel is PPPoE\n", dest_dev);
+				DEBUG_TRACE("Net device: %px PPP channel is PPPoE\n", dest_dev);
 
 				/*
 				 * Get PPPoE session information and the underlying device it is using.
 				 */
-				pppoe_channel_addressing_get(ppp_chan[0], &addressing);
+				if (pppoe_channel_addressing_get(ppp_chan[0], &addressing)) {
+					DEBUG_WARN("%px: failed to get PPPoE addressing info\n", dest_dev);
+					ppp_release_channels(ppp_chan, 1);
+					break;
+				}
 
 				/*
 				 * Copy the dev hold into this, we will release the hold later
@@ -5353,7 +6274,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			}
 #endif
 
-			DEBUG_TRACE("Net device: %p PPP channel protocol: %d - Unknown to the ECM\n",
+			DEBUG_TRACE("Net device: %px PPP channel protocol: %d - Unknown to the ECM\n",
 				    dest_dev, channel_protocol);
 
 			/*
@@ -5377,7 +6298,7 @@ int32_t ecm_interface_multicast_from_heirarchy_construct(struct ecm_front_end_co
 			DEBUG_INFO("Completed interface heirarchy construct with first interface @: %d\n", current_interface_index);
 #if DEBUG_LEVEL > 1
 			for (i = current_interface_index; i < ECM_DB_IFACE_HEIRARCHY_MAX; ++i) {
-				DEBUG_TRACE("\tInterface @ %d: %p, type: %d, name: %s\n",
+				DEBUG_TRACE("\tInterface @ %d: %px, type: %d, name: %s\n",
 						i, interfaces[i], ecm_db_iface_type_get(interfaces[i]), ecm_db_interface_type_to_string(ecm_db_iface_type_get(interfaces[i])));
 
 			}
@@ -5439,21 +6360,25 @@ static void ecm_interface_ovpn_stats_update(struct net_device *dev, ip_addr_t fr
  *	Given an interface list, walk the interfaces and update the stats for certain types.
  */
 static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_iface_instance *iface_list[],
-					uint8_t *mac_addr, bool is_mcast_flow, uint32_t tx_packets, uint32_t tx_bytes, uint32_t rx_packets,
+					uint8_t *mac_addr, bool is_mcast_to_if, uint32_t tx_packets, uint32_t tx_bytes, uint32_t rx_packets,
 					uint32_t rx_bytes, bool is_ported, struct ecm_db_connection_instance *ci)
 {
 	int list_index;
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+	bool update_mcast_rx_stats = false;
+#endif
 
 	for (list_index = iface_list_first; (list_index < ECM_DB_IFACE_HEIRARCHY_MAX); list_index++) {
 		struct ecm_db_iface_instance *ii;
 		ecm_db_iface_type_t ii_type;
 		char *ii_name;
 		struct net_device *dev;
+		struct rtnl_link_stats64 stats;
 
 		ii = iface_list[list_index];
 		ii_type = ecm_db_iface_type_get(ii);
 		ii_name = ecm_db_interface_type_to_string(ii_type);
-		DEBUG_TRACE("list_index: %d, ii: %p, type: %d (%s)\n", list_index, ii, ii_type, ii_name);
+		DEBUG_TRACE("list_index: %d, ii: %px, type: %d (%s)\n", list_index, ii, ii_type, ii_name);
 
 		/*
 		 * Locate real device in system
@@ -5463,9 +6388,9 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 			DEBUG_WARN("Could not locate interface\n");
 			continue;
 		}
-		DEBUG_TRACE("found dev: %p (%s)\n", dev, dev->name);
+		DEBUG_TRACE("found dev: %px (%s)\n", dev, dev->name);
 
-		if (likely(!is_mcast_flow)) {
+		if (likely(!is_mcast_to_if)) {
 			/*
 			 * Refresh the bridge forward table entry if the port is a bridge port.
 			 * Refresh if the ci is a 3-tuple PPPoE bridge flow.
@@ -5479,9 +6404,8 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 			}
 		}
 
+		memset(&stats, 0, sizeof(stats));
 		switch (ii_type) {
-			struct rtnl_link_stats64 stats;
-
 #ifdef ECM_INTERFACE_VLAN_ENABLE
 			case ECM_DB_IFACE_TYPE_VLAN:
 				DEBUG_INFO("VLAN\n");
@@ -5490,6 +6414,14 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 				stats.tx_packets = tx_packets;
 				stats.tx_bytes = tx_bytes;
 				__vlan_dev_update_accel_stats(dev, &stats);
+				break;
+#endif
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+			case ECM_DB_IFACE_TYPE_OVS_BRIDGE:
+				DEBUG_INFO("OVS BRIDGE\n");
+				ovsmgr_bridge_interface_stats_update(dev,
+								     rx_packets, rx_bytes,
+								     tx_packets, tx_bytes);
 				break;
 #endif
 			case ECM_DB_IFACE_TYPE_BRIDGE:
@@ -5516,6 +6448,24 @@ static void ecm_interface_list_stats_update(int iface_list_first, struct ecm_db_
 				ecm_interface_ovpn_stats_update(dev, from_addr, to_addr);
 			}
 			break;
+#endif
+#ifdef ECM_INTERFACE_MACVLAN_ENABLE
+			case ECM_DB_IFACE_TYPE_MACVLAN:
+				DEBUG_INFO("MACVLAN\n");
+				stats.rx_packets = rx_packets;
+				stats.rx_bytes = rx_bytes;
+				stats.tx_packets = tx_packets;
+				stats.tx_bytes = tx_bytes;
+#ifdef ECM_MULTICAST_ENABLE
+				/*
+				 * Update multicast rx statistics only for
+				 * 'from' interface.
+				 */
+				update_mcast_rx_stats = (!is_mcast_to_if &&
+							ecm_db_multicast_connection_to_interfaces_set_check(ci));
+#endif
+				macvlan_offload_stats_update(dev, &stats, update_mcast_rx_stats);
+				break;
 #endif
 			default:
 				/*
@@ -5559,7 +6509,7 @@ void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
 	 * from_tx_packets / bytes: the amount transmitted by the 'from' interface
 	 * from_rx_packets / bytes: the amount received by the 'from' interface
 	 */
-	DEBUG_INFO("%p: Update from interface stats\n", ci);
+	DEBUG_INFO("%px: Update from interface stats\n", ci);
 	from_ifaces_first = ecm_db_connection_interfaces_get_and_ref(ci, from_ifaces, ECM_DB_OBJ_DIR_FROM);
 	ecm_db_connection_node_address_get(ci, ECM_DB_OBJ_DIR_FROM, mac_addr);
 	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, false, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes, is_ported, ci);
@@ -5570,7 +6520,7 @@ void ecm_interface_stats_update(struct ecm_db_connection_instance *ci,
 	 * to_tx_packets / bytes: the amount transmitted by the 'to' interface
 	 * to_rx_packets / bytes: the amount received by the 'to' interface
 	 */
-	DEBUG_INFO("%p: Update to interface stats\n", ci);
+	DEBUG_INFO("%px: Update to interface stats\n", ci);
 	to_ifaces_first = ecm_db_connection_interfaces_get_and_ref(ci, to_ifaces, ECM_DB_OBJ_DIR_TO);
 	ecm_db_connection_node_address_get(ci, ECM_DB_OBJ_DIR_TO, mac_addr);
 	ecm_interface_list_stats_update(to_ifaces_first, to_ifaces, mac_addr, false, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes, is_ported, ci);
@@ -5614,10 +6564,10 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 	 * from_tx_packets / bytes: the amount transmitted by the 'from' interface
 	 * from_rx_packets / bytes: the amount received by the 'from' interface
 	 */
-	DEBUG_INFO("%p: Update from interface stats\n", ci);
+	DEBUG_INFO("%px: Update from interface stats\n", ci);
 	from_ifaces_first = ecm_db_connection_interfaces_get_and_ref(ci, from_ifaces, ECM_DB_OBJ_DIR_FROM);
 	ecm_db_connection_node_address_get(ci, ECM_DB_OBJ_DIR_FROM, mac_addr);
-	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, false, from_tx_packets, from_tx_bytes, from_rx_packets, from_rx_bytes, is_ported, ci);
+	ecm_interface_list_stats_update(from_ifaces_first, from_ifaces, mac_addr, false, 0, 0, from_rx_packets, from_rx_bytes, is_ported, ci);
 	ecm_db_connection_interfaces_deref(from_ifaces, from_ifaces_first);
 
 	/*
@@ -5625,7 +6575,7 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 	 * to_tx_packets / bytes: the amount transmitted by the 'to' interface
 	 * to_rx_packets / bytes: the amount received by the 'to' interface
 	 */
-	DEBUG_INFO("%p: Update to interface stats\n", ci);
+	DEBUG_INFO("%px: Update to interface stats\n", ci);
 
 	/*
 	 * This function allocates the memory for temporary destination interface heirarchies.
@@ -5633,7 +6583,7 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 	 */
 	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &to_ifaces, &to_ifaces_first);
 	if (ret == 0) {
-		DEBUG_WARN("%p: Get and ref to all multicast detination interface heirarchies failed\n", ci);
+		DEBUG_WARN("%px: Get and ref to all multicast detination interface heirarchies failed\n", ci);
 		return;
 	}
 
@@ -5641,7 +6591,7 @@ void ecm_interface_multicast_stats_update(struct ecm_db_connection_instance *ci,
 		if (to_ifaces_first[if_index] < ECM_DB_IFACE_HEIRARCHY_MAX) {
 			ii_temp = ecm_db_multicast_if_heirarchy_get(to_ifaces, if_index);
 			ecm_db_multicast_copy_if_heirarchy(to_list_single, ii_temp);
-			ecm_interface_list_stats_update(to_ifaces_first[if_index], to_list_single, mac_addr, true, to_tx_packets, to_tx_bytes, to_rx_packets, to_rx_bytes, is_ported, ci);
+			ecm_interface_list_stats_update(to_ifaces_first[if_index], to_list_single, mac_addr, true, from_tx_packets, from_tx_bytes, 0, 0, is_ported, ci);
 		}
 	}
 
@@ -5661,8 +6611,10 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 	struct ecm_db_connection_instance *ci[ECM_DB_OBJ_DIR_MAX];
 	struct ecm_db_connection_instance *ci_mcast __attribute__ ((unused));
 #endif
+	char name[IFNAMSIZ];
 
-	DEBUG_TRACE("Regenerate connections using interface: %p\n", ii);
+	ecm_db_iface_interface_name_get(ii, name);
+	DEBUG_TRACE("Regenerate connections using interface: %px (%s)\n", ii, name);
 
 #ifndef ECM_DB_XREF_ENABLE
 	/*
@@ -5679,7 +6631,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 	 */
 	if (!ci[ECM_DB_OBJ_DIR_FROM] && !ci[ECM_DB_OBJ_DIR_TO] && !ci[ECM_DB_OBJ_DIR_FROM_NAT] && !ci[ECM_DB_OBJ_DIR_TO_NAT]) {
 		ecm_db_regeneration_needed();
-		DEBUG_TRACE("%p: Regenerate (ALL) COMPLETE\n", ii);
+		DEBUG_TRACE("%px: Regenerate (ALL) COMPLETE\n", ii);
 		return;
 	}
 
@@ -5687,12 +6639,12 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 		/*
 		 * Re-generate all connections associated with this interface
 		 */
-		DEBUG_TRACE("%p: Regenerate %s direction connections\n", ii, ecm_db_obj_dir_strings[dir]);
+		DEBUG_TRACE("%px: Regenerate %s direction connections\n", ii, ecm_db_obj_dir_strings[dir]);
 		while (ci[dir]) {
 			struct ecm_db_connection_instance *cin;
 			cin = ecm_db_connection_iface_get_and_ref_next(ci[dir], dir);
 
-			DEBUG_TRACE("%p: Regenerate: %p", ii, ci[dir]);
+			DEBUG_TRACE("%px: Regenerate: %px", ii, ci[dir]);
 			ecm_db_connection_regenerate(ci[dir]);
 			ecm_db_connection_deref(ci[dir]);
 			ci[dir] = cin;
@@ -5724,7 +6676,7 @@ static void ecm_interface_regenerate_connections(struct ecm_db_iface_instance *i
 #endif
 
 #endif
-	DEBUG_TRACE("%p: Regenerate COMPLETE\n", ii);
+	DEBUG_TRACE("%px: Regenerate COMPLETE\n", ii);
 }
 
 /*
@@ -5735,7 +6687,7 @@ void ecm_interface_dev_regenerate_connections(struct net_device *dev)
 {
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("Regenerate connections for: %p (%s)\n", dev, dev->name);
+	DEBUG_INFO("Regenerate connections for: %px (%s)\n", dev, dev->name);
 
 	/*
 	 * If the interface is known to us then we will get it returned by this
@@ -5743,11 +6695,11 @@ void ecm_interface_dev_regenerate_connections(struct net_device *dev)
 	 */
 	ii = ecm_db_iface_find_and_ref_by_interface_identifier(dev->ifindex);
 	if (!ii) {
-		DEBUG_WARN("%p: No interface instance could be established for this dev\n", dev);
+		DEBUG_WARN("%px: No interface instance could be established for this dev\n", dev);
 		return;
 	}
 	ecm_interface_regenerate_connections(ii);
-	DEBUG_TRACE("%p: Regenerate for %p: COMPLETE\n", dev, ii);
+	DEBUG_TRACE("%px: Regenerate for %px: COMPLETE\n", dev, ii);
 	ecm_db_iface_deref(ii);
 }
 
@@ -5763,8 +6715,10 @@ static void ecm_interface_defunct_connections(struct ecm_db_iface_instance *ii)
 	int dir;
 	struct ecm_db_connection_instance *ci[ECM_DB_OBJ_DIR_MAX];
 	struct ecm_db_connection_instance *ci_mcast __attribute__ ((unused));
+	char name[IFNAMSIZ];
 
-	DEBUG_TRACE("defunct connections using interface: %p\n", ii);
+	ecm_db_iface_interface_name_get(ii, name);
+	DEBUG_TRACE("defunct connections using interface: %px (%s)\n", ii, name);
 
 	for (dir = 0; dir < ECM_DB_OBJ_DIR_MAX; dir++) {
 		ci[dir] = ecm_db_iface_connections_get_and_ref_first(ii, dir);
@@ -5776,7 +6730,7 @@ static void ecm_interface_defunct_connections(struct ecm_db_iface_instance *ii)
 	if (!ci[ECM_DB_OBJ_DIR_FROM] && !ci[ECM_DB_OBJ_DIR_TO] &&
 			!ci[ECM_DB_OBJ_DIR_FROM_NAT] && !ci[ECM_DB_OBJ_DIR_TO_NAT]) {
 		ecm_db_connection_defunct_all();
-		DEBUG_TRACE("%p: Defunct (ALL) COMPLETE\n", ii);
+		DEBUG_TRACE("%px: Defunct (ALL) COMPLETE\n", ii);
 		return;
 	}
 
@@ -5784,19 +6738,19 @@ static void ecm_interface_defunct_connections(struct ecm_db_iface_instance *ii)
 	 * Defunct all connections associated with this interface
 	 */
 	for (dir = 0; dir < ECM_DB_OBJ_DIR_MAX; dir++) {
-		DEBUG_TRACE("%p: Defunct %s direction connections\n", ii, ecm_db_obj_dir_strings[dir]);
+		DEBUG_TRACE("%px: Defunct %s direction connections\n", ii, ecm_db_obj_dir_strings[dir]);
 		while (ci[dir]) {
 			struct ecm_db_connection_instance *cin;
 			cin = ecm_db_connection_iface_get_and_ref_next(ci[dir], dir);
 
-			DEBUG_TRACE("%p: Defunct: %p", ii, ci[dir]);
+			DEBUG_TRACE("%px: Defunct: %px", ii, ci[dir]);
 			ecm_db_connection_make_defunct(ci[dir]);
 			ecm_db_connection_deref(ci[dir]);
 			ci[dir] = cin;
 		}
 	}
 #endif
-	DEBUG_TRACE("%p: Defunct COMPLETE\n", ii);
+	DEBUG_TRACE("%px: Defunct COMPLETE\n", ii);
 }
 
 /*
@@ -5807,7 +6761,7 @@ void ecm_interface_dev_defunct_connections(struct net_device *dev)
 {
 	struct ecm_db_iface_instance *ii;
 
-	DEBUG_INFO("defunct connections for: %p (%s)\n", dev, dev->name);
+	DEBUG_INFO("defunct connections for: %px (%s)\n", dev, dev->name);
 
 	/*
 	 * Filter interface instances matching dev and defunct connections
@@ -5821,7 +6775,7 @@ void ecm_interface_dev_defunct_connections(struct net_device *dev)
 		 */
 		if (dev->ifindex == ecm_db_iface_interface_identifier_get(ii)) {
 			ecm_interface_defunct_connections(ii);
-			DEBUG_TRACE("%p: defunct for %p: COMPLETE\n", dev, ii);
+			DEBUG_TRACE("%px: defunct for %px: COMPLETE\n", dev, ii);
 		}
 
 		/*
@@ -5843,34 +6797,44 @@ static void ecm_interface_mtu_change(struct net_device *dev)
 	struct ecm_db_iface_instance *ii;
 
 	mtu = dev->mtu;
-	DEBUG_INFO("%p (%s): MTU Change to: %d\n", dev, dev->name, mtu);
+	DEBUG_INFO("%px (%s): MTU Change to: %d\n", dev, dev->name, mtu);
 
 	/*
-	 * Find the interface for the given device.
+	 * Filter interface instances matching dev and regenerate connections
 	 */
-	ii = ecm_db_iface_find_and_ref_by_interface_identifier(dev->ifindex);
-	if (!ii) {
-		DEBUG_WARN("%p: No interface instance could be established for this dev\n", dev);
-		return;
-	}
+	ii = ecm_db_interfaces_get_and_ref_first();
+	while (ii) {
+		struct ecm_db_iface_instance *iin;
 
-	/*
-	 * Change the mtu
-	 */
-	ecm_db_iface_mtu_reset(ii, mtu);
-	DEBUG_TRACE("%p (%s): MTU Changed to: %d\n", dev, dev->name, mtu);
-	if (netif_is_bond_slave(dev)) {
-		struct net_device *master = NULL;
-		master = ecm_interface_get_and_hold_dev_master(dev);
-		DEBUG_ASSERT(master, "Expected a master\n");
-		ecm_interface_dev_regenerate_connections(master);
-		dev_put(master);
-	} else {
-		ecm_interface_regenerate_connections(ii);
-	}
+		/*
+		 * Defunct connections if ii is representing dev, otherwise
+		 * skip to the next ii.
+		 */
+		if (dev->ifindex != ecm_db_iface_interface_identifier_get(ii)) {
+			goto next;
+		}
 
-	DEBUG_TRACE("%p: Regenerate for %p: COMPLETE\n", dev, ii);
-	ecm_db_iface_deref(ii);
+		/*
+		 * Change the mtu
+		 */
+		ecm_db_iface_mtu_reset(ii, mtu);
+
+		if (!netif_is_bond_slave(dev)) {
+			ecm_interface_regenerate_connections(ii);
+		} else {
+			struct net_device *master = NULL;
+			master = ecm_interface_get_and_hold_dev_master(dev);
+			DEBUG_ASSERT(master, "Expected a master\n");
+			ecm_interface_dev_regenerate_connections(master);
+			dev_put(master);
+		}
+
+		DEBUG_TRACE("%px: Regenerate for (%s) belong to iface %px COMPLETE\n", dev, dev->name, ii);
+next:
+		iin = ecm_db_interface_get_and_ref_next(ii);
+		ecm_db_iface_deref(ii);
+		ii = iin;
+	}
 }
 
 /*
@@ -5879,18 +6843,14 @@ static void ecm_interface_mtu_change(struct net_device *dev)
  */
 static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, unsigned long event, void *ptr)
 {
-#if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 10, 0))
-	struct net_device *dev __attribute__ ((unused)) = (struct net_device *)ptr;
-#else
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
-#endif
 	struct net_device *master = NULL;
 
-	DEBUG_INFO("Net device notifier for: %p, name: %s, event: %lx\n", dev, dev->name, event);
+	DEBUG_INFO("Net device notifier for: %px, name: %s, event: %lx\n", dev, dev->name, event);
 
 	switch (event) {
 	case NETDEV_DOWN:
-		DEBUG_INFO("Net device: %p, DOWN\n", dev);
+		DEBUG_INFO("Net device: %px, DOWN\n", dev);
 		if (netif_is_bond_slave(dev)) {
 			master = ecm_interface_get_and_hold_dev_master(dev);
 			DEBUG_ASSERT(master, "Expected a master\n");
@@ -5902,9 +6862,9 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 		break;
 
 	case NETDEV_CHANGE:
-		DEBUG_INFO("Net device: %p, CHANGE\n", dev);
+		DEBUG_INFO("Net device: %px, CHANGE\n", dev);
 		if (!netif_carrier_ok(dev)) {
-			DEBUG_INFO("Net device: %p, CARRIER BAD\n", dev);
+			DEBUG_INFO("Net device: %px, CARRIER BAD\n", dev);
 			if (netif_is_bond_slave(dev)) {
 				master = ecm_interface_get_and_hold_dev_master(dev);
 				DEBUG_ASSERT(master, "Expected a master.\n");
@@ -5917,12 +6877,12 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
 		break;
 
 	case NETDEV_CHANGEMTU:
-		DEBUG_INFO("Net device: %p, MTU CHANGE\n", dev);
+		DEBUG_INFO("Net device: %px, MTU CHANGE\n", dev);
 		ecm_interface_mtu_change(dev);
 		break;
 
 	default:
-		DEBUG_TRACE("Net device: %p, UNHANDLED: %lx\n", dev, event);
+		DEBUG_TRACE("Net device: %px, UNHANDLED: %lx\n", dev, event);
 		break;
 	}
 
@@ -5933,7 +6893,7 @@ static int ecm_interface_netdev_notifier_callback(struct notifier_block *this, u
  * ecm_interface_node_connections_defunct()
  *	Defunct the connections on this node.
  */
-void ecm_interface_node_connections_defunct(uint8_t *mac)
+void ecm_interface_node_connections_defunct(uint8_t *mac, int ip_version)
 {
 	struct ecm_db_node_instance *ni = NULL;
 
@@ -5960,7 +6920,7 @@ void ecm_interface_node_connections_defunct(uint8_t *mac)
 			 * FROM_NAT and TO_NAT have the same list of connections.
 			 */
 			for (dir = 0; dir <= ECM_DB_OBJ_DIR_TO; dir++) {
-				ecm_db_traverse_node_connection_list_and_defunct(ni, dir);
+				ecm_db_traverse_node_connection_list_and_defunct(ni, dir, ip_version);
 			}
 		}
 
@@ -6021,8 +6981,8 @@ static int ecm_interface_node_br_fdb_notify_event(struct notifier_block *nb,
 		return NOTIFY_DONE;
 	}
 
-	DEBUG_TRACE("%p: FDB notify event for moved MAC addr: %pM\n", fe, fe->addr);
-	ecm_interface_node_connections_defunct(fe->addr);
+	DEBUG_TRACE("%px: FDB notify event for moved MAC addr: %pM\n", fe, fe->addr);
+	ecm_interface_node_connections_defunct(fe->addr, ECM_DB_IP_VERSION_IGNORE);
 
 	return NOTIFY_DONE;
 }
@@ -6046,12 +7006,12 @@ static int ecm_interface_node_br_fdb_delete_event(struct notifier_block *nb,
 	}
 
 	if ((event != BR_FDB_EVENT_DEL) || fe->is_local) {
-		DEBUG_WARN("%p: local fdb or not deleting event, ignore\n", fe);
+		DEBUG_WARN("%px: local fdb or not deleting event, ignore\n", fe);
 		return NOTIFY_DONE;
 	}
 
-	DEBUG_TRACE("%p: FDB delete event for MAC addr: %pM\n", fe, fe->addr);
-	ecm_interface_node_connections_defunct(fe->addr);
+	DEBUG_TRACE("%px: FDB delete event for MAC addr: %pM\n", fe, fe->addr);
+	ecm_interface_node_connections_defunct(fe->addr, ECM_DB_IP_VERSION_IGNORE);
 
 	return NOTIFY_DONE;
 }
@@ -6086,7 +7046,8 @@ static struct notifier_block ecm_interface_node_br_fdb_delete_nb = {
  *	Return true if outdated interfaces found
  */
 static bool ecm_interface_multicast_find_outdated_iface_instances(struct ecm_db_connection_instance *ci, struct ecm_multicast_if_update *mc_updates,
-						   uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev)
+						   uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev,
+						   struct net_device *brdev)
 {
 	struct ecm_db_iface_instance *mc_ifaces;
 	struct ecm_db_iface_instance *ii_temp;
@@ -6107,7 +7068,7 @@ static bool ecm_interface_multicast_find_outdated_iface_instances(struct ecm_db_
 
 	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
 	if (ret == 0) {
-		DEBUG_WARN("%p: multicast interfaces ref fail!\n", ci);
+		DEBUG_WARN("%px: multicast interfaces ref fail!\n", ci);
 		return false;
 	}
 
@@ -6132,23 +7093,42 @@ static bool ecm_interface_multicast_find_outdated_iface_instances(struct ecm_db_
 		to_iface = *ifaces;
 		ii_type = ecm_db_iface_type_get(to_iface);
 
-		/*
-		 * If the update was received from bridge snooper, do not consider entries in the
-		 * interface list that are not part of a bridge.
-		 */
-		if (is_br_snooper && (ii_type != ECM_DB_IFACE_TYPE_BRIDGE)) {
-			continue;
-		}
-
-		/*
-		 * If the update was received from MFC, do not consider entries in the
-		 * interface list that are part of a bridge. The bridge entries will be
-		 * taken care by the Bridge Snooper Callback
-		 */
-		if (ii_type == ECM_DB_IFACE_TYPE_BRIDGE) {
-			if (!is_br_snooper && !(flags & ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG)) {
+		if ((ii_type == ECM_DB_IFACE_TYPE_BRIDGE) || (ii_type == ECM_DB_IFACE_TYPE_OVS_BRIDGE)) {
+			/*
+			 * If the update was received from MFC, do not consider entries in the
+			 * interface list that are part of a bridge/ovs_bridge. The bridge/ovs_bridge entries will be
+			 * taken care by the Bridge Snooper Callback
+			 *
+			 * TODO: Check if an assert is needed for the flag
+			 * ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG to be set, if is_br_snooper is false.
+			 */
+			if (!is_br_snooper && (flags & ECM_DB_MULTICAST_CONNECTION_BRIDGE_DEV_SET_FLAG)) {
 				continue;
 			}
+
+			/*
+			 * If update was received from Bridge snooper.
+			 * Check for the correct bridge interface in the 'to' list
+			 * as ECM support multibridge multicast.
+			 */
+			if (is_br_snooper) {
+				struct net_device *to_dev;
+
+				to_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(to_iface));
+				if (to_dev) {
+					if (to_dev->ifindex != brdev->ifindex) {
+						dev_put(to_dev);
+						continue;
+					}
+					dev_put(to_dev);
+				}
+			}
+		} else if (is_br_snooper) {
+			/*
+			 * If the update was received from bridge snooper, do not consider entries in the
+			 * interface list that are not part of a bridge or ovs bridge.
+			 */
+			continue;
 		}
 
 		/*
@@ -6233,7 +7213,7 @@ static bool ecm_interface_multicast_find_new_iface_instances(struct ecm_db_conne
 
 	ret = ecm_db_multicast_connection_to_interfaces_get_and_ref_all(ci, &mc_ifaces, &mc_ifaces_first);
 	if (ret == 0) {
-		DEBUG_WARN("%p: multicast interfaces ref fail!\n", ci);
+		DEBUG_WARN("%px: multicast interfaces ref fail!\n", ci);
 		return false;
 	}
 
@@ -6323,14 +7303,17 @@ static bool ecm_interface_multicast_find_new_iface_instances(struct ecm_db_conne
  * interface list
  */
 bool ecm_interface_multicast_find_updates_to_iface_list(struct ecm_db_connection_instance *ci, struct ecm_multicast_if_update *mc_updates,
-						uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev)
+						uint32_t flags, bool is_br_snooper, uint32_t *mc_dst_if_index, uint32_t max_to_dev,
+						struct net_device *brdev)
 {
 	bool join;
 	bool leave;
+
 	/*
 	 * Find destination interfaces that have left the group
 	 */
-	leave = ecm_interface_multicast_find_outdated_iface_instances(ci, mc_updates, flags, is_br_snooper, mc_dst_if_index, max_to_dev);
+	leave = ecm_interface_multicast_find_outdated_iface_instances(ci, mc_updates, flags, is_br_snooper, mc_dst_if_index, max_to_dev, brdev);
+
 	/*
 	 * Find new destination interfaces that have joined the group
 	 */
@@ -6374,7 +7357,7 @@ static int ecm_interface_neigh_mac_update_notify_event(struct notifier_block *nb
 	DEBUG_TRACE("old mac: %pM new mac: %pM\n", nmu->old_mac, nmu->update_mac);
 
 	DEBUG_INFO("neigh mac update notify for node %pM\n", nmu->old_mac);
-	ecm_interface_node_connections_defunct((uint8_t *)nmu->old_mac);
+	ecm_interface_node_connections_defunct((uint8_t *)nmu->old_mac, ECM_DB_IP_VERSION_IGNORE);
 
 	return NOTIFY_DONE;
 }
@@ -6427,7 +7410,7 @@ static int ecm_interface_wifi_event_iwevent(int ifindex, unsigned char *buf, siz
 			DEBUG_INFO("STA %pM joining\n", (uint8_t *)iwe->u.addr.sa_data);
 		} else if (iwe->cmd == IWEVEXPIRED) {
 			DEBUG_INFO("STA %pM leaving\n", (uint8_t *)iwe->u.addr.sa_data);
-			ecm_interface_node_connections_defunct((uint8_t *)iwe->u.addr.sa_data);
+			ecm_interface_node_connections_defunct((uint8_t *)iwe->u.addr.sa_data, ECM_DB_IP_VERSION_IGNORE);
 		} else {
 			DEBUG_INFO("iwe->cmd is %d for STA %pM\n", iwe->cmd, (unsigned char *) iwe->u.addr.sa_data);
 		}
@@ -6519,15 +7502,14 @@ static int ecm_interface_wifi_event_rx(struct socket *sock, struct sockaddr_nl *
 	msg.msg_namelen = sizeof(struct sockaddr_nl);
 	msg.msg_control = NULL;
 	msg.msg_controllen = 0;
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0))
-	msg.msg_iov   = &iov;
-	msg.msg_iovlen = 1;
-#else
 	iov_iter_init(&msg.msg_iter, READ, &iov, 1, 1);
-#endif
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
 	size = sock_recvmsg(sock, &msg, len, msg.msg_flags);
+#else
+	size = sock_recvmsg(sock, &msg, msg.msg_flags);
+#endif
 	set_fs(oldfs);
 
 	return size;
@@ -6544,7 +7526,7 @@ static void ecm_interface_wifi_event_thread(void)
 	unsigned char buf[512];
 	int len = sizeof(buf);
 
-	allow_signal(SIGKILL|SIGSTOP);
+	kernel_sigaction(SIGKILL, SIG_DFL);
 	err = sock_create(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE, &__ewn.sock);
 	if (err < 0) {
 		DEBUG_ERROR("failed to create sock\n");
@@ -6616,12 +7598,51 @@ int ecm_interface_wifi_event_stop(void)
 	}
 
 	DEBUG_INFO("kill ecm_interface_wifi_event thread\n");
-	force_sig(SIGKILL, __ewn.thread);
+
+	send_sig(SIGKILL, __ewn.thread, 1);
 	err = kthread_stop(__ewn.thread);
 	__ewn.thread = NULL;
 
 	return err;
 }
+
+#if defined(CONFIG_NET_CLS_ACT) && defined(ECM_CLASSIFIER_DSCP_IGS)
+/*
+ * ecm_interface_igs_enabled_handler()
+ * 	IGS enabled check sysctl node handler.
+ */
+static int ecm_interface_igs_enabled_handler(struct ctl_table *ctl, int write, void __user *buffer,
+		 size_t *lenp, loff_t *ppos)
+{
+	int ret;
+	int current_value;
+
+	/*
+	 * Take the current value
+	 */
+	current_value = ecm_interface_igs_enabled;
+
+	/*
+	 * Write the variable with user input
+	 */
+	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+	if (ret || (!write)) {
+		return ret;
+	}
+
+	if (ECM_FRONT_END_TYPE_NSS != ecm_front_end_type_get()) {
+		DEBUG_WARN("IGS enabled check is for NSS only.\n");
+		return -EINVAL;
+	}
+
+	if ((ecm_interface_igs_enabled != 1) && (ecm_interface_igs_enabled != 0)) {
+		DEBUG_WARN("Invalid input. Valid values 0/1\n");
+		ecm_interface_igs_enabled = current_value;
+		return -EINVAL;
+	}
+	return 0;
+}
+#endif
 
 /*
  * ecm_interface_src_check_handler()
@@ -6667,6 +7688,15 @@ static struct ctl_table ecm_interface_table[] = {
 		.mode			= 0644,
 		.proc_handler		= &ecm_interface_src_check_handler,
 	},
+#if defined(CONFIG_NET_CLS_ACT) && defined(ECM_CLASSIFIER_DSCP_IGS)
+	{
+		.procname		= "igs_enabled",
+		.data			= &ecm_interface_igs_enabled,
+		.maxlen			= sizeof(int),
+		.mode			= 0644,
+		.proc_handler		= &ecm_interface_igs_enabled_handler,
+	},
+#endif
 	{ }
 };
 
@@ -6715,6 +7745,464 @@ EXPORT_SYMBOL(ecm_interface_ipsec_unregister_callbacks);
 
 #endif
 
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+
+/*
+ * ecm_interface_ovs_defunct_masked_tuple()
+ *	Make defunct based on masked fields
+ */
+static void ecm_interface_ovs_defunct_masked_tuple(struct ovsmgr_dp_flow *flow)
+{
+	ip_addr_t src_addr;
+	ip_addr_t dest_addr;
+	bool is_routed = false;
+
+	bool smac_valid = !is_zero_ether_addr(flow->smac);
+	bool dmac_valid = !is_zero_ether_addr(flow->dmac);
+
+	if (flow->tuple.ip_version == 4) {
+		ECM_NIN4_ADDR_TO_IP_ADDR(src_addr, flow->tuple.ipv4.src);
+		ECM_NIN4_ADDR_TO_IP_ADDR(dest_addr, flow->tuple.ipv4.dst);
+	} else {
+		ECM_NIN6_ADDR_TO_IP_ADDR(src_addr, flow->tuple.ipv6.src);
+		ECM_NIN6_ADDR_TO_IP_ADDR(dest_addr, flow->tuple.ipv6.dst);
+	}
+
+	if (netif_is_ovs_master(flow->indev) || netif_is_ovs_master(flow->outdev)) {
+		is_routed = true;
+	}
+
+	/*
+	 * This function attempts to defunct connections which match
+	 * given OVS flow.  Some of the parameters in flow are masked so the
+	 * logic used here is to match:
+	 *  if (A & B == A), where B is flow parameter and A is CI parameter.
+	 *  A, B can be MAC, IP, port, protocol.
+	 *
+	 * OVS datapath flow can be routed or bridged flow.  To identify bridge vs routed
+	 * flow->{indev/outdev} is checked if it is OVS bridge interface and smac/dmac is
+	 * matching interface MAC address.  Otherwise flow is considered to be bridge flows.
+	 *
+	 * This function and the underlying functions (called functions) implement above logic
+	 * to match parameters.  SMAC/DMAC is expected to be non-zero, if they are 0 (any) then
+	 * rest of the parameters are used to filter out ECM connections using OVS classifier Hash bucket.
+	 * Otherwise node list is used to identify the connections originated from it and they are defunct.
+	 * In this implementation, worst case is SMAC and DMAC are 0 and all OVS connections need to be
+	 * parsed.
+	 *
+	 * Below is the sequence of checks and how ECM connections are filtered:
+	 *
+	 * 1. if SMAC and DMAC are invalid, defunct flows by masked matching (ip_version, sip, sport, protocol, dip, dport)
+	 *
+	 * 2. SMAC is valid (non zero) && outdev is OVS bridge:  defunction connections originated from nodes matching smac.
+	 *		a. Check if outdev is OVS bridge interface and dmac is matching bridge MAC.
+	 *		   If yes then defunct connections by matching {ip_version, sip, dip, protocol, sport, dport},
+	 *		   dmac in CI is ignored (any destination node address).
+	 *
+	 * 3. DMAC is valid (non-zero) && indev is OVS bridge: - defunction connections originated to nodes matching dmac.
+	 *		a. Check if indev is OVS bridge interface and smac is matching bridge MAC.
+	 *		   If yes then defunct connections by matching {ip_version, ip, dip, protocol, sport, dport},
+	 *		   smac in CI is ignored (any destination node address).
+	 *
+	 * 4. if either indev OR outdev is ovs_bridge: Then defunct connections through OVS classifier hash bucket by matching:
+	 *	            {ip_version, sip, dip, protocol, sport, dport}
+	 *
+	 * 5. if SMAC is valid : Then delete bridge flows originating from SMAC by matching:
+	 *		   {ip_version, dmac, sip, dip, protocol, sport, dport}
+	 *
+	 * 6. if DMAC is valid : Then delete bridge flows originating to DMAC by matching:
+	 *		   {ip_version, smac, sip, dip, protocol, sport, dport}
+	 *
+	 * 7. If any of the above conndition is not true:  defunct flows by masked matching (ip_version, sip, sport, protocol, dip, dport)
+	 */
+
+	/*
+	 * case 1:  Defunct by classifier if smac and dmac are invalid
+	 */
+	if (!smac_valid && !dmac_valid) {
+		goto classify_defunct;
+	}
+
+	/*
+	 * case 2: If outdev is ovs_br, find all connection FROM smac and MATCH
+	 */
+	if (smac_valid && netif_is_ovs_master(flow->outdev)) {
+		if (unlikely(dmac_valid && !ECM_MAC_ADDR_MATCH(flow->outdev->dev_addr, flow->dmac))) {
+			DEBUG_WARN("%px: Defunct routed connections FROM %pM to the %s (OVS bridge) Failed\n", flow, flow->smac,
+								flow->outdev->name);
+			return;
+		}
+
+		DEBUG_TRACE("%px: Defunct routed connections by masked 7 tuple FROM %pM to the %s (OVS bridge)\n", flow,
+							flow->smac, flow->outdev->name);
+
+		ecm_db_node_ovs_connections_masked_defunct(flow->tuple.ip_version, flow->smac, true, src_addr,
+							   ntohs(flow->tuple.src_port), flow->dmac, false, dest_addr,
+							   ntohs(flow->tuple.dst_port), flow->tuple.protocol,
+							   ECM_DB_OBJ_DIR_FROM, true);
+		return;
+	}
+
+	/*
+	 * case 3: If indev is ovs_br, find all connection from TO  dmac and match.
+	 */
+	if (dmac_valid && netif_is_ovs_master(flow->indev)) {
+		if (unlikely(smac_valid && !ECM_MAC_ADDR_MATCH(flow->indev->dev_addr, flow->smac))) {
+			DEBUG_WARN("%px: Defunct routed connections TO %pM from %s (OVS bridge), Failed\n", flow,
+				   flow->dmac, flow->indev->name);
+			return;
+		}
+
+		DEBUG_TRACE("%px: Defunct routed the connections by masked 7 tuple TO %pM from %s (OVS bridge)\n", flow,
+			    flow->dmac, flow->indev->name);
+
+		ecm_db_node_ovs_connections_masked_defunct(flow->tuple.ip_version, flow->smac, false, src_addr,
+							   ntohs(flow->tuple.src_port), flow->dmac, true, dest_addr,
+							   ntohs(flow->tuple.dst_port), flow->tuple.protocol,
+							   ECM_DB_OBJ_DIR_TO, true);
+
+		return;
+	}
+
+	/*
+	 * case 4: If smac or dmac is not valid and either of indev or outdev is ovs-bridge device, defunct by 5 tuple
+	 */
+	if (is_routed) {
+		goto classify_defunct;
+	}
+
+	/*
+	 * case 5: if smac is valid, match bridged connection FROM SMAC
+	 */
+	if (smac_valid) {
+		DEBUG_TRACE("%px: Defunct Bridged flows by masked  7 tuple (smac valid) indev = %s, outdev = %s, smac:%pM, dmac:%pM, "
+								"proto=%d, sport=%d, dport=%d\n",
+					flow, flow->indev->name, flow->outdev->name, flow->smac, flow->dmac,
+					flow->tuple.protocol, ntohs(flow->tuple.src_port), ntohs(flow->tuple.dst_port));
+
+		ecm_db_node_ovs_connections_masked_defunct(flow->tuple.ip_version, flow->smac, true, src_addr,
+							   ntohs(flow->tuple.src_port), flow->dmac,
+							   dmac_valid, dest_addr,
+							   ntohs(flow->tuple.dst_port), flow->tuple.protocol,
+							   ECM_DB_OBJ_DIR_FROM, false);
+		return;
+	}
+
+	/*
+	 * case 6: if dmac is valid, match bridged connection TO DMAC
+	 */
+	if (dmac_valid) {
+		DEBUG_TRACE("%px: Defunct Bridged flows by masked 7 tuple (dmac valid) indev = %s, outdev = %s, smac:%pM, dmac:%pM, "
+								"proto=%d, sport=%d, dport=%d\n",
+					flow, flow->indev->name, flow->outdev->name, flow->smac, flow->dmac,
+					flow->tuple.protocol, ntohs(flow->tuple.src_port), ntohs(flow->tuple.dst_port));
+
+		ecm_db_node_ovs_connections_masked_defunct(flow->tuple.ip_version, flow->smac, false, src_addr,
+							   ntohs(flow->tuple.src_port), flow->dmac, true,  dest_addr,
+							   ntohs(flow->tuple.dst_port), flow->tuple.protocol,
+							   ECM_DB_OBJ_DIR_TO, false);
+
+		return;
+	}
+
+classify_defunct:
+
+	/*
+	 * case 7: If dmac and smac are NULL, defunct connections by matching 5 tuple info
+	 */
+	DEBUG_TRACE("%px: Defunct flows by 5 tuple (smac & dmac invalid) indev = %s, outdev = %s, smac:%pM, dmac:%pM, "
+					     "proto=%d, sport=%d, dport=%d is_routed=%d\n",
+				flow, flow->indev->name, flow->outdev->name, flow->smac, flow->dmac,
+				flow->tuple.protocol, ntohs(flow->tuple.src_port), ntohs(flow->tuple.dst_port), is_routed);
+
+	ecm_db_connection_defunct_by_classifier(flow->tuple.ip_version, src_addr, ntohs(flow->tuple.src_port), dest_addr,
+						ntohs(flow->tuple.dst_port), flow->tuple.protocol, is_routed, ECM_CLASSIFIER_TYPE_OVS);
+
+}
+
+/*
+ * ecm_interface_ovs_flow_defunct_connections()
+ *	This event can be triggered when the OVS flow is deleted due to flow timeout.
+ *	Defunct the connections based on the OVS flow information.
+ */
+static void ecm_interface_ovs_flow_defunct_connections(struct ovsmgr_dp_flow *flow)
+{
+	ip_addr_t src_ip = ECM_IP_ADDR_NULL;
+	ip_addr_t dest_ip = ECM_IP_ADDR_NULL;
+
+	/*
+	 * Delete by flow rule.
+	 */
+
+	if (flow->tuple.ip_version == 4) {
+		DEBUG_TRACE("IPv4: Src: %pI4:%d protocol: %d Dst: %pI4:%d\n",
+			   &flow->tuple.ipv4.src, ntohs(flow->tuple.src_port),
+			   flow->tuple.protocol,
+			   &flow->tuple.ipv4.dst, ntohs(flow->tuple.dst_port));
+
+		if (flow->tuple.ipv4.src) {
+			ECM_NIN4_ADDR_TO_IP_ADDR(src_ip, flow->tuple.ipv4.src);
+		}
+
+		if (flow->tuple.ipv4.dst) {
+			ECM_NIN4_ADDR_TO_IP_ADDR(dest_ip, flow->tuple.ipv4.dst);
+		}
+	} else if (flow->tuple.ip_version == 6) {
+		DEBUG_TRACE("IPv6: Src: %pI6:%d protocol: %d Dst: %pI6:%d\n",
+			   &flow->tuple.ipv6.src, ntohs(flow->tuple.src_port),
+			   flow->tuple.protocol,
+			   &flow->tuple.ipv6.dst, ntohs(flow->tuple.dst_port));
+		ECM_NIN6_ADDR_TO_IP_ADDR(src_ip, flow->tuple.ipv6.src);
+		ECM_NIN6_ADDR_TO_IP_ADDR(dest_ip, flow->tuple.ipv6.dst);
+	} else {
+		DEBUG_WARN("%px: Unsupported IP version: %d\n", flow, flow->tuple.ip_version);
+		return;
+	}
+
+	/*
+	 * For multicast flows, ovs manager will set source ip
+	 * as 0.0.0.0, we need to get the 'ci' from multicast
+	 * destination ip
+	 */
+	if (ecm_ip_addr_is_multicast(dest_ip)) {
+#ifdef ECM_MULTICAST_ENABLE
+		ip_addr_t grp_ip;
+		struct ecm_db_connection_instance *ci;
+		struct ecm_db_multicast_tuple_instance *ti;
+
+		/*
+		 * Get the for the group in the tuple_instance table. As OVS
+		 * does not support "source specific multicast" there can be
+		 * only one tuple entry for a group.
+		 */
+		ti = ecm_db_multicast_connection_get_and_ref_first(dest_ip);
+		if (!ti) {
+			DEBUG_WARN("%px: no multicast tuple entry found\n", flow);
+			return;
+		}
+
+		/*
+		 * Force destruction of the connection by making it defunct
+		 */
+		while (ti) {
+			struct ecm_db_multicast_tuple_instance *ti_next;
+
+			ecm_db_multicast_tuple_instance_group_ip_get(ti, grp_ip);
+			if (ECM_IP_ADDR_MATCH(grp_ip, dest_ip)) {
+				ci = ecm_db_multicast_connection_get_from_tuple(ti);
+				ecm_db_connection_make_defunct(ci);
+			}
+			ti_next = ecm_db_multicast_connection_get_and_ref_next(ti);
+			ecm_db_multicast_connection_deref(ti);
+			ti = ti_next;
+		}
+#endif
+		return;
+	}
+
+	/*
+	 * For unicast if 5-tuple is not valid, then delete the flows by
+	 * {smac/dmac and indev/outdev}
+	 */
+	if ((flow->tuple.protocol == IPPROTO_TCP || flow->tuple.protocol == IPPROTO_UDP) &&
+			flow->tuple.src_port && flow->tuple.dst_port &&
+			!ECM_IP_ADDR_IS_NULL(src_ip) && !ECM_IP_ADDR_IS_NULL(dest_ip)) {
+		struct ecm_db_connection_instance *ci;
+
+		/*
+		 * Delete the flows by using 5 tuple
+		 */
+		DEBUG_TRACE("%px: Delete flow by 5 tuple: indev = %s, outdev = %s, smac:%pM, dmac:%pM, "
+					"proto=%d, sport=%d, dport=%d\n",
+					flow, flow->indev->name, flow->outdev->name, flow->smac, flow->dmac,
+					flow->tuple.protocol, ntohs(flow->tuple.src_port), ntohs(flow->tuple.dst_port));
+
+		/*
+		 * Delete the flows by using 5-tuple parameters.
+		 */
+		ci = ecm_db_connection_from_ovs_flow_get_and_ref(flow);
+		if (!ci) {
+			DEBUG_WARN("%px: OVS flow not found in ECM database, Try to match by mask\n", flow);
+			goto no_ci;
+		}
+		DEBUG_INFO("%px: Connection defunct %px\n", flow, ci);
+
+		/*
+		 * Force destruction of the connection by making it defunct
+		 */
+		ecm_db_connection_make_defunct(ci);
+		ecm_db_connection_deref(ci);
+		return;
+	}
+
+no_ci:
+
+	/*
+	 * if all tuple values are 0, defunct by interface
+	 */
+	if (unlikely(is_zero_ether_addr(flow->smac) && is_zero_ether_addr(flow->dmac))) {
+		bool sip_valid, dip_valid;
+
+		if (flow->tuple.ip_version == 4) {
+			sip_valid = !!flow->tuple.ipv4.src;
+			dip_valid = !!flow->tuple.ipv4.dst;
+		} else {
+			sip_valid = !ipv6_addr_any((const struct in6_addr *)&flow->tuple.ipv6.src);
+			dip_valid = !ipv6_addr_any((const struct in6_addr *)&flow->tuple.ipv6.dst);
+		}
+
+		if (sip_valid || dip_valid || flow->tuple.src_port || flow->tuple.dst_port || flow->tuple.protocol) {
+			goto defunct_by_masked_tuple;
+		}
+
+		if (flow->indev && !netif_is_ovs_master(flow->indev)) {
+			DEBUG_TRACE("%px: Defunct all flows by indev=%s\n", flow, flow->indev->name);
+			ecm_interface_dev_defunct_connections(flow->indev);
+		}
+
+		if (flow->outdev && !netif_is_ovs_master(flow->outdev)) {
+			DEBUG_TRACE("%px: Defunct all flows by outdev=%s\n", flow, flow->outdev->name);
+			ecm_interface_dev_defunct_connections(flow->outdev);
+		}
+
+		DEBUG_TRACE("%px: Delete flow is called with all tuple 0\n", flow);
+		return;
+	}
+
+defunct_by_masked_tuple:
+
+	DEBUG_TRACE("%px: Delete flow by 5 or 7 tuple masks: indev = %s, outdev = %s, smac:%pM, dmac:%pM, "
+		    "proto=%d, sport=%d, dport=%d\n",
+		    flow, flow->indev->name, flow->outdev->name, flow->smac, flow->dmac,
+		    flow->tuple.protocol, ntohs(flow->tuple.src_port), ntohs(flow->tuple.dst_port));
+
+	ecm_interface_ovs_defunct_masked_tuple(flow);
+}
+
+#ifdef ECM_MULTICAST_ENABLE
+/*
+ * ecm_interface_multicast_ovs_flow_update_connections()
+ *	Update the connections based on the OVS flow information.
+ *
+ *	This event is triggered by OVS when a new OVS port joins an
+ *	already existing OVS multicast flow. We rely on this event rather
+ *	than the MCS update event when an OVS port joins an existing flow.
+ *	This is because when the MCS event is received, the OVS may not
+ *	have yet updated its flow entry to add the new port,
+ *	so ECM will not be able to query OVS to validate the new flow entry
+ */
+static void ecm_interface_multicast_ovs_flow_update_connections(struct ovsmgr_dp_flow *flow)
+{
+	ip_addr_t ip_dest_addr;
+	struct ecm_db_connection_instance *ci;
+	struct ecm_db_multicast_tuple_instance *ti;
+	struct ecm_front_end_connection_instance *feci;
+	struct net_device *brdev;
+
+	if (flow->tuple.ip_version == 4) {
+		ECM_NIN4_ADDR_TO_IP_ADDR(ip_dest_addr, flow->tuple.ipv4.dst);
+		DEBUG_TRACE("IPv4: Src: %pI4:%d protocol: %d Dst: %pI4:%d\n",
+			   &flow->tuple.ipv4.src, flow->tuple.src_port,
+			   flow->tuple.protocol,
+			   &flow->tuple.ipv4.dst, flow->tuple.dst_port);
+	} else if (flow->tuple.ip_version == 6) {
+		ECM_NIN6_ADDR_TO_IP_ADDR(ip_dest_addr, flow->tuple.ipv6.dst);
+		DEBUG_TRACE("IPv6: Src: %pI6:%d protocol: %d Dst: %pI6:%d\n",
+			   &flow->tuple.ipv6.src, flow->tuple.src_port,
+			   flow->tuple.protocol,
+			   &flow->tuple.ipv6.dst, flow->tuple.dst_port);
+	} else {
+		DEBUG_WARN("%px: Unsupported IP version: %d\n", flow, flow->tuple.ip_version);
+		return;
+	}
+
+	if (!ecm_ip_addr_is_multicast(ip_dest_addr)) {
+		DEBUG_WARN("%px: Change notification is supported only for multicast flows\n", flow);
+		return;
+	}
+
+	/*
+	 * Get the OVS bridge device.
+	 */
+	if (ecm_front_end_is_ovs_bridge_device(flow->outdev)) {
+		brdev = flow->outdev;
+	} else if (ecm_interface_is_ovs_bridge_port(flow->outdev)) {
+		brdev = ovsmgr_dev_get_master(flow->outdev);
+		if (!brdev) {
+			DEBUG_WARN("%px: Master device for OVS port: %s is NULL!\n", flow, flow->outdev->name);
+			return;
+		}
+	} else {
+		DEBUG_WARN("%px: egress port: %s is neither OVS bridge nor OVS port\n", flow, flow->outdev->name);
+		return;
+	}
+
+	/*
+	 * Get the first entry for the group in the tuple_instance table,
+	 */
+	ti = ecm_db_multicast_connection_get_and_ref_first(ip_dest_addr);
+	if (!ti) {
+		DEBUG_WARN("%px: no multicast tuple entry found\n", flow);
+		return;
+	}
+
+	ci = ecm_db_multicast_connection_get_from_tuple(ti);
+	feci = ecm_db_connection_front_end_get_and_ref(ci);
+
+	/*
+	 * The source IP address in the OVS flow passed to us is always found
+	 * to be NULL. So, update the all multicast connections for this group address.
+	 */
+	if (feci->multicast_update) {
+		feci->multicast_update(ip_dest_addr, brdev);
+	}
+
+	feci->deref(feci);
+	ecm_db_multicast_connection_deref(ti);
+}
+#endif
+
+/*
+ * ecm_interface_ovs_notifier_callback()
+ * 	Netdevice notifier callback to inform us of change of state of a netdevice
+ */
+static int ecm_interface_ovs_notifier_callback(struct notifier_block *nb, unsigned long event, void *data)
+{
+	struct ovsmgr_notifiers_info *ovs_info = (struct ovsmgr_notifiers_info *)data;
+	struct ovsmgr_dp_port_info *port;
+
+	DEBUG_INFO("OVS notifier event: %lu\n", event);
+
+	switch(event) {
+	case OVSMGR_DP_PORT_DEL:
+		port = ovs_info->port;
+		ecm_interface_dev_defunct_connections(port->dev);
+		break;
+	case OVSMGR_DP_FLOW_DEL:
+		ecm_interface_ovs_flow_defunct_connections(ovs_info->flow);
+		break;
+	case OVSMGR_DP_FLOW_TBL_FLUSH:
+		ecm_db_connection_defunct_all();
+		break;
+	case OVSMGR_DP_FLOW_CHANGE:
+#ifdef ECM_MULTICAST_ENABLE
+		ecm_interface_multicast_ovs_flow_update_connections(ovs_info->flow);
+#endif
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+/*
+ * struct notifier_block ecm_interface_ovs_notifier
+ *	Registration for OVS events
+ */
+static struct notifier_block ecm_interface_ovs_notifier __read_mostly = {
+	.notifier_call = ecm_interface_ovs_notifier_callback,
+};
+#endif
+
 /*
  * ecm_interface_init()
  */
@@ -6743,6 +8231,9 @@ int ecm_interface_init(void)
 #endif
 #ifdef ECM_DB_XREF_ENABLE
 	neigh_mac_update_register_notify(&ecm_interface_neigh_mac_update_nb);
+#endif
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+	ovsmgr_notifier_register(&ecm_interface_ovs_notifier);
 #endif
 	ecm_interface_wifi_event_start();
 
@@ -6775,6 +8266,9 @@ void ecm_interface_exit(void)
 #endif
 	ecm_interface_wifi_event_stop();
 
+#ifdef ECM_INTERFACE_OVS_BRIDGE_ENABLE
+	ovsmgr_notifier_unregister(&ecm_interface_ovs_notifier);
+#endif
 	/*
 	 * Unregister sysctl table.
 	 */

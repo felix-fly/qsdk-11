@@ -14,8 +14,6 @@
 /dts-v1/;
 #include "ipq6018-soc.dtsi"
 / {
-	model ="QCA, IPQ6018-DB.CP02";
-	compatible = "qca,ipq6018", "qca,ipq6018-db-cp02";
 	machid = <0x1030100>;
 	config_name = "config@db-cp02";
 

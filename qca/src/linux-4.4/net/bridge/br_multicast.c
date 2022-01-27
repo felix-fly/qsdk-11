@@ -1654,6 +1654,12 @@ static int br_multicast_ipv4_rcv(struct net_bridge *br,
 }
 
 #if IS_ENABLED(CONFIG_IPV6)
+static int br_ndisc_send_na_finish(struct net *net, struct sock *sk,
+				   struct sk_buff *skb)
+{
+	return dev_queue_xmit(skb);
+}
+
 static int br_ndisc_send_na(struct net_device *dev,
 			    const struct in6_addr *daddr,
 			    const struct in6_addr *solicited_addr,
@@ -1695,7 +1701,7 @@ static int br_ndisc_send_na(struct net_device *dev,
 	msg = (struct nd_msg *)skb_put(skb, sizeof(*msg));
 	*msg = (struct nd_msg) {
 		.icmph = {
-			.icmp6_type = ICMPV6_NDISC_NBR_ADVERTISEMENT,
+			.icmp6_type = NDISC_NEIGHBOUR_ADVERTISEMENT,
 			.icmp6_router = false,
 			.icmp6_solicited = solicited,
 			.icmp6_override = override,
@@ -1773,9 +1779,8 @@ static int br_ndisc_send_na(struct net_device *dev,
 	idev = __in6_dev_get(dst->dev);
 	IP6_UPD_PO_STATS(net, idev, IPSTATS_MIB_OUT, skb->len);
 
-	err = NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT, dev_net(dev),
-		      NULL, skb, NULL, dst->dev,
-		      dest_hw ? br_dev_queue_push_xmit : dst_output);
+	err = NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT, net, sk, skb, NULL,
+		      dst->dev, dest_hw ? br_ndisc_send_na_finish : dst_output);
 
 	if (!err) {
 		ICMP6MSGOUT_INC_STATS(net, idev, type);
@@ -1843,7 +1848,7 @@ static void br_do_proxy_ndisc(struct sk_buff *skb, struct net_bridge *br,
 
 	msg = (struct nd_msg *)skb_transport_header(skb);
 	if (msg->icmph.icmp6_code != 0 ||
-	    msg->icmph.icmp6_type != ICMPV6_NDISC_NBR_SOLICITATION)
+	    msg->icmph.icmp6_type != NDISC_NEIGHBOUR_SOLICITATION)
 		return;
 
 	if (ipv6_addr_loopback(daddr) ||
@@ -1917,6 +1922,11 @@ static int br_multicast_ipv6_rcv(struct net_bridge *br,
 
 	err = ipv6_mc_check_mld(skb, &skb_trimmed);
 
+	if (err == -ENOMSG &&
+	    icmp6_hdr(skb)->icmp6_type == NDISC_NEIGHBOUR_SOLICITATION) {
+		br_do_proxy_ndisc(skb, br, vid, port);
+	}
+
 	if (err == -ENOMSG) {
 		if (!ipv6_addr_is_ll_all_nodes(&ipv6_hdr(skb)->daddr))
 			BR_INPUT_SKB_CB(skb)->mrouters_only = 1;
@@ -1943,9 +1953,6 @@ static int br_multicast_ipv6_rcv(struct net_bridge *br,
 	case ICMPV6_MGM_REDUCTION:
 		src = eth_hdr(skb)->h_source;
 		br_ip6_multicast_leave_group(br, port, &mld->mld_mca, vid, src);
-		break;
-	case ICMPV6_NDISC_NBR_SOLICITATION:
-		br_do_proxy_ndisc(skb, br, vid, port);
 		break;
 	}
 

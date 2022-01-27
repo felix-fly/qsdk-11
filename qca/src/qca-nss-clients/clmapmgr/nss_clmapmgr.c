@@ -1,6 +1,6 @@
 /*
  **************************************************************************
- * Copyright (c) 2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -51,19 +51,27 @@ static netdev_tx_t nss_clmapmgr_dev_xmit(struct sk_buff *skb, struct net_device 
 
 	if_number = priv->nss_if_number_us;
 	if (unlikely(if_number <= 0)) {
-		nss_clmapmgr_info("%p: clmapmgr dev is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: clmapmgr dev is not registered with nss\n", dev);
 		goto fail;
 	}
 
 	clmap_ctx = nss_clmap_get_ctx();
 	if (unlikely(!clmap_ctx)) {
-		nss_clmapmgr_info("%p: NSS clmapmgr context not found.\n", dev);
+		nss_clmapmgr_info("%px: NSS clmapmgr context not found.\n", dev);
 		goto fail;
 	}
 
 	status = nss_clmap_tx_buf(clmap_ctx, skb, (uint32_t)if_number);
 	if (unlikely(status != NSS_TX_SUCCESS)) {
-		nss_clmapmgr_info("%p: NSS clmapmgr could not send packet to NSS %d\n", dev, if_number);
+		if (likely(status == NSS_TX_FAILURE_QUEUE)) {
+			nss_clmapmgr_warning("%px: netdev :%px queue is full", dev, dev);
+			if (!netif_queue_stopped(dev)) {
+				netif_stop_queue(dev);
+			}
+			nss_clmapmgr_warning("%px: (CLMAP packet) Failed to xmit the packet because of tx queue full, status: %d\n", dev, status);
+			return NETDEV_TX_BUSY;
+		}
+		nss_clmapmgr_info("%px: NSS clmapmgr could not send packet to NSS %d\n", dev, if_number);
 		goto fail;
 	}
 
@@ -76,16 +84,16 @@ fail:
 }
 
 /*
- * nss_clmapmgr_dev_stats64()
+ * nss_clmapmgr_get_dev_stats64()
  *	Netdev ops function to retrieve stats.
  */
-struct rtnl_link_stats64 *nss_clmapmgr_dev_stats64(struct net_device *dev,
+static struct rtnl_link_stats64 *nss_clmapmgr_get_dev_stats64(struct net_device *dev,
 						struct rtnl_link_stats64 *stats)
 {
 	struct nss_clmapmgr_priv_t *priv;
 
 	if (!stats) {
-		nss_clmapmgr_warning("%p: invalid rtnl structure\n", dev);
+		nss_clmapmgr_warning("%px: invalid rtnl structure\n", dev);
 		return stats;
 	}
 
@@ -103,6 +111,28 @@ struct rtnl_link_stats64 *nss_clmapmgr_dev_stats64(struct net_device *dev,
 
 	return stats;
 }
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0))
+/*
+ * nss_clmapmgr_dev_stats64()
+ *	Netdev ops function to retrieve stats for kernel version < 4.6
+ */
+static struct rtnl_link_stats64 *nss_clmapmgr_dev_stats64(struct net_device *dev,
+						struct rtnl_link_stats64 *tot)
+{
+	return nss_clmapmgr_get_dev_stats64(dev, tot);
+}
+#else
+/*
+ * nss_clmapmgr_dev_stats64()
+ *	Netdev ops function to retrieve stats for kernel version >= 4.6
+ */
+static void nss_clmapmgr_dev_stats64(struct net_device *dev,
+				struct rtnl_link_stats64 *tot)
+{
+	nss_clmapmgr_get_dev_stats64(dev, tot);
+}
+#endif
 
 /*
  * nss_clmapmgr_dev_init()
@@ -186,7 +216,7 @@ static void nss_clmapmgr_us_exception(struct net_device *dev, struct sk_buff *sk
 	/*
 	 * This is an error packet and needs to be dropped.
 	 */
-	nss_clmapmgr_warning("%p: upstream packet got exceptioned, dropping the packet..", dev);
+	nss_clmapmgr_warning("%px: upstream packet got exceptioned, dropping the packet..", dev);
 	dev_kfree_skb_any(skb);
 }
 
@@ -214,18 +244,18 @@ static void nss_clmapmgr_event_receive(void *if_ctx, struct nss_cmn_msg *cmsg)
 		if (interface_type == NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US) {
 			netdev_stats->tx_packets += stats->node_stats.tx_packets;
 			netdev_stats->tx_bytes += stats->node_stats.tx_bytes;
+			dropped += stats->dropped_macdb_lookup_failed;
+			dropped += stats->dropped_invalid_packet_size;
+			dropped += stats->dropped_low_hroom;
 		} else if (interface_type == NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS) {
 			netdev_stats->rx_packets += stats->node_stats.rx_packets;
 			netdev_stats->rx_bytes += stats->node_stats.rx_bytes;
+			dropped += stats->dropped_pbuf_alloc_failed;
+			dropped += stats->dropped_linear_failed;
+			dropped += stats->shared_packet_count;
+			dropped += stats->ethernet_frame_error;
 		}
-		dropped += stats->dropped_macdb_lookup_failed;
-		dropped += stats->dropped_invalid_packet_size;
-		dropped += stats->dropped_low_hroom;
 		dropped += stats->dropped_next_node_queue_full;
-		dropped += stats->dropped_pbuf_alloc_failed;
-		dropped += stats->dropped_linear_failed;
-		dropped += stats->shared_packet_count;
-		dropped += stats->ethernet_frame_error;
 		netdev_stats->tx_dropped += dropped;
 		if (interface_type == NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS) {
 			netdev_stats->rx_dropped += nss_cmn_rx_dropped_sum(&stats->node_stats);
@@ -233,7 +263,7 @@ static void nss_clmapmgr_event_receive(void *if_ctx, struct nss_cmn_msg *cmsg)
 		break;
 
 	default:
-		nss_clmapmgr_info("%p: Unknown Event from NSS\n", dev);
+		nss_clmapmgr_info("%px: Unknown Event from NSS\n", dev);
 		break;
 	}
 
@@ -294,7 +324,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_add(struct net_device *dev, struct nss_cl
 	}
 
 	if (!clmapmsg) {
-		nss_clmapmgr_info("%p: nss_clmapmgr_msg is NULL !!\n", dev);
+		nss_clmapmgr_info("%px: nss_clmapmgr_msg is NULL !!\n", dev);
 		return NSS_CLMAPMGR_ERR_BAD_PARAM;
 	}
 
@@ -309,12 +339,12 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_add(struct net_device *dev, struct nss_cl
 		 */
 		next_ifnum = nss_eogremgr_get_if_num_inner(clmapmsg->tunnel_id);
 		if (next_ifnum < 0) {
-			nss_clmapmgr_info("%p: No NSS interface registered for the tunnel id: %d\n", dev, clmapmsg->tunnel_id);
+			nss_clmapmgr_info("%px: No NSS interface registered for the tunnel id: %d\n", dev, clmapmsg->tunnel_id);
 			return NSS_CLMAPMGR_ERR_TUNNEL_NOT_FOUND;
 		}
 		break;
 	default:
-		nss_clmapmgr_info("%p: Invalid tunnel type: %d\n", dev, clmapmsg->tunnel_type);
+		nss_clmapmgr_info("%px: Invalid tunnel type: %d\n", dev, clmapmsg->tunnel_type);
 		return NSS_CLMAPMGR_ERR_BAD_PARAM;
 	}
 
@@ -325,7 +355,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_add(struct net_device *dev, struct nss_cl
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with nss\n", dev);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_NETDEV_UNKNOWN;
 	}
@@ -344,7 +374,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_add(struct net_device *dev, struct nss_cl
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_MAC_ADD, sizeof(struct nss_clmap_mac_msg), NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: nss clmap mac add command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: nss clmap mac add command error:%d if_num: %d\n", dev, status, us_if);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_MAC_ADD_FAILED;
 	}
@@ -371,7 +401,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_remove(struct net_device *dev, uint8_t *m
 	}
 
 	if (!mac_addr) {
-		nss_clmapmgr_info("%p: mac address is NULL !!\n", dev);
+		nss_clmapmgr_info("%px: mac address is NULL !!\n", dev);
 		return NSS_CLMAPMGR_ERR_BAD_PARAM;
 	}
 
@@ -382,7 +412,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_remove(struct net_device *dev, uint8_t *m
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with nss\n", dev);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_NETDEV_UNKNOWN;
 	}
@@ -399,7 +429,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_remove(struct net_device *dev, uint8_t *m
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_MAC_DEL, sizeof(struct nss_clmap_mac_msg), NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap mac del command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap mac del command error:%d if_num: %d\n", dev, status, us_if);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_MAC_DEL_FAILED;
 	}
@@ -432,12 +462,12 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_flush(struct net_device *dev, uint32_t tu
 		 */
 		next_ifnum = nss_eogremgr_get_if_num_inner(tunnel_id);
 		if (next_ifnum < 0) {
-			nss_clmapmgr_info("%p: No NSS interface registered for the tunnel id: %d\n", dev, tunnel_id);
+			nss_clmapmgr_info("%px: No NSS interface registered for the tunnel id: %d\n", dev, tunnel_id);
 			return NSS_CLMAPMGR_ERR_TUNNEL_NOT_FOUND;
 		}
 		break;
 	default:
-		nss_clmapmgr_info("%p: Invalid tunnel type: %d\n", dev, tunnel_type);
+		nss_clmapmgr_info("%px: Invalid tunnel type: %d\n", dev, tunnel_type);
 		return NSS_CLMAPMGR_ERR_BAD_PARAM;
 	}
 
@@ -448,7 +478,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_flush(struct net_device *dev, uint32_t tu
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with nss\n", dev);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_NETDEV_UNKNOWN;
 	}
@@ -460,7 +490,7 @@ nss_clmapmgr_status_t nss_clmapmgr_mac_flush(struct net_device *dev, uint32_t tu
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_MAC_FLUSH, sizeof(struct nss_clmap_mac_msg), NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap mac flush command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap mac flush command error:%d if_num: %d\n", dev, status, us_if);
 		dev_put(dev);
 		return NSS_CLMAPMGR_ERR_MAC_FLUSH_FAILED;
 	}
@@ -478,6 +508,7 @@ int nss_clmapmgr_netdev_enable(struct net_device *dev)
 	struct nss_clmap_msg req;
 	int us_if, ds_if;
 	struct nss_ctx_instance *nss_ctx = NULL;
+	struct nss_clmapmgr_priv_t *priv;
 	nss_tx_status_t status;
 
 	if (!dev) {
@@ -492,7 +523,7 @@ int nss_clmapmgr_netdev_enable(struct net_device *dev)
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with nss\n", dev);
 		goto release_ref;
 	}
 
@@ -501,7 +532,7 @@ int nss_clmapmgr_netdev_enable(struct net_device *dev)
 	 */
 	ds_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS);
 	if (ds_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with nss\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with nss\n", dev);
 		goto release_ref;
 	}
 
@@ -511,7 +542,7 @@ int nss_clmapmgr_netdev_enable(struct net_device *dev)
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_INTERFACE_ENABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap enable command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap enable command error:%d if_num: %d\n", dev, status, us_if);
 		goto release_ref;
 	}
 
@@ -521,13 +552,15 @@ int nss_clmapmgr_netdev_enable(struct net_device *dev)
 	nss_clmap_msg_init(&req, ds_if, NSS_CLMAP_MSG_TYPE_INTERFACE_ENABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap enable command error:%d if_num: %d\n", dev, status, ds_if);
+		nss_clmapmgr_warning("%px: NSS clmap enable command error:%d if_num: %d\n", dev, status, ds_if);
 		goto disable_us;
 	}
 
 	/*
 	 * Open the netdev to accept packets
 	 */
+	priv = (struct nss_clmapmgr_priv_t *)netdev_priv(dev);
+	priv->clmap_enabled = true;
 	nss_clmapmgr_dev_open(dev);
 
 	return NOTIFY_OK;
@@ -536,7 +569,7 @@ disable_us:
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_INTERFACE_DISABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap enable command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap enable command error:%d if_num: %d\n", dev, status, us_if);
 	}
 
 release_ref:
@@ -553,6 +586,7 @@ int nss_clmapmgr_netdev_disable(struct net_device *dev)
 	struct nss_clmap_msg req;
 	int us_if, ds_if;
 	struct nss_ctx_instance *nss_ctx = NULL;
+	struct nss_clmapmgr_priv_t *priv;
 	nss_tx_status_t status;
 
 	if (!dev) {
@@ -567,7 +601,7 @@ int nss_clmapmgr_netdev_disable(struct net_device *dev)
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with NSS\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with NSS\n", dev);
 		goto release_ref;
 	}
 
@@ -576,7 +610,7 @@ int nss_clmapmgr_netdev_disable(struct net_device *dev)
 	 */
 	ds_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS);
 	if (ds_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with NSS\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with NSS\n", dev);
 		goto release_ref;
 	}
 
@@ -586,7 +620,7 @@ int nss_clmapmgr_netdev_disable(struct net_device *dev)
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_INTERFACE_DISABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap disable command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap disable command error:%d if_num: %d\n", dev, status, us_if);
 		goto release_ref;
 	}
 
@@ -596,13 +630,15 @@ int nss_clmapmgr_netdev_disable(struct net_device *dev)
 	nss_clmap_msg_init(&req, ds_if, NSS_CLMAP_MSG_TYPE_INTERFACE_DISABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap disable command error:%d if_num: %d\n", dev, status, ds_if);
+		nss_clmapmgr_warning("%px: NSS clmap disable command error:%d if_num: %d\n", dev, status, ds_if);
 		goto enable_us;
 	}
 
 	/*
 	 * Close the netdev
 	 */
+	priv = (struct nss_clmapmgr_priv_t *)netdev_priv(dev);
+	priv->clmap_enabled = false;
 	nss_clmapmgr_dev_close(dev);
 
 	return NOTIFY_OK;
@@ -611,7 +647,7 @@ enable_us:
 	nss_clmap_msg_init(&req, us_if, NSS_CLMAP_MSG_TYPE_INTERFACE_ENABLE, 0, NULL, NULL);
 	status = nss_clmap_tx_msg_sync(nss_ctx, &req);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_warning("%p: NSS clmap disable command error:%d if_num: %d\n", dev, status, us_if);
+		nss_clmapmgr_warning("%px: NSS clmap disable command error:%d if_num: %d\n", dev, status, us_if);
 	}
 
 release_ref:
@@ -653,19 +689,19 @@ static nss_clmapmgr_status_t nss_clmapmgr_destroy_us_interface(struct net_device
 	int retry = 0;
 
 	if (!nss_clmap_unregister(interface_num)) {
-		nss_clmapmgr_warning("%p: clmap NSS upstream interface unregister failed\n.", dev);
+		nss_clmapmgr_warning("%px: clmap NSS upstream interface unregister failed\n.", dev);
 		return NSS_CLMAPMGR_ERR_NSSIF_UNREGISTER_FAILED;
 	}
 
 dealloc_us:
 	status = nss_dynamic_interface_dealloc_node(interface_num, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_info("%p: clmap dealloc node failure for interface_num = %d\n", dev, interface_num);
+		nss_clmapmgr_info("%px: clmap dealloc node failure for interface_num = %d\n", dev, interface_num);
 		if (++retry <= NSS_CLMAPMGR_CMD_MAX_RETRY_COUNT) {
 			goto dealloc_us;
 		}
 
-		nss_clmapmgr_error("%p: fatal Error, failed to dealloc upstream clmap NSS interface.\n", dev);
+		nss_clmapmgr_error("%px: fatal Error, failed to dealloc upstream clmap NSS interface.\n", dev);
 		return NSS_CLMAPMGR_ERR_NSSIF_DEALLOC_FAILED;
 	}
 
@@ -682,23 +718,41 @@ static nss_clmapmgr_status_t nss_clmapmgr_destroy_ds_interface(struct net_device
 	int retry = 0;
 
 	if (!nss_clmap_unregister(interface_num)) {
-		nss_clmapmgr_warning("%p: clmap NSS downstream interface unregister failed\n.", dev);
+		nss_clmapmgr_warning("%px: clmap NSS downstream interface unregister failed\n.", dev);
 		return NSS_CLMAPMGR_ERR_NSSIF_UNREGISTER_FAILED;
 	}
 
 dealloc_ds:
 	status = nss_dynamic_interface_dealloc_node(interface_num, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS);
 	if (status != NSS_TX_SUCCESS) {
-		nss_clmapmgr_info("%p: clmap dealloc node failure for ds_if = %d\n", dev, interface_num);
+		nss_clmapmgr_info("%px: clmap dealloc node failure for ds_if = %d\n", dev, interface_num);
 		if (++retry <= NSS_CLMAPMGR_CMD_MAX_RETRY_COUNT) {
 			goto dealloc_ds;
 		}
 
-		nss_clmapmgr_error("%p: fatal Error, failed to dealloc downstream clmap NSS interface.\n", dev);
+		nss_clmapmgr_error("%px: fatal Error, failed to dealloc downstream clmap NSS interface.\n", dev);
 		return NSS_CLMAPMGR_ERR_NSSIF_DEALLOC_FAILED;
 	}
 
 	return NSS_CLMAPMGR_SUCCESS;
+}
+
+/*
+ * nss_clmapmgr_decongestion_callback()
+ * 	Wakeup netif queue if we were stopped by start_xmit
+ */
+static void nss_clmapmgr_decongestion_callback(void *arg) {
+	struct net_device *dev = arg;
+	struct nss_clmapmgr_priv_t *priv;
+
+	priv = (struct nss_clmapmgr_priv_t *)netdev_priv(dev);
+	if (unlikely(!priv->clmap_enabled)) {
+		return;
+	}
+
+	if (netif_queue_stopped(dev)) {
+		netif_wake_queue(dev);
+	}
 }
 
 /*
@@ -714,11 +768,18 @@ nss_clmapmgr_status_t nss_clmapmgr_netdev_destroy(struct net_device *dev)
 	netif_tx_disable(dev);
 
 	/*
+	 * Deregister decongestion callback
+	 */
+	if (nss_cmn_unregister_queue_decongestion(nss_clmap_get_ctx(), nss_clmapmgr_decongestion_callback) != NSS_CB_UNREGISTER_SUCCESS) {
+		nss_clmapmgr_info("%px: failed to unregister decongestion callback\n", dev);
+	}
+
+	/*
 	 * Check if upstream clmap interface is registered with NSS
 	 */
 	us_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with NSS\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with NSS\n", dev);
 		return NSS_CLMAPMGR_ERR_NETDEV_UNKNOWN;
 	}
 
@@ -727,23 +788,23 @@ nss_clmapmgr_status_t nss_clmapmgr_netdev_destroy(struct net_device *dev)
 	 */
 	ds_if = nss_cmn_get_interface_number_by_dev_and_type(dev, NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS);
 	if (ds_if < 0) {
-		nss_clmapmgr_info("%p: Net device is not registered with NSS\n", dev);
+		nss_clmapmgr_info("%px: Net device is not registered with NSS\n", dev);
 		return NSS_CLMAPMGR_ERR_NETDEV_UNKNOWN;
 	}
 
 	ret = nss_clmapmgr_destroy_us_interface(dev, us_if);
 	if (ret != NSS_CLMAPMGR_SUCCESS) {
-		nss_clmapmgr_warning("%p: failed to destroy clmap upstream interface: %d\n", dev, us_if);
+		nss_clmapmgr_warning("%px: failed to destroy clmap upstream interface: %d\n", dev, us_if);
 		return ret;
 	}
 
 	ret = nss_clmapmgr_destroy_ds_interface(dev, ds_if);
 	if (ret != NSS_CLMAPMGR_SUCCESS) {
-		nss_clmapmgr_warning("%p: failed to destroy clmap downstream interface: %d\n", dev, ds_if);
+		nss_clmapmgr_warning("%px: failed to destroy clmap downstream interface: %d\n", dev, ds_if);
 		return ret;
 	}
 
-	nss_clmapmgr_info("%p: deleted clmap instance, us_if = %d ds_if = %d\n",
+	nss_clmapmgr_info("%px: deleted clmap instance, us_if = %d ds_if = %d\n",
 			dev, us_if, ds_if);
 
 	unregister_netdev(dev);
@@ -779,7 +840,7 @@ struct net_device *nss_clmapmgr_netdev_create(void)
 	 */
 	ret = register_netdev(dev);
 	if (ret) {
-		nss_clmapmgr_warning("%p: Netdevice registration failed\n", dev);
+		nss_clmapmgr_warning("%px: Netdevice registration failed\n", dev);
 		free_netdev(dev);
 		return NULL;
 	}
@@ -789,7 +850,7 @@ struct net_device *nss_clmapmgr_netdev_create(void)
 	 */
 	ds_if = nss_dynamic_interface_alloc_node(NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_DS);
 	if (ds_if < 0) {
-		nss_clmapmgr_warning("%p: NSS dynamic interface alloc failed for clmap downstream\n", dev);
+		nss_clmapmgr_warning("%px: NSS dynamic interface alloc failed for clmap downstream\n", dev);
 		goto deregister_netdev;
 	}
 
@@ -798,11 +859,12 @@ struct net_device *nss_clmapmgr_netdev_create(void)
 	 */
 	us_if = nss_dynamic_interface_alloc_node(NSS_DYNAMIC_INTERFACE_TYPE_CLMAP_US);
 	if (us_if < 0) {
-		nss_clmapmgr_warning("%p: NSS dynamic interface alloc failed for clmap upstream\n", dev);
+		nss_clmapmgr_warning("%px: NSS dynamic interface alloc failed for clmap upstream\n", dev);
 		goto dealloc_ds_node;
 	}
 
 	priv = (struct nss_clmapmgr_priv_t *)netdev_priv(dev);
+	priv->clmap_enabled = false;
 	priv->nss_if_number_us = us_if;
 	priv->nss_if_number_ds = ds_if;
 
@@ -816,7 +878,7 @@ struct net_device *nss_clmapmgr_netdev_create(void)
 				dev,
 				features);
 	if (!nss_ctx) {
-		nss_clmapmgr_info("%p: nss_clmap_register failed for downstream interface\n", dev);
+		nss_clmapmgr_info("%px: nss_clmap_register failed for downstream interface\n", dev);
 		goto dealloc_us_node;
 	}
 
@@ -830,16 +892,26 @@ struct net_device *nss_clmapmgr_netdev_create(void)
 				dev,
 				features);
 	if (!nss_ctx) {
-		nss_clmapmgr_info("%p: nss_clmap_register failed for upstream interface\n", dev);
+		nss_clmapmgr_info("%px: nss_clmap_register failed for upstream interface\n", dev);
 		goto unregister_ds;
 	}
 
-	nss_clmapmgr_info("%p: nss_clmap_register() successful. nss_ctx = %p\n", dev, nss_ctx);
+	/*
+	 * Register decongestion callback
+	 */
+	if (nss_cmn_register_queue_decongestion(nss_clmap_get_ctx(), nss_clmapmgr_decongestion_callback, dev) != NSS_CB_REGISTER_SUCCESS) {
+		nss_clmapmgr_warning("%px: failed to register decongestion callback\n", dev);
+		goto unregister_us;
+	}
 
 	/*
 	 * Success
 	 */
+	nss_clmapmgr_info("%px: nss_clmap_register() successful. nss_ctx = %px\n", dev, nss_ctx);
 	return dev;
+
+unregister_us:
+	nss_clmap_unregister(us_if);
 
 unregister_ds:
 	nss_clmap_unregister(ds_if);
@@ -850,7 +922,7 @@ dealloc_us_node:
 		if (++retry <= NSS_CLMAPMGR_CMD_MAX_RETRY_COUNT) {
 			goto dealloc_us_node;
 		}
-		nss_clmapmgr_error("%p: fatal Error, Unable to dealloc the node[%d] in the NSS FW!\n", dev, us_if);
+		nss_clmapmgr_error("%px: fatal Error, Unable to dealloc the node[%d] in the NSS FW!\n", dev, us_if);
 	}
 
 	retry = 0;
@@ -860,7 +932,7 @@ dealloc_ds_node:
 		if (++retry <= NSS_CLMAPMGR_CMD_MAX_RETRY_COUNT) {
 			goto dealloc_ds_node;
 		}
-		nss_clmapmgr_error("%p: fatal Error, Unable to dealloc the node[%d] in the NSS FW!\n", dev, ds_if);
+		nss_clmapmgr_error("%px: fatal Error, Unable to dealloc the node[%d] in the NSS FW!\n", dev, ds_if);
 	}
 
 deregister_netdev:

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -19,6 +19,7 @@
 #include "htc_debug.h"
 #include "htc_internal.h"
 #include "htc_credit_history.h"
+#include "htc_hang_event.h"
 #include <hif.h>
 #include <qdf_nbuf.h>           /* qdf_nbuf_t */
 #include <qdf_types.h>          /* qdf_print */
@@ -46,7 +47,7 @@ ATH_DEBUG_INSTANTIATE_MODULE_VAR(htc,
 #endif
 
 #if (defined(WMI_MULTI_MAC_SVC) || defined(QCA_WIFI_QCA8074) || \
-	defined(QCA_WIFI_QCA6018))
+	defined(QCA_WIFI_QCA6018) || defined(QCA_WIFI_QCA9574))
 static const uint32_t svc_id[] = {WMI_CONTROL_SVC, WMI_CONTROL_SVC_WMAC1,
 						WMI_CONTROL_SVC_WMAC2};
 #else
@@ -134,6 +135,16 @@ void htc_dump(HTC_HANDLE HTCHandle, uint8_t CmdId, bool start)
 	hif_dump(target->hif_dev, CmdId, start);
 }
 
+void htc_ce_tasklet_debug_dump(HTC_HANDLE htc_handle)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
+
+	if (!target->hif_dev)
+		return;
+
+	hif_display_stats(target->hif_dev);
+}
+
 /* cleanup the HTC instance */
 static void htc_cleanup(HTC_TARGET *target)
 {
@@ -142,6 +153,12 @@ static void htc_cleanup(HTC_TARGET *target)
 	HTC_ENDPOINT *endpoint;
 	HTC_PACKET_QUEUE *pkt_queue;
 	qdf_nbuf_t netbuf;
+
+	while (htc_dec_return_runtime_cnt((void *)target) >= 0) {
+		hif_pm_runtime_put(target->hif_dev, RTPM_ID_HTC);
+		hif_pm_runtime_update_stats(target->hif_dev, RTPM_ID_HTC,
+					    HIF_PM_HTC_STATS_PUT_HTC_CLEANUP);
+	}
 
 	if (target->hif_dev) {
 		hif_detach_htc(target->hif_dev);
@@ -243,8 +260,130 @@ int htc_runtime_resume(HTC_HANDLE htc_ctx)
 	qdf_sched_work(0, &target->queue_kicker);
 	return 0;
 }
+
+/**
+ * htc_runtime_pm_deinit(): runtime pm related de-intialization
+ *
+ * need to de-initialize the work item.
+ *
+ * @target: HTC target pointer
+ *
+ */
+static void htc_runtime_pm_deinit(HTC_TARGET *target)
+{
+	if (!target)
+		return;
+
+	qdf_destroy_work(0, &target->queue_kicker);
+}
+
+int32_t htc_dec_return_runtime_cnt(HTC_HANDLE htc)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc);
+
+	return qdf_atomic_dec_return(&target->htc_runtime_cnt);
+}
+
+/**
+ * htc_init_runtime_cnt: Initialize htc runtime count
+ * @htc: HTC handle
+ *
+ * Return: None
+ */
+static inline
+void htc_init_runtime_cnt(HTC_TARGET *target)
+{
+	qdf_atomic_init(&target->htc_runtime_cnt);
+}
 #else
 static inline void htc_runtime_pm_init(HTC_TARGET *target) { }
+static inline void htc_runtime_pm_deinit(HTC_TARGET *target) { }
+
+static inline
+void htc_init_runtime_cnt(HTC_TARGET *target)
+{
+}
+#endif
+
+#if defined(DEBUG_HL_LOGGING) && defined(CONFIG_HL_SUPPORT)
+static
+void htc_update_rx_bundle_stats(void *ctx, uint8_t no_of_pkt_in_bundle)
+{
+	HTC_TARGET *target = (HTC_TARGET *)ctx;
+
+	no_of_pkt_in_bundle--;
+	if (target && (no_of_pkt_in_bundle < HTC_MAX_MSG_PER_BUNDLE_RX))
+		target->rx_bundle_stats[no_of_pkt_in_bundle]++;
+}
+#else
+static
+void htc_update_rx_bundle_stats(void *ctx, uint8_t no_of_pkt_in_bundle)
+{
+}
+#endif
+
+#ifdef WLAN_DEBUG_LINK_VOTE
+static qdf_atomic_t htc_link_vote_ids[HTC_LINK_VOTE_INVALID_MAX_USER_ID];
+
+static void htc_init_link_vote_ids(void)
+{
+	uint32_t i;
+
+	for (i = HTC_LINK_VOTE_INVALID_MIN_USER_ID;
+	     i < HTC_LINK_VOTE_INVALID_MAX_USER_ID; i++)
+		qdf_atomic_init(&htc_link_vote_ids[i]);
+}
+
+void htc_log_link_user_votes(void)
+{
+	uint32_t i;
+	uint32_t link_vote;
+
+	for (i = HTC_LINK_VOTE_INVALID_MIN_USER_ID + 1;
+	     i < HTC_LINK_VOTE_INVALID_MAX_USER_ID; i++) {
+		link_vote = qdf_atomic_read(&htc_link_vote_ids[i]);
+		if (link_vote)
+			HTC_NOFL_INFO("Link vote %d user id: %d",
+				      link_vote, i);
+	}
+}
+
+void htc_vote_link_down(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
+
+	if (!target->hif_dev)
+		return;
+	if (id >= HTC_LINK_VOTE_INVALID_MAX_USER_ID ||
+	    id <= HTC_LINK_VOTE_INVALID_MIN_USER_ID) {
+		HTC_ERROR("invalid id: %d", id);
+		return;
+	}
+
+	hif_vote_link_down(target->hif_dev);
+	qdf_atomic_dec(&htc_link_vote_ids[id]);
+}
+
+void htc_vote_link_up(HTC_HANDLE htc_handle, enum htc_link_vote_user_id id)
+{
+	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
+
+	if (!target->hif_dev)
+		return;
+	if (id >= HTC_LINK_VOTE_INVALID_MAX_USER_ID ||
+	    id <= HTC_LINK_VOTE_INVALID_MIN_USER_ID) {
+		HTC_ERROR("invalid link vote user id: %d", id);
+		return;
+	}
+
+	hif_vote_link_up(target->hif_dev);
+	qdf_atomic_inc(&htc_link_vote_ids[id]);
+}
+#else
+static inline
+void htc_init_link_vote_ids(void)
+{
+}
 #endif
 
 /* registered target arrival callback from the HIF layer */
@@ -288,6 +427,14 @@ HTC_HANDLE htc_create(void *ol_sc, struct htc_init_info *pInfo,
 		target->osdev = osdev;
 		target->con_mode = con_mode;
 
+		/* If htc_ready_timeout_ms is not configured from CFG,
+		 * assign the default timeout value here.
+		 */
+
+		if (!target->HTCInitInfo.htc_ready_timeout_ms)
+			target->HTCInitInfo.htc_ready_timeout_ms =
+							HTC_CONTROL_RX_TIMEOUT;
+
 		reset_endpoint_states(target);
 
 		INIT_HTC_PACKET_QUEUE(&target->ControlBufferTXFreeList);
@@ -316,6 +463,7 @@ HTC_HANDLE htc_create(void *ol_sc, struct htc_init_info *pInfo,
 		htcCallbacks.txResourceAvailHandler =
 						 htc_tx_resource_avail_handler;
 		htcCallbacks.fwEventHandler = htc_fw_event_handler;
+		htcCallbacks.update_bundle_stats = htc_update_rx_bundle_stats;
 		target->hif_dev = ol_sc;
 
 		/* Get HIF default pipe for HTC message exchange */
@@ -331,8 +479,13 @@ HTC_HANDLE htc_create(void *ol_sc, struct htc_init_info *pInfo,
 	} while (false);
 
 	htc_recv_init(target);
+	htc_init_runtime_cnt(target);
 
 	HTC_TRACE("-htc_create: (0x%pK)", target);
+
+	htc_hang_event_notifier_register(target);
+
+	htc_init_link_vote_ids();
 
 	return (HTC_HANDLE) target;
 }
@@ -343,10 +496,12 @@ void htc_destroy(HTC_HANDLE HTCHandle)
 
 	AR_DEBUG_PRINTF(ATH_DEBUG_TRC,
 			("+htc_destroy ..  Destroying :0x%pK\n", target));
+	htc_hang_event_notifier_unregister();
 	hif_stop(htc_get_hif_device(HTCHandle));
 	if (target)
 		htc_cleanup(target);
 	AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("-htc_destroy\n"));
+	htc_credit_history_deinit();
 }
 
 /* get the low level HIF device for the caller , the caller may wish to do low
@@ -680,6 +835,8 @@ static void reset_endpoint_states(HTC_TARGET *target)
 		INIT_HTC_PACKET_QUEUE(&pEndpoint->RxBufferHoldQueue);
 		pEndpoint->target = target;
 		pEndpoint->TxCreditFlowEnabled = (bool)htc_credit_flow;
+		pEndpoint->num_requeues_warn = 0;
+		pEndpoint->total_num_requeues = 0;
 		qdf_atomic_init(&pEndpoint->TxProcessCount);
 	}
 }
@@ -803,7 +960,7 @@ void htc_stop(HTC_HANDLE HTCHandle)
 {
 	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(HTCHandle);
 	int i;
-	HTC_ENDPOINT *pEndpoint;
+	HTC_ENDPOINT *endpoint;
 #ifdef RX_SG_SUPPORT
 	qdf_nbuf_t netbuf;
 	qdf_nbuf_queue_t *rx_sg_queue = &target->RxSgQueue;
@@ -811,15 +968,17 @@ void htc_stop(HTC_HANDLE HTCHandle)
 
 	AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("+htc_stop\n"));
 
+	htc_runtime_pm_deinit(target);
+
 	HTC_INFO("%s: endpoints cleanup\n", __func__);
 	/* cleanup endpoints */
 	for (i = 0; i < ENDPOINT_MAX; i++) {
-		pEndpoint = &target->endpoint[i];
-		htc_flush_rx_hold_queue(target, pEndpoint);
-		htc_flush_endpoint_tx(target, pEndpoint, HTC_TX_PACKET_TAG_ALL);
-		if (pEndpoint->ul_is_polled) {
-			qdf_timer_stop(&pEndpoint->ul_poll_timer);
-			qdf_timer_free(&pEndpoint->ul_poll_timer);
+		endpoint = &target->endpoint[i];
+		htc_flush_rx_hold_queue(target, endpoint);
+		htc_flush_endpoint_tx(target, endpoint, HTC_TX_PACKET_TAG_ALL);
+		if (endpoint->ul_is_polled) {
+			qdf_timer_stop(&endpoint->ul_poll_timer);
+			qdf_timer_free(&endpoint->ul_poll_timer);
 		}
 	}
 
@@ -845,12 +1004,18 @@ void htc_stop(HTC_HANDLE HTCHandle)
 	 * In SSR case, HTC tx completion callback for wmi will be blocked
 	 * by TARGET_STATUS_RESET and HTC packets will be left unfreed on
 	 * lookup queue.
+	 *
+	 * In case of target failing to send wmi_ready_event, the htc connect
+	 * msg buffer will be left unmapped and not freed. So calling the
+	 * completion handler for this buffer will handle this scenario.
 	 */
 	HTC_INFO("%s: flush endpoints Tx lookup queue\n", __func__);
 	for (i = 0; i < ENDPOINT_MAX; i++) {
-		pEndpoint = &target->endpoint[i];
-		if (pEndpoint->service_id == WMI_CONTROL_SVC)
+		endpoint = &target->endpoint[i];
+		if (endpoint->service_id == WMI_CONTROL_SVC)
 			htc_flush_endpoint_txlookupQ(target, i, false);
+		else if (endpoint->service_id == HTC_CTRL_RSVD_SVC)
+			htc_flush_endpoint_txlookupQ(target, i, true);
 	}
 	HTC_INFO("%s: resetting endpoints state\n", __func__);
 
@@ -1028,42 +1193,6 @@ void htc_clear_bundle_stats(HTC_HANDLE HTCHandle)
 #endif
 
 /**
- * htc_vote_link_down - API to vote for link down
- * @htc_handle: HTC handle
- *
- * API for upper layers to call HIF to vote for link down
- *
- * Return: void
- */
-void htc_vote_link_down(HTC_HANDLE htc_handle)
-{
-	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
-
-	if (!target->hif_dev)
-		return;
-
-	hif_vote_link_down(target->hif_dev);
-}
-
-/**
- * htc_vote_link_up - API to vote for link up
- * @htc_handle: HTC Handle
- *
- * API for upper layers to call HIF to vote for link up
- *
- * Return: void
- */
-void htc_vote_link_up(HTC_HANDLE htc_handle)
-{
-	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
-
-	if (!target->hif_dev)
-		return;
-
-	hif_vote_link_up(target->hif_dev);
-}
-
-/**
  * htc_can_suspend_link - API to query HIF for link status
  * @htc_handle: HTC Handle
  *
@@ -1086,14 +1215,17 @@ int htc_pm_runtime_get(HTC_HANDLE htc_handle)
 {
 	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
 
-	return hif_pm_runtime_get(target->hif_dev);
+	return hif_pm_runtime_get(target->hif_dev,
+				  RTPM_ID_HTC, false);
 }
 
 int htc_pm_runtime_put(HTC_HANDLE htc_handle)
 {
 	HTC_TARGET *target = GET_HTC_TARGET_FROM_HANDLE(htc_handle);
 
-	return hif_pm_runtime_put(target->hif_dev);
+	hif_pm_runtime_update_stats(target->hif_dev, RTPM_ID_HTC,
+				    HIF_PM_HTC_STATS_PUT_HTT_RESPONSE);
+	return hif_pm_runtime_put(target->hif_dev, RTPM_ID_HTC);
 }
 #endif
 
