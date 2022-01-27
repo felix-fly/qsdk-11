@@ -5,7 +5,6 @@
 依赖
 
 ```bash
-sudo add-apt-repository -y ppa:avsm/ppa
 sudo apt update
 sudo apt-get install -y opam ocaml-nox git zip subversion build-essential flex wget gawk unzip man file zlib1g-dev libssl-dev libncurses5-dev python
 ```
