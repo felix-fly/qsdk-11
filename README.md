@@ -1,21 +1,21 @@
-# qsdk_cmiot-ax6
+# qsdk for ax18
 
-建议在ubuntu16.04 x64上编译，较新系统会有一些奇奇怪怪的问题。
-请自行解决编译的依赖问题，我也不知道我装了些什么依赖。
-
-注意
-· 不要用 root 用户进行编译！！！
-· 国内用户编译前最好准备好梯子
-· 默认登陆IP 192.168.1.1 密码没有
+在ubuntu16.04 x64上编译通过。
 
 依赖
-· sudo apt-get -y install build-essential asciidoc binutils bzip2 gawk gettext git libncurses5-dev libz-dev patch python3 python2.7 unzip zlib1g-dev lib32gcc1 libc6-dev-i386 subversion flex uglifyjs git-core gcc-multilib p7zip p7zip-full msmtp libssl-dev texinfo libglib2.0-dev xmlto qemu-utils upx libelf-dev autoconf automake libtool autopoint device-tree-compiler g++-multilib antlr3 gperf wget curl swig rsync
 
+```bash
+sudo add-apt-repository -y ppa:avsm/ppa
+sudo apt update
+sudo apt-get install -y opam ocaml-nox git zip subversion build-essential flex wget gawk unzip man file zlib1g-dev libssl-dev libncurses5-dev python
+```
 
 编译
-· cd qsdk_cmiot-ax6
-· cp config-ax18 .config
-· make package/symlinks
-· make defconfig
-· make download -j
-· make -j4 V=s
+
+```bash
+cd qsdk_11
+make package/symlinks
+make defconfig
+make download -j$(nproc)
+make -j$(nproc) V=s
+```
