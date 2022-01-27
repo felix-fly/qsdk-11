@@ -1,1 +1,0 @@
-cmd_drivers/mtd/mtdsplit/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/mtd/mtdsplit/built-in.o drivers/mtd/mtdsplit/mtdsplit.o drivers/mtd/mtdsplit/mtdsplit_squashfs.o drivers/mtd/mtdsplit/mtdsplit_fit.o 

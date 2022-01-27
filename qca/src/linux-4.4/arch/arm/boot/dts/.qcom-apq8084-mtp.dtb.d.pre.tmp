@@ -1,8 +1,0 @@
-qcom-apq8084-mtp.o: arch/arm/boot/dts/qcom-apq8084-mtp.dts \
- arch/arm/boot/dts/qcom-apq8084.dtsi arch/arm/boot/dts/skeleton.dtsi \
- arch/arm/boot/dts/include/dt-bindings/clock/qcom,gcc-apq8084.h \
- arch/arm/boot/dts/include/dt-bindings/gpio/gpio.h \
- arch/arm/boot/dts/qcom-pma8084.dtsi \
- arch/arm/boot/dts/include/dt-bindings/iio/qcom,spmi-vadc.h \
- arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h \
- arch/arm/boot/dts/include/dt-bindings/spmi/spmi.h

@@ -1,1 +1,0 @@
-cmd_drivers/base/regmap/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/base/regmap/built-in.o drivers/base/regmap/regmap-core.o drivers/base/regmap/regmap-i2c.o drivers/base/regmap/regmap-spi.o drivers/base/regmap/regmap-spmi.o drivers/base/regmap/regmap-mmio.o 

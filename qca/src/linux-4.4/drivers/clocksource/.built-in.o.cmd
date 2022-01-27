@@ -1,1 +1,0 @@
-cmd_drivers/clocksource/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/clocksource/built-in.o drivers/clocksource/clksrc-probe.o drivers/clocksource/qcom-timer.o drivers/clocksource/arm_arch_timer.o drivers/clocksource/dummy_timer.o 

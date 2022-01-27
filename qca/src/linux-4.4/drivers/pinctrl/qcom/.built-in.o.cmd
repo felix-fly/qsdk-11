@@ -1,1 +1,0 @@
-cmd_drivers/pinctrl/qcom/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/pinctrl/qcom/built-in.o drivers/pinctrl/qcom/pinctrl-msm.o drivers/pinctrl/qcom/pinctrl-ipq6018.o drivers/pinctrl/qcom/pinctrl-spmi-gpio.o drivers/pinctrl/qcom/pinctrl-spmi-mpp.o 

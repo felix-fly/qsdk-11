@@ -1,1 +1,0 @@
-cmd_drivers/video/fbdev/qcom/mdss-qpic.o := arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/video/fbdev/qcom/mdss-qpic.o drivers/video/fbdev/qcom/mdss_qpic.o drivers/video/fbdev/qcom/mdss_fb.o drivers/video/fbdev/qcom/mdss_qpic_panel.o 

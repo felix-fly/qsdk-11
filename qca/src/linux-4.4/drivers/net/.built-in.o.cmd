@@ -1,1 +1,0 @@
-cmd_drivers/net/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/net/built-in.o drivers/net/mdio.o drivers/net/Space.o drivers/net/loopback.o drivers/net/phy/built-in.o drivers/net/ethernet/built-in.o drivers/net/wireless/built-in.o 

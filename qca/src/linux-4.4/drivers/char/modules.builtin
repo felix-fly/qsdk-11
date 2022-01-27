@@ -1,3 +1,0 @@
-kernel/drivers/char/adsprpc.ko
-kernel/drivers/char/hw_random/rng-core.ko
-kernel/drivers/char/hw_random/msm-rng.ko

@@ -1,1 +1,0 @@
-cmd_drivers/net/phy/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/net/phy/built-in.o drivers/net/phy/mdio-boardinfo.o drivers/net/phy/libphy.o drivers/net/phy/swconfig.o drivers/net/phy/fixed_phy.o drivers/net/phy/mdio-bitbang.o drivers/net/phy/mdio-gpio.o drivers/net/phy/at803x.o drivers/net/phy/mdio-qca.o 

@@ -1,1 +1,0 @@
-cmd_drivers/staging/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/staging/built-in.o drivers/staging/staging.o drivers/staging/media/built-in.o drivers/staging/android/built-in.o drivers/staging/mt29f_spinand/built-in.o 

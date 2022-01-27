@@ -1,1 +1,0 @@
-cmd_drivers/misc/qseecom.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/misc/qseecom.ko drivers/misc/qseecom.o drivers/misc/qseecom.mod.o

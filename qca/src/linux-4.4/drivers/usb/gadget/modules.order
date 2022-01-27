@@ -1,4 +1,0 @@
-kernel/drivers/usb/gadget/libcomposite.ko
-kernel/drivers/usb/gadget/udc/udc-core.ko
-kernel/drivers/usb/gadget/function/usb_f_qdss.ko
-kernel/drivers/usb/gadget/function/u_qdss.ko

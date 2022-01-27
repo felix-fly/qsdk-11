@@ -1,2 +1,0 @@
-kernel/drivers/leds/leds-gpio.ko
-kernel/drivers/leds/ledtrig-usbdev.ko

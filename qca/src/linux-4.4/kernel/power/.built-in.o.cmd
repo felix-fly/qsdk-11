@@ -1,1 +1,0 @@
-cmd_kernel/power/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o kernel/power/built-in.o kernel/power/qos.o kernel/power/main.o kernel/power/process.o kernel/power/suspend.o kernel/power/poweroff.o 

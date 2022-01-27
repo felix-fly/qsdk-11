@@ -1,1 +1,0 @@
-cmd_drivers/usb/gadget/udc/udc-core.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/gadget/udc/udc-core.ko drivers/usb/gadget/udc/udc-core.o drivers/usb/gadget/udc/udc-core.mod.o

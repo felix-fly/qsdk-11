@@ -1,1 +1,0 @@
-cmd_drivers/video/fbdev/qcom/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/video/fbdev/qcom/built-in.o drivers/video/fbdev/qcom/mdss-qpic.o drivers/video/fbdev/qcom/qpic_panel_er_ssd1963.o 

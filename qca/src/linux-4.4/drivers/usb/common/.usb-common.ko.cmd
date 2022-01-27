@@ -1,1 +1,0 @@
-cmd_drivers/usb/common/usb-common.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/common/usb-common.ko drivers/usb/common/usb-common.o drivers/usb/common/usb-common.mod.o

@@ -1,1 +1,0 @@
-cmd_drivers/thermal/thermal_sys.o := arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/thermal/thermal_sys.o drivers/thermal/thermal_core.o drivers/thermal/of-thermal.o drivers/thermal/step_wise.o drivers/thermal/user_space.o 

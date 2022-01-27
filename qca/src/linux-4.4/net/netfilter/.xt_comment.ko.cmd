@@ -1,1 +1,0 @@
-cmd_net/netfilter/xt_comment.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o net/netfilter/xt_comment.ko net/netfilter/xt_comment.o net/netfilter/xt_comment.mod.o

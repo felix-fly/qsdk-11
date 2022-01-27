@@ -1,1 +1,0 @@
-cmd_drivers/usb/host/xhci-pci.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/host/xhci-pci.ko drivers/usb/host/xhci-pci.o drivers/usb/host/xhci-pci.mod.o

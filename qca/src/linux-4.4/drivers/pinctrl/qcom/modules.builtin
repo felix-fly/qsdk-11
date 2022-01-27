@@ -1,3 +1,0 @@
-kernel/drivers/pinctrl/qcom/pinctrl-ipq6018.ko
-kernel/drivers/pinctrl/qcom/pinctrl-spmi-gpio.ko
-kernel/drivers/pinctrl/qcom/pinctrl-spmi-mpp.ko

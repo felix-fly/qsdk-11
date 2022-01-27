@@ -1,1 +1,0 @@
-cmd_drivers/usb/gadget/function/u_qdss.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/gadget/function/u_qdss.ko drivers/usb/gadget/function/u_qdss.o drivers/usb/gadget/function/u_qdss.mod.o

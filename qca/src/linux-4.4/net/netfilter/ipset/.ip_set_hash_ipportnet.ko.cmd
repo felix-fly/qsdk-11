@@ -1,1 +1,0 @@
-cmd_net/netfilter/ipset/ip_set_hash_ipportnet.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o net/netfilter/ipset/ip_set_hash_ipportnet.ko net/netfilter/ipset/ip_set_hash_ipportnet.o net/netfilter/ipset/ip_set_hash_ipportnet.mod.o

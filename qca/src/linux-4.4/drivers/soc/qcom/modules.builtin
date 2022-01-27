@@ -1,7 +1,0 @@
-kernel/drivers/soc/qcom/qcom_gsbi.ko
-kernel/drivers/soc/qcom/smem.ko
-kernel/drivers/soc/qcom/rpm-glink.ko
-kernel/drivers/soc/qcom/rpm_log.ko
-kernel/drivers/soc/qcom/ipq_tcsr.ko
-kernel/drivers/soc/qcom/tz_log.ko
-kernel/drivers/soc/qcom/qmi_helpers.ko

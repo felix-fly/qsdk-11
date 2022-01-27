@@ -1,1 +1,0 @@
-cmd_drivers/usb/phy/phy-msm-ssusb-qmp.ko := arm-openwrt-linux-uclibcgnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -T ./arch/arm/kernel/module.lds -o drivers/usb/phy/phy-msm-ssusb-qmp.ko drivers/usb/phy/phy-msm-ssusb-qmp.o drivers/usb/phy/phy-msm-ssusb-qmp.mod.o

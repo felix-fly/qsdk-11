@@ -1,1 +1,0 @@
-cmd_drivers/cpuidle/built-in.o :=  arm-openwrt-linux-uclibcgnueabi-ld -EL    -r -o drivers/cpuidle/built-in.o drivers/cpuidle/cpuidle.o drivers/cpuidle/driver.o drivers/cpuidle/governor.o drivers/cpuidle/sysfs.o drivers/cpuidle/governors/built-in.o drivers/cpuidle/dt_idle_states.o drivers/cpuidle/cpuidle-arm.o 

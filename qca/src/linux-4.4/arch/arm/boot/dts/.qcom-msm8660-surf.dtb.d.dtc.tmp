@@ -1,1 +1,0 @@
-arch/arm/boot/dts/qcom-msm8660-surf.dtb: arch/arm/boot/dts/.qcom-msm8660-surf.dtb.dts.tmp arch/arm/boot/dts/skeleton.dtsi
