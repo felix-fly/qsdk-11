@@ -13,6 +13,7 @@ sudo apt-get install -y opam ocaml-nox git zip subversion build-essential flex w
 
 ```bash
 cd qsdk_11
+cp ax18.config .config
 make package/symlinks
 make defconfig
 make download -j$(nproc)
